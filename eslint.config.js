@@ -2,9 +2,15 @@
 import tseslintPlugin from "@typescript-eslint/eslint-plugin";
 import tsParser from "@typescript-eslint/parser";
 import securityPlugin from "eslint-plugin-security";
+const securityConfigs = (securityPlugin && securityPlugin.configs) || {};
 import noUnsanitized from "eslint-plugin-no-unsanitized";
+import importPlugin from "eslint-plugin-import";
+import nodePlugin from "eslint-plugin-n";
 import securityNode from "eslint-plugin-security-node";
 import prettierPlugin from "eslint-plugin-prettier";
+import vitestPlugin from "@vitest/eslint-plugin";
+import { configs as sonarConfigs } from "eslint-plugin-sonarjs";
+import * as regexpPlugin from "eslint-plugin-regexp";
 
 export default [
   // Global ignores
@@ -12,12 +18,54 @@ export default [
     ignores: [
       "dist/**/*",
       "node_modules/**/*",
-      ".astro/**/*", // harmless if absent
       "**/*.min.js",
       "tests/**/*",
       "tests/**",
       "tests/old_tests/**/*",
     ],
+  },
+  // Global settings to help import resolver find packages and TS files when
+  // linting config files and project sources.
+  {
+    settings: {
+      "import/parsers": {
+        "@typescript-eslint/parser": [".ts", ".tsx"],
+      },
+      "import/resolver": {
+        typescript: {
+          alwaysTryTypes: true,
+        },
+        node: {
+          extensions: [".js", ".cjs", ".mjs", ".ts", ".tsx", ".json"],
+        },
+      },
+    },
+  },
+  // Include the recommended configuration from eslint-plugin-no-unsanitized
+  // to ensure default allowed sanitizer patterns (e.g., Sanitizer API and
+  // common escape helpers) are applied before our stricter project rules.
+  noUnsanitized.configs.recommended,
+  // Import plugin recommendation for import/export static checks and the
+  // TypeScript-specific layer. This brings rules like no-unresolved, named
+  // and namespace checks which improve module hygiene and prevent misspellings.
+  importPlugin.flatConfigs.recommended,
+  importPlugin.flatConfigs.typescript,
+  // RegExp plugin: recommend safe regexp usage and optimizations
+  regexpPlugin.configs["flat/recommended"],
+  // SonarJS rules for code quality and additional security heuristics
+  sonarConfigs.recommended,
+  // Security plugin recommended ruleset (node & generic security heuristics)
+  securityConfigs.recommended,
+  // NOTE: Node-specific rules must not apply to browser-targeted `src/**`.
+  // We'll enable a focused set of `n/*` rules only for tooling/config files.
+  {
+    files: ["scripts/**", "*.config.*", "eslint.config.js"],
+    plugins: { n: nodePlugin },
+    rules: {
+      "n/no-unsupported-features/node-builtins": "warn",
+      "n/no-missing-import": "warn",
+      "n/no-unpublished-import": "warn",
+    },
   },
   {
     files: ["src/**/*.ts", "src/**/*.tsx"],
@@ -32,6 +80,20 @@ export default [
         allowDefaultProject: true,
       },
     },
+    // Help eslint-plugin-import resolve TypeScript modules
+    settings: {
+      "import/parsers": {
+        "@typescript-eslint/parser": [".ts", ".tsx"],
+      },
+      "import/resolver": {
+        typescript: {
+          alwaysTryTypes: true,
+        },
+        node: {
+          extensions: [".js", ".jsx", ".ts", ".tsx", ".json"],
+        },
+      },
+    },
     plugins: {
       "@typescript-eslint": tseslintPlugin,
       security: securityPlugin,
@@ -40,6 +102,9 @@ export default [
       prettier: prettierPlugin,
     },
     rules: {
+      // Allow slightly higher cognitive complexity for complex crypto/url logic
+      "sonarjs/cognitive-complexity": ["error", 18],
+
       // Prettier integration (we don’t format here, but fail if misformatted in non-Astro files)
       "prettier/prettier": "error",
 
@@ -127,6 +192,19 @@ export default [
   // Tests: downgrade noisy legacy checks to warnings so lint remains actionable
   {
     files: ["tests/**", "tests/old_tests/**"],
+    // Apply Vitest recommended rules plus some legacy relaxations so tests
+    // are checked for common issues but don't block on historical patterns.
+    ...vitestPlugin.configs.recommended,
+    settings: {
+      vitest: {
+        typecheck: true,
+      },
+    },
+    languageOptions: {
+      globals: {
+        ...vitestPlugin.environments.env.globals,
+      },
+    },
     rules: {
       "security/detect-object-injection": "warn",
       "no-restricted-properties": "off",

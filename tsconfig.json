@@ -50,15 +50,13 @@
 
     // === LIBRARY-SPECIFIC CONFIGURATION ===
     "skipLibCheck": false, // Do not skip type checking of declaration files
-    "incremental": true, // Enable faster subsequent builds
+    "incremental": false, // Disable for DTS build compatibility with tsup
 
     // === ERROR REPORTING ===
     "noErrorTruncation": true,
     "pretty": true
   },
-  "include": [
-    "index.ts"
-  ],
+  "include": ["src/index.ts", "src/globals.d.ts"],
   "exclude": [
     "node_modules",
     "dist",
