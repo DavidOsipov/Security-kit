@@ -46,7 +46,7 @@
     "LICENSE.md"
   ],
   "scripts": {
-    "build": "tsup security_kit.ts --format esm,cjs --dts --clean --sourcemap",
+    "build": "tsup index.ts --format esm,cjs --dts --clean --sourcemap",
     "test": "vitest run",
     "test:watch": "vitest",
     "coverage": "vitest run --coverage",
