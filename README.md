@@ -25,3 +25,156 @@ This library is built on a set of non-negotiable principles, codified in the [Se
 
 ```bash
 npm install @david-osipov/security-kit
+```
+
+## Quick Start
+
+Get started quickly by using the `SIMPLE_API` and sealing the kit at your application's startup.
+
+```typescript
+import { SIMPLE_API, sealSecurityKit, isDevelopment } from '@david-osipov/security-kit';
+
+// It's critical to seal the kit at application startup.
+// This prevents any further configuration changes, hardening your app against runtime tampering.
+try {
+  sealSecurityKit();
+} catch (error) {
+  // This might fail if crypto isn't available yet.
+  // In a real app, you might call an async function first to ensure it's ready.
+  console.error("Could not seal security kit immediately:", error);
+}
+
+// Example of using the library's functions
+async function runDemo() {
+  // Generate a cryptographically secure, URL-friendly ID
+  const secureId = await SIMPLE_API.generateSecureId(32);
+  console.log('Secure ID:', secureId);
+
+  // Generate a v4 UUID
+  const uuid = await SIMPLE_API.generateSecureUUID();
+  console.log('Secure UUID:', uuid);
+
+  // Perform a timing-attack-resistant string comparison
+  const userInput = 'user-provided-token';
+  const secretToken = 'a-very-secret-token-from-server';
+  const areTokensEqual = SIMPLE_API.secureCompare(userInput, secretToken);
+
+  console.log('Tokens are equal (timing-safe):', areTokensEqual);
+
+  // Log a message that will only appear in development environments
+  if (isDevelopment()) {
+    console.log('This is a development build.');
+  }
+}
+
+runDemo();
+```
+
+## Key Features
+
+*   **Modern Cryptography:**
+    *   Cryptographically secure random number, integer, and byte generation.
+    *   High-performance, unbiased secure string generation (inspired by `nanoid`).
+    *   RFC 4122 v4 UUID generation.
+    *   Secure, non-extractable `CryptoKey` generation for AES-GCM.
+    *   Timing-attack resistant `secureCompare` and `secureCompareAsync` functions.
+*   **Secure Development Helpers:**
+    *   `secureDevLog`: A development-only logger with automatic redaction of sensitive data.
+    *   `secureWipe`: Best-effort memory wiping for sensitive buffers.
+    *   Hardened environment detection (`isDevelopment`, `isProduction`).
+    *   Rate-limited production error reporter.
+*   **URL & URI Hardening:**
+    *   `createSecureURL` and `updateURLParams`: Safely build and modify URLs without string interpolation vulnerabilities.
+    *   `validateURL` and `parseURLParams`: Robust validation and parsing of URL strings and their parameters.
+    *   RFC 3986 compliant component encoders (`encodeQueryValue`, `encodePathSegment`).
+*   **Cross-Context Communication:**
+    *   `sendSecurePostMessage` and `createSecurePostMessageListener` enforce strict origin validation, forbidding wildcards.
+    *   Hardened payload validation to prevent oversized payloads and prototype pollution.
+*   **Subresource Integrity (SRI):**
+    *   `generateSRI` to create integrity hashes for your assets.
+
+## The Security Constitution
+
+This library is more than just code; it's an architecture. The included [`Security Consitution.md`](./Security%20Consitution.md) is a mandatory read for any team using this library. It serves as a single source of truth for developers and security engineers, outlining the non-negotiable rules and principles that this library enforces.
+
+## API Documentation
+
+For a detailed understanding of every function, please refer to the JSDoc comments within the `security_kit.ts` source file. Here are a few highlights of the advanced API:
+
+#### `createSecureURL(base, pathSegments?, queryParams?, fragment?)`
+
+Safely constructs a URL, preventing common encoding and path traversal vulnerabilities.
+
+```typescript
+import { createSecureURL } from '@david-osipov/security-kit';
+
+const url = createSecureURL(
+  'https://api.example.com',
+  ['users', 'search'],
+  { q: 'John Doe', filter: 'active+premium' },
+  'results'
+);
+// Returns: "https://api.example.com/users/search?q=John%20Doe&filter=active%2Bpremium#results"
+```
+
+#### `createSecurePostMessageListener(options)`
+
+Listens for `postMessage` events while enforcing a strict origin allowlist and validating the payload.
+
+```typescript
+import { createSecurePostMessageListener } from '@david-osipov/security-kit';
+
+const listener = createSecurePostMessageListener({
+  allowedOrigins: ['https://trusted-partner.com'],
+  onMessage: (data) => {
+    console.log('Received trusted message:', data);
+  },
+  validate: {
+    type: 'string',
+    payload: 'object'
+  }
+});
+
+// Don't forget to clean up!
+// listener.destroy();
+```
+
+#### `secureDevLog(level, component, message, context?)`
+
+A development-only logger that automatically redacts sensitive keys from context objects to prevent accidental secret leakage in console output.
+
+```typescript
+import { secureDevLog } from '@david-osipov/security-kit';
+
+const sensitiveData = {
+  userId: 123,
+  token: 'jwt-token-string-here',
+  password: 'user-password'
+};
+
+// In development, this will log the object with '[REDACTED]' values for token and password.
+// In production, this function does nothing.
+secureDevLog('info', 'AuthComponent', 'User logged in', sensitiveData);
+```
+
+## Contributing
+
+Contributions are welcome! If you find a bug or have a feature request, please open an issue. If you'd like to contribute code, please fork the repository and submit a pull request.
+
+Please note that this is a personal project maintained on a best-effort basis.
+
+1.  Fork the repository.
+2.  Create your feature branch (`git checkout -b feature/AmazingFeature`).
+3.  Commit your changes (`git commit -m 'Add some AmazingFeature'`).
+4.  Push to the branch (`git push origin feature/AmazingFeature`).
+5.  Open a Pull Request.
+
+## License
+
+This project is licensed under the MIT License - see the [LICENSE.md](LICENSE.md) file for details.
+
+---
+
+Authored and maintained by **David Osipov**.
+*   Website: [https://david-osipov.vision](https://david-osipov.vision)
+*   ISNI: [0000 0005 1802 960X](https://isni.org/isni/000000051802960X)
