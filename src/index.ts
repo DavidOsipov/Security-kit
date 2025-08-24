@@ -21,10 +21,12 @@
 // --- Custom Error Classes for Robust Handling ---
 
 /**
- * Build-time test flag for dead code elimination of test-only exports.
+ * A build-time flag for dead code elimination of test-only exports.
  * Consumers of this library should configure their bundler (e.g., Vite, webpack)
  * to define this global constant as `true` in test builds and `false` in production.
- * Example Vite config (`vite.config.ts`):
+ * This ensures that test helpers are completely removed from production bundles.
+ *
+ * @example Vite config (`vite.config.ts`):
  * ```
  * export default defineConfig({
  *   define: {
@@ -765,14 +767,14 @@ export const environment = (() => {
       if (explicitEnv) return explicitEnv === 'development';
       if (cache.has('isDevelopment')) return cache.get('isDevelopment') ?? false;
 
-      // CHANGED: Added universal environment detection for Node.js
-      // Check for Node.js environment variables first.
-      if (typeof process !== 'undefined' && process.env) {
+      // Universal Node.js detection
+      if (typeof process !== 'undefined' && process.env?.NODE_ENV) {
         const isNodeDev = process.env.NODE_ENV === 'development';
         cache.set('isDevelopment', isNodeDev);
         return isNodeDev;
       }
 
+      // Fallback to browser-specific detection
       let result = false;
       try {
         // Modern browser environment detection
@@ -813,7 +815,6 @@ export function setAppEnvironment(env: 'development' | 'production') {
   environment.setExplicitEnv(env);
 }
 
-// CORRECTION: Export a live function instead of a static snapshot.
 /**
  * Returns `true` if the current environment is determined to be 'development'.
  * This function always returns the live state and is not affected by module load order.
@@ -957,7 +958,6 @@ function sanitizeErrorForLogs(err: unknown): { name: string; message: string } |
 // Module-level TextEncoder reuse to avoid allocations on hot paths.
 const ENCODER = new TextEncoder();
 
-// CORRECTION: Internal test helpers are now exposed via a function that is a no-op in production.
 /**
  * FOR TESTING PURPOSES ONLY.
  * Returns an object with internal helpers for testing the library's state.
@@ -972,7 +972,6 @@ export function getInternalTestUtils(): {
   _getCryptoGenerationForTest: () => number;
   _getCryptoStateForTest: () => string;
 } | undefined {
-  // CHANGED: Added a guard to prevent ReferenceError in browsers.
   const isNodeTestEnv = typeof process !== 'undefined' && process.env && process.env['NODE_ENV'] === 'test';
   const isSecurityKitTestFlag = typeof process !== 'undefined' && process.env && process.env['SECURITY_KIT_TEST'] === '1';
 
@@ -1095,7 +1094,6 @@ export async function secureCompareAsync(
   }
 }
 
-// CORRECTION: Hardened redaction logic.
 function _redact(data: unknown, depth = 0): unknown {
   const MAX_DEPTH = 8;
   // More comprehensive regex for secret keys.
@@ -1821,7 +1819,6 @@ export function sendSecurePostMessage(options: SecurePostMessageOptions): void {
     throw new InvalidParameterError('targetOrigin must be a specific string.');
   }
 
-  // CORRECTION: Harden against non-serializable payloads.
   try {
     const message = JSON.stringify(payload);
     targetWindow.postMessage(message, targetOrigin);
@@ -2113,7 +2110,6 @@ export async function generateSRI(
     throw new InvalidParameterError(`Unsupported SRI algorithm: ${algorithm}`);
   }
 
-  // CORRECTION: Reuse the module-level TextEncoder instance.
   if (input === undefined || input === null) {
     throw new InvalidParameterError('Input content is required for SRI generation');
   }
