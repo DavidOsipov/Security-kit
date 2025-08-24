@@ -29,28 +29,22 @@ npm install @david-osipov/security-kit
 
 ## Quick Start
 
-Get started quickly by using the `SIMPLE_API` and sealing the kit at your application's startup.
+The recommended way to initialize the library is to call an async function first, then seal the kit at your application's startup.
 
 ```typescript
 import { SIMPLE_API, sealSecurityKit, isDevelopment } from '@david-osipov/security-kit';
 
-// It's critical to seal the kit at application startup.
-// This prevents any further configuration changes, hardening your app against runtime tampering.
-try {
-  sealSecurityKit();
-} catch (error) {
-  // This might fail if crypto isn't available yet.
-  // In a real app, you might call an async function first to ensure it's ready.
-  console.error("Could not seal security kit immediately:", error);
-}
-
-// Example of using the library's functions
-async function runDemo() {
-  // Generate a cryptographically secure, URL-friendly ID
+async function initializeApp() {
+  // 1. Call an async function first. This ensures the crypto API is ready.
   const secureId = await SIMPLE_API.generateSecureId(32);
-  console.log('Secure ID:', secureId);
+  console.log('Generated an initial secure ID:', secureId);
 
-  // Generate a v4 UUID
+  // 2. NOW, it is safe to seal the kit.
+  // This prevents any further configuration changes, hardening your app against runtime tampering.
+  sealSecurityKit();
+  console.log('Security Kit is sealed.');
+
+  // 3. Continue using the library.
   const uuid = await SIMPLE_API.generateSecureUUID();
   console.log('Secure UUID:', uuid);
 
@@ -67,7 +61,7 @@ async function runDemo() {
   }
 }
 
-runDemo();
+initializeApp();
 ```
 
 ## Key Features
@@ -99,7 +93,7 @@ This library is more than just code; it's an architecture. The included [`Securi
 
 ## API Documentation
 
-For a detailed understanding of every function, please refer to the JSDoc comments within the `security_kit.ts` source file. Here are a few highlights of the advanced API:
+For a detailed understanding of every function, please refer to the JSDoc comments within the `index.ts` source file. Here are a few highlights of the advanced API:
 
 #### `createSecureURL(base, pathSegments?, queryParams?, fragment?)`
 
@@ -156,6 +150,23 @@ const sensitiveData = {
 // In production, this function does nothing.
 secureDevLog('info', 'AuthComponent', 'User logged in', sensitiveData);
 ```
+
+## For Library Consumers & Test Environments
+
+This library includes test-only code that is automatically removed from production builds using a global `__TEST__` flag. To leverage this Dead Code Elimination (DCE), you must configure your bundler.
+
+**Example for Vite (`vite.config.ts`):**
+```typescript
+import { defineConfig } from 'vite';
+
+export default defineConfig({
+  define: {
+    // This makes the flag available in your code
+    __TEST__: process.env.NODE_ENV === 'test',
+  },
+});
+```
+This ensures that functions like `__test_resetCryptoStateForUnitTests` do not exist in your final production bundle.
 
 ## Contributing
 
