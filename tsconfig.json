@@ -1,0 +1,68 @@
+{
+  "name": "@david-osipov/security-kit",
+  "version": "7.3.0",
+  "description": "An opinionated, zero-dependency security toolkit for modern browsers. Implements a verifiable Zero Trust security model in TypeScript, built on the native Web Crypto API.",
+  "author": "David Osipov <personal@david-osipov.vision>",
+  "license": "MIT",
+  "homepage": "https://github.com/david-osipov/Security-Kit#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/david-osipov/Security-Kit.git"
+  },
+  "bugs": {
+    "url": "https://github.com/david-osipov/Security-Kit/issues"
+  },
+  "keywords": [
+    "security",
+    "crypto",
+    "webcrypto",
+    "zerotrust",
+    "hardening",
+    "secure",
+    "nanoid",
+    "uuid",
+    "sri",
+    "postmessage",
+    "typescript",
+    "constant-time",
+    "csp",
+    "owasp"
+  ],
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": [
+    "dist",
+    "Security Consitution.md",
+    "README.md",
+    "LICENSE.md"
+  ],
+  "scripts": {
+    "build": "tsup security_kit.ts --format esm,cjs --dts --clean --sourcemap",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "coverage": "vitest run --coverage",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "npm run typecheck && npm run lint && npm run test && npm run build"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.24",
+    "@typescript-eslint/eslint-plugin": "^7.1.0",
+    "@typescript-eslint/parser": "^7.1.0",
+    "@vitest/coverage-v8": "^1.3.1",
+    "eslint": "^8.57.0",
+    "eslint-plugin-security": "^2.1.1",
+    "tsup": "^8.0.2",
+    "typescript": "^5.3.3",
+    "vitest": "^1.3.1"
+  }
+}
