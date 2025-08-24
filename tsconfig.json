@@ -1,0 +1,68 @@
+{
+  // === STRICT TYPESCRIPT CONFIGURATION FOR A DISTRIBUTABLE LIBRARY ===
+  // Adapted from a high-quality Astro project configuration.
+  // This config is designed to produce clean, correct, and type-safe
+  // declaration files (.d.ts) for consumers of the npm package.
+  "compilerOptions": {
+    // === EMIT (OUTPUT) CONFIGURATION ===
+    // We MUST emit files for the library to be usable.
+    "declaration": true, // Generate .d.ts files for consumers
+    "declarationMap": true, // Generate source maps for .d.ts files (great for IDEs)
+    "sourceMap": true, // Generate .js.map files for easier debugging by consumers
+    "outDir": "./dist", // Output directory for all generated files
+    "removeComments": false, // Keep JSDoc comments for tools like TypeDoc and IDE hints
+
+    // === PROJECT STRUCTURE & MODULES ===
+    // These settings ensure modern, compatible module output.
+    // The actual CJS/ESM formats will be handled by your build tool (e.g., tsup).
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "lib": ["ES2022", "DOM"],
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "isolatedModules": true,
+    "resolveJsonModule": true,
+    "moduleDetection": "force",
+
+    // === TYPE CHECKING - THE STRICTEST POSSIBLE (PRESERVED) ===
+    // All strictness flags from your original config are kept.
+    // This is a critical feature for a security-focused library.
+    "strict": true,
+    "noImplicitAny": true,
+    "noImplicitThis": true,
+    "alwaysStrict": true,
+    "strictNullChecks": true,
+    "strictFunctionTypes": true,
+    "strictBindCallApply": true,
+    "strictPropertyInitialization": true,
+    "useUnknownInCatchVariables": true,
+    "exactOptionalPropertyTypes": true,
+    "noImplicitReturns": true,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUncheckedIndexedAccess": true,
+    "noPropertyAccessFromIndexSignature": true,
+    "allowUnreachableCode": false,
+    "allowUnusedLabels": false,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+
+    // === LIBRARY-SPECIFIC CONFIGURATION ===
+    "skipLibCheck": false, // Do not skip type checking of declaration files
+    "incremental": true, // Enable faster subsequent builds
+
+    // === ERROR REPORTING ===
+    "noErrorTruncation": true,
+    "pretty": true
+  },
+  "include": [
+    "security_kit.ts" // Only include the main source file for the library build
+  ],
+  "exclude": [
+    "node_modules",
+    "dist",
+    "tests", // Exclude test files from the main library build
+    "vitest.config.ts" // Exclude config files
+  ]
+}
