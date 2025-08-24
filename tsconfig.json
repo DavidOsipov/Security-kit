@@ -57,7 +57,7 @@
     "pretty": true
   },
   "include": [
-    "security_kit.ts" // Only include the main source file for the library build
+    "index.ts"
   ],
   "exclude": [
     "node_modules",
