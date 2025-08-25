@@ -10,8 +10,8 @@ describe("string comparison helpers", () => {
     const b = "\u00E9";
     expect(secureCompare(a, b)).toBe(true);
     expect(secureCompare("abc", "abd")).toBe(false);
-    const long = "x".repeat(4097);
-    expect(() => secureCompare(long, "x")).toThrow(InvalidParameterError);
+  const long = "x".repeat(4097);
+  expect(() => secureCompare(long, "x")).toThrow(InvalidParameterError);
   });
 
   it("secureCompareAsync uses digest path and falls back safely", async () => {
@@ -28,7 +28,7 @@ describe("string comparison helpers", () => {
     setCrypto(null);
 
     const long = "x".repeat(4097);
-    await expect(secureCompareAsync(long, "x")).rejects.toThrow(
+    await expect(secureCompareAsync(long, "x")).rejects.toBeInstanceOf(
       InvalidParameterError,
     );
   });

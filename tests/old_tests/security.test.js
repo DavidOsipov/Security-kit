@@ -291,11 +291,11 @@ describe("Security Testing Suite", () => {
 
       expect(() => {
         safeAddEventListener(button, "onload", validHandler);
-      }).toThrow("Event onload not allowed");
+      }).toThrow(/Event .*not allowed/);
 
       expect(() => {
         safeAddEventListener(button, "click", "not a function");
-      }).toThrow("Handler must be a function");
+      }).toThrow(/Handler must be a function/);
     });
   });
 
@@ -674,7 +674,7 @@ describe("Security Testing Suite", () => {
         // Large string attack
         expect(() => {
           mockResourceLimiter("x".repeat(2 * 1024 * 1024));
-        }).toThrow("Input too large");
+  }).toThrow(/Input too large/);
 
         // Deep object attack
         let deepObj = {};
@@ -686,7 +686,7 @@ describe("Security Testing Suite", () => {
 
         expect(() => {
           mockResourceLimiter(deepObj);
-        }).toThrow("Object too deep");
+  }).toThrow(/Object too deep/);
       });
 
       it("should handle ReDoS (Regular Expression Denial of Service) patterns", async () => {

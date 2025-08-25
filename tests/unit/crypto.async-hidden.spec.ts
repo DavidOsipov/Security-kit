@@ -17,7 +17,7 @@ describe("getSecureRandomAsync abort/hidden behavior", () => {
       .spyOn(document as any, "hidden", "get")
       .mockReturnValue(true);
     try {
-      await expect(getSecureRandomAsync()).rejects.toThrow(
+      await expect(getSecureRandomAsync()).rejects.toBeInstanceOf(
         RandomGenerationError,
       );
     } finally {

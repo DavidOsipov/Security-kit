@@ -72,7 +72,8 @@ export function secureWipe(
    *   therefore should not be relied upon for secret material.
    */
   if (!typedArray) return;
-  if (opts?.forbidShared) {
+  const forbidShared = opts?.forbidShared !== false; // default true
+  if (forbidShared) {
     try {
       if (
         typeof SharedArrayBuffer !== "undefined" &&
@@ -125,14 +126,16 @@ export function secureWipe(
         typeof BigUint64Array !== "undefined" &&
         typedArray instanceof BigUint64Array
       ) {
-        (typedArray as BigUint64Array).fill(0n);
+        const ta = typedArray;
+        ta.fill(0n);
         return true;
       }
       if (
         typeof BigInt64Array !== "undefined" &&
         typedArray instanceof BigInt64Array
       ) {
-        (typedArray as BigInt64Array).fill(0n);
+        const ta = typedArray;
+        ta.fill(0n);
         return true;
       }
       return false;
@@ -140,9 +143,10 @@ export function secureWipe(
 
     const tryGenericWipe = () => {
       // Only perform a generic wipe when the underlying buffer looks usable.
-      if (!typedArray || !typedArray.buffer) return false;
+      if (!typedArray?.buffer) return false;
       if (typeof (typedArray as Uint8Array).fill === "function") {
-        (typedArray as Uint8Array).fill(0);
+        const ta = typedArray as Uint8Array;
+        ta.fill(0);
         return true;
       }
       const view = new Uint8Array(
@@ -191,12 +195,18 @@ export function secureCompare(
       `Input length cannot exceed ${MAX_COMPARISON_LENGTH} characters.`,
     );
   }
-  const len = Math.max(sa.length, sb.length);
-  let diff = sa.length ^ sb.length;
-  for (let i = 0; i < len; i++) {
-    diff |= (sa.charCodeAt(i) || 0) ^ (sb.charCodeAt(i) || 0);
+  // Perform a fixed-time loop up to MAX_COMPARISON_LENGTH to avoid leaking
+  // the actual input lengths via timing. Reading beyond the string length
+  // yields NaN from charCodeAt which we coerce to 0.
+  let diff = 0;
+  for (let i = 0; i < MAX_COMPARISON_LENGTH; i++) {
+    const ca = sa.charCodeAt(i) || 0;
+    const cb = sb.charCodeAt(i) || 0;
+    diff |= ca ^ cb;
   }
-  return diff === 0;
+  // Also require exact length match; the timing above is constant regardless
+  // of lengths, so returning length equality does not leak timing.
+  return diff === 0 && sa.length === sb.length;
 }
 
 export async function secureCompareAsync(
@@ -434,5 +444,11 @@ export const __test_arrayBufferToBase64:
   | ((buf: ArrayBuffer) => string)
   | undefined =
   typeof __TEST__ !== "undefined" && __TEST__
-    ? _arrayBufferToBase64
+    ? (() => {
+        // runtime guard for test-only API usage
+        // use require to avoid static circular imports in some bundlers
+        const { assertTestApiAllowed } = require("./dev-guards");
+        assertTestApiAllowed();
+        return _arrayBufferToBase64;
+      })()
     : undefined;

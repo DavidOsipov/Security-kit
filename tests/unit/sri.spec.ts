@@ -34,9 +34,7 @@ describe("SRI generation", () => {
       subtle: { digest: vi.fn(async () => new Uint8Array(32).buffer) },
     } as unknown as Crypto;
     setCrypto(stub);
-    await expect(generateSRI("test", "md5" as any)).rejects.toThrow(
-      /Unsupported SRI algorithm/,
-    );
+    await expect(generateSRI("test", "md5" as any)).rejects.toThrow(/Unsupported SRI algorithm/);
     setCrypto(null);
   });
 });

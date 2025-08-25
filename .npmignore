@@ -1,0 +1,19 @@
+tests/
+tests/**
+payloads/
+tools/
+scripts/*.ts
+scripts/*.cjs
+.vscode/
+.env
+.github/
+*.log
+.DS_Store
+node_modules/
+**/*.spec.ts
+**/*.spec.js
+README.md
+Security Consitution.md
+**/__snapshots__/**
+npm-debug.log
+coverage/

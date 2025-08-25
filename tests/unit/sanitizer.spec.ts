@@ -11,8 +11,8 @@ describe("Sanitizer", () => {
     const s = new Sanitizer(mockDomPurify, {
       strict: STRICT_HTML_POLICY_CONFIG,
     });
-    const out = s.sanitizeForNonTTBrowsers("<b>hello</b>", "strict");
-    expect(out).toBe("SANITIZED:<b>hello</b>");
+  const out = s.getSanitizedString("<b>hello</b>", "strict");
+  expect(out).toBe("SANITIZED:<b>hello</b>");
   });
 
   it("createPolicy throws when policy missing", () => {

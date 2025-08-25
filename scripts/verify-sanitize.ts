@@ -42,7 +42,11 @@ function isDevIdentifierNode(n: any) {
 }
 
 function isEnvironmentIsProductionNode(n: any) {
-  return n && n.type === "MemberExpression" && isMemberAccess(n, "environment", "isProduction");
+  return (
+    n &&
+    n.type === "MemberExpression" &&
+    isMemberAccess(n, "environment", "isProduction")
+  );
 }
 
 function isIdentifier(node: any, name: string) {
@@ -54,8 +58,10 @@ function isMemberAccess(node: any, objectName: string, propertyName: string) {
   const obj = node.object;
   const prop = node.property;
   if (obj && obj.type === "Identifier" && obj.name === objectName) {
-    if (prop && prop.type === "Identifier" && prop.name === propertyName) return true;
-    if (prop && prop.type === "Literal" && prop.value === propertyName) return true;
+    if (prop && prop.type === "Identifier" && prop.name === propertyName)
+      return true;
+    if (prop && prop.type === "Literal" && prop.value === propertyName)
+      return true;
   }
   return false;
 }
@@ -117,16 +123,17 @@ function iterateChildNodes(node: any, cb: (child: any) => void) {
   callIfArray(n.elements);
   callIfArray(n.properties);
 }
- 
-
 
 function processFallback(res: any, src: string, violations: string[]) {
   const lines = src.split("\n");
-  const hasDevHelper = /(?:function|const)\s+(?:_devConsole|secureDevLog)\b/.test(src);
+  const hasDevHelper =
+    /(?:function|const)\s+(?:_devConsole|secureDevLog)\b/.test(src);
   for (const msg of res.messages || []) {
     if (msg.ruleId !== "no-console") continue;
     if (!isConsoleAllowed(msg.line, lines, hasDevHelper)) {
-      violations.push(`${path.relative(process.cwd(), res.filePath)}:${msg.line}: ${msg.message}`);
+      violations.push(
+        `${path.relative(process.cwd(), res.filePath)}:${msg.line}: ${msg.message}`,
+      );
     }
   }
   // If ESLint messages are not present, also scan for console.* occurrences as a best-effort fallback
@@ -136,7 +143,9 @@ function processFallback(res: any, src: string, violations: string[]) {
     consoleRegex.lastIndex = 0;
     while (consoleRegex.exec(line)) {
       if (!isConsoleAllowed(lineNum, lines, hasDevHelper)) {
-        violations.push(`${path.relative(process.cwd(), res.filePath)}:${lineNum}: console.* usage detected (fallback)`);
+        violations.push(
+          `${path.relative(process.cwd(), res.filePath)}:${lineNum}: console.* usage detected (fallback)`,
+        );
       }
     }
   }
@@ -144,31 +153,68 @@ function processFallback(res: any, src: string, violations: string[]) {
 
 // Top-level small helpers extracted from findConsoleViolations to reduce nesting
 function isNamedDevHelperNode(a: any) {
-  return a && a.type === "FunctionDeclaration" && a.id && (isIdentifier(a.id, "_devConsole") || isIdentifier(a.id, "secureDevLog"));
+  return (
+    a &&
+    a.type === "FunctionDeclaration" &&
+    a.id &&
+    (isIdentifier(a.id, "_devConsole") || isIdentifier(a.id, "secureDevLog"))
+  );
 }
 
 function hasIfGuardInFunctionNode(a: any) {
   if (!a || !a.body || !Array.isArray(a.body.body)) return false;
   const first = a.body.body[0];
-  return !!(first && first.type === "IfStatement" && nodeContainsDevGuard(first.test));
+  return !!(
+    first &&
+    first.type === "IfStatement" &&
+    nodeContainsDevGuard(first.test)
+  );
 }
 
 function isAncestorAllowedNode(a: any) {
-  const allowed = !!(a && typeof a.type === "string" && (isNamedDevHelperNode(a) || (a.type === "IfStatement" && a.test && nodeContainsDevGuard(a.test)) || ((a.type === "FunctionDeclaration" || a.type === "FunctionExpression" || a.type === "ArrowFunctionExpression") && hasIfGuardInFunctionNode(a))));
+  const allowed = !!(
+    a &&
+    typeof a.type === "string" &&
+    (isNamedDevHelperNode(a) ||
+      (a.type === "IfStatement" && a.test && nodeContainsDevGuard(a.test)) ||
+      ((a.type === "FunctionDeclaration" ||
+        a.type === "FunctionExpression" ||
+        a.type === "ArrowFunctionExpression") &&
+        hasIfGuardInFunctionNode(a)))
+  );
   return allowed;
 }
 
-function handleCallExpressionNode(node: any, ancestors: any[], violations: string[], filePath: string) {
+function handleCallExpressionNode(
+  node: any,
+  ancestors: any[],
+  violations: string[],
+  filePath: string,
+) {
   const callee = node.callee;
-  if (callee && callee.type === "MemberExpression" && callee.object && isIdentifier(callee.object, "console")) {
+  if (
+    callee &&
+    callee.type === "MemberExpression" &&
+    callee.object &&
+    isIdentifier(callee.object, "console")
+  ) {
     const allowed = ancestors.some(isAncestorAllowedNode);
-    if (!allowed) violations.push(`${path.relative(process.cwd(), filePath)}:${node.loc.start.line}: console.* usage detected`);
+    if (!allowed)
+      violations.push(
+        `${path.relative(process.cwd(), filePath)}:${node.loc.start.line}: console.* usage detected`,
+      );
   }
 }
 
-function walkNode(node: any, ancestors: any[], violations: string[], filePath: string) {
+function walkNode(
+  node: any,
+  ancestors: any[],
+  violations: string[],
+  filePath: string,
+) {
   if (!node || typeof node.type !== "string") return;
-  if (node.type === "CallExpression") handleCallExpressionNode(node, ancestors, violations, filePath);
+  if (node.type === "CallExpression")
+    handleCallExpressionNode(node, ancestors, violations, filePath);
 
   ancestors.push(node);
   traverseChildren(node, (n) => walkNode(n, ancestors, violations, filePath));
@@ -193,12 +239,14 @@ function findConsoleViolations(results: ESLint.LintResult[]) {
     if (!src) continue;
 
     // parse and walk helper
-  let ast: any = null;
+    let ast: any = null;
     try {
       ast = parse(src, { sourceType: "module", ecmaVersion: 2024, loc: true });
     } catch (err) {
       // Log parsing error and fall back to text heuristics
-      console.error(`verify-sanitize: parse error in ${path.relative(process.cwd(), res.filePath)}: ${String(err)}`);
+      console.error(
+        `verify-sanitize: parse error in ${path.relative(process.cwd(), res.filePath)}: ${String(err)}`,
+      );
     }
 
     if (!ast) {
@@ -210,22 +258,32 @@ function findConsoleViolations(results: ESLint.LintResult[]) {
     const beforeCount = violations.length;
     walkNode(ast as any, [], violations, res.filePath);
     // If AST traversal didn't find anything, run the text-based fallback for this file as a safety net
-    if (violations.length === beforeCount) processFallback(res, src, violations);
+    if (violations.length === beforeCount)
+      processFallback(res, src, violations);
   }
   return violations;
 }
 
-function isConsoleAllowed(lineNumber: number, lines: string[], hasDevHelper: boolean) {
+function isConsoleAllowed(
+  lineNumber: number,
+  lines: string[],
+  hasDevHelper: boolean,
+) {
   const lineIdx = Math.max(0, lineNumber - 1);
   const start = Math.max(0, lineIdx - 12);
-  const context = lines.slice(start, Math.min(lines.length, lineIdx + 4)).join("\n");
+  const context = lines
+    .slice(start, Math.min(lines.length, lineIdx + 4))
+    .join("\n");
   let allowed = false;
-  const hasInlineGuard = context.includes("isDevelopment(") || context.includes("environment.isProduction");
+  const hasInlineGuard =
+    context.includes("isDevelopment(") ||
+    context.includes("environment.isProduction");
   if (hasInlineGuard) allowed = true;
   if (!allowed && hasDevHelper) {
     const searchStart = Math.max(0, lineIdx - 30);
     const up = lines.slice(searchStart, lineIdx + 1).join("\n");
-    if (/(?:function|const)\s+(?:_devConsole|secureDevLog)\b/.test(up)) allowed = true;
+    if (/(?:function|const)\s+(?:_devConsole|secureDevLog)\b/.test(up))
+      allowed = true;
   }
   return allowed;
 }
@@ -349,4 +407,9 @@ if (process.argv[1] && process.argv[1].endsWith("verify-sanitize.ts")) {
   });
 }
 
-export { findConsoleViolations, nodeContainsDevGuard, isConsoleAllowed, processFallback };
+export {
+  findConsoleViolations,
+  nodeContainsDevGuard,
+  isConsoleAllowed,
+  processFallback,
+};

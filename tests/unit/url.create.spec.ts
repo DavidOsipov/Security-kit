@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { createSecureURL } from "../../src/url";
+import { InvalidParameterError } from "../../src/errors";
 
 describe("createSecureURL", () => {
   it("encodes path segments once (no double-encode)", () => {
@@ -10,8 +11,8 @@ describe("createSecureURL", () => {
   it("rejects traversal or separators in segments", () => {
     expect(() =>
       createSecureURL("https://example.test", ["foo/bar"]),
-    ).toThrow();
-    expect(() => createSecureURL("https://example.test", [".."])).toThrow();
+    ).toThrow(InvalidParameterError);
+    expect(() => createSecureURL("https://example.test", [".."])).toThrow(InvalidParameterError);
   });
 
   it("appends query params using URLSearchParams and preserves existing params", () => {

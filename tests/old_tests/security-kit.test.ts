@@ -1682,7 +1682,7 @@ describe("security-kit (TS)", () => {
             payload: { test: true },
             targetOrigin: "https://example.com",
           });
-        }).toThrow("targetWindow must be provided.");
+  }).toThrow(/targetWindow must be provided\.?/);
       });
 
       it("throws when targetOrigin is empty or invalid", () => {
@@ -1692,7 +1692,7 @@ describe("security-kit (TS)", () => {
             payload: { test: true },
             targetOrigin: "",
           });
-        }).toThrow("targetOrigin must be a specific string.");
+  }).toThrow(/targetOrigin must be a specific string\.?/);
       });
     });
 
@@ -1788,7 +1788,7 @@ describe("security-kit (TS)", () => {
             ["https://example.com"],
             "not a function" as any,
           );
-        }).toThrow("onMessage must be a function.");
+  }).toThrow(/onMessage must be a function\.?/);
       });
 
       it("destroy method cleans up event listener", () => {

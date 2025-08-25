@@ -14,6 +14,7 @@ const {
   getSecureRandomBytesSync,
   setCrypto,
 } = SK as any;
+import { InvalidParameterError } from "../../src/errors";
 
 describe("crypto primitives (unit)", () => {
   beforeEach(() => {
@@ -64,7 +65,7 @@ describe("crypto primitives (unit)", () => {
     expect(out).toBeInstanceOf(Uint8Array);
     expect(out.length).toBe(16);
     expect(out.every((b: number) => b === 0)).toBe(false);
-    expect(() => getSecureRandomBytesSync(0)).toThrow();
+    expect(() => getSecureRandomBytesSync(0)).toThrow(InvalidParameterError);
   });
 
   it("handles pathological all-255 stub for random int", async () => {

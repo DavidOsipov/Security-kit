@@ -7,7 +7,7 @@
  */
 
 import { InvalidParameterError } from "./errors";
-import { POSTMESSAGE_FORBIDDEN_KEYS } from "./postMessage";
+import { isForbiddenKey, getForbiddenKeys } from "./constants";
 import { secureDevLog } from "./utils";
 
 // Allowed query/param key pattern and safe-key checker
@@ -25,7 +25,7 @@ function isSafeKey(key: string): boolean {
 type ParamType = "string" | "number" | "boolean";
 type UnsafeKeyAction = "throw" | "warn" | "skip";
 
-function normalizeOrigin(o: string): string {
+export function normalizeOrigin(o: string): string {
   try {
     const u = new URL(o);
     // Normalize by removing default ports for http/https for consistent allowlist matching
@@ -57,13 +57,22 @@ function isOriginAllowed(origin: string, allowlist?: string[]): boolean {
 // --- Secure URL Construction ---
 // SAFE_SCHEMES is now managed by `src/url-policy.ts` for controlled configuration.
 import { getSafeSchemes } from "./url-policy";
+import { environment } from "./environment";
 
 function getEffectiveSchemes(allowedSchemes?: string[]): Set<string> {
   const SAFE_SCHEMES = new Set(getSafeSchemes());
+  // If caller didn't supply allowedSchemes, just use policy.
   if (!Array.isArray(allowedSchemes) || allowedSchemes.length === 0)
     return SAFE_SCHEMES;
+
   const userSet = new Set(allowedSchemes.map((s) => String(s)));
-  return new Set([...userSet].filter((s) => SAFE_SCHEMES.has(s)));
+  // In production, do not allow callers to expand the global policy. Only
+  // allow intersection. In development, be more permissive for DX.
+  const intersection = new Set([...userSet].filter((s) => SAFE_SCHEMES.has(s)));
+  if (environment.isProduction) return intersection;
+  // In non-production, prefer intersection but if intersection is empty, fall
+  // back to the SAFE_SCHEMES to avoid accidental denial during development.
+  return intersection.size > 0 ? intersection : SAFE_SCHEMES;
 }
 
 function enforceSchemeAndLength(
@@ -84,7 +93,7 @@ function enforceSchemeAndLength(
 
 // Shared set of keys that are never allowed as query or update keys.
 const GLOBAL_DANGEROUS_KEYS = new Set([
-  ...POSTMESSAGE_FORBIDDEN_KEYS,
+  ...getForbiddenKeys(),
   "__proto__",
   "constructor",
   "prototype",
@@ -96,12 +105,18 @@ function _checkForDangerousKeys(
   componentName: string,
   baseRef: string,
 ): void {
-  const protoIsNull = Object.getPrototypeOf(obj) === null;
-  if (Object.prototype.hasOwnProperty.call(obj, "__proto__") || protoIsNull) {
-    const msg = `Unsafe key '__proto__' present on ${componentName} object.`;
+  const handleUnsafe = (msg: string, extra?: Record<string, unknown>) => {
     if (onUnsafeKey === "throw") throw new InvalidParameterError(msg);
     if (onUnsafeKey === "warn")
-      secureDevLog("warn", componentName, msg, { base: baseRef });
+      secureDevLog("warn", componentName, msg, {
+        base: baseRef,
+        ...(extra || {}),
+      });
+  };
+
+  const protoIsNull = Object.getPrototypeOf(obj) === null;
+  if (Object.prototype.hasOwnProperty.call(obj, "__proto__") || protoIsNull) {
+    handleUnsafe(`Unsafe key '__proto__' present on ${componentName} object.`);
   }
 
   const ownKeyNames = new Set<string>([
@@ -113,10 +128,12 @@ function _checkForDangerousKeys(
   for (const dangerous of GLOBAL_DANGEROUS_KEYS) {
     if (dangerous === "__proto__") continue;
     if (ownKeyNames.has(dangerous)) {
-      const msg = `Unsafe key '${dangerous}' present on ${componentName} object.`;
-      if (onUnsafeKey === "throw") throw new InvalidParameterError(msg);
-      if (onUnsafeKey === "warn")
-        secureDevLog("warn", componentName, msg, { base: baseRef, dangerous });
+      handleUnsafe(
+        `Unsafe key '${dangerous}' present on ${componentName} object.`,
+        {
+          dangerous,
+        },
+      );
     }
   }
 }
@@ -129,7 +146,7 @@ function processQueryParams(
 ): void {
   _checkForDangerousKeys(params, onUnsafeKey, "createSecureURL", base);
   for (const [key, value] of Object.entries(params)) {
-    const unsafe = POSTMESSAGE_FORBIDDEN_KEYS.has(key) || !isSafeKey(key);
+    const unsafe = isForbiddenKey(key) || !isSafeKey(key);
     if (unsafe) {
       const msg = `Skipping unsafe query key '${key}' when building URL.`;
       if (onUnsafeKey === "throw") throw new InvalidParameterError(msg);
@@ -150,20 +167,25 @@ function processUpdateParams(
   baseUrl: string,
 ): void {
   _checkForDangerousKeys(updates, onUnsafeKey, "updateURLParams", baseUrl);
+  const handleUnsafeKey = (k: string) => {
+    const msg = `Skipping unsafe query key '${k}' when updating URL.`;
+    if (onUnsafeKey === "throw") throw new InvalidParameterError(msg);
+    if (onUnsafeKey === "warn")
+      secureDevLog("warn", "updateURLParams", msg, { baseUrl, key: k });
+  };
+
   for (const [key, value] of Object.entries(updates)) {
-    const unsafe = POSTMESSAGE_FORBIDDEN_KEYS.has(key) || !isSafeKey(key);
-    if (unsafe) {
-      const msg = `Skipping unsafe query key '${key}' when updating URL.`;
-      if (onUnsafeKey === "throw") throw new InvalidParameterError(msg);
-      if (onUnsafeKey === "warn")
-        secureDevLog("warn", "updateURLParams", msg, { baseUrl, key });
+    if (isForbiddenKey(key) || !isSafeKey(key)) {
+      handleUnsafeKey(key);
       continue;
     }
+
     if (value === undefined && removeUndefined) {
       url.searchParams.delete(key);
-    } else {
-      url.searchParams.set(key, value === null ? "" : String(value));
+      continue;
     }
+
+    url.searchParams.set(key, value === null ? "" : String(value));
   }
 }
 
@@ -366,15 +388,10 @@ export function validateURL(
     };
   }
 
-  // Determine effective allowed schemes: intersection of SAFE_SCHEMES and
-  // user-provided allowedSchemes (if any). This prevents callers from
-  // enabling unsafe schemes like 'javascript:' or 'data:'.
-  const SAFE_SCHEMES = new Set(getSafeSchemes());
-  let effectiveSchemes = SAFE_SCHEMES;
-  if (Array.isArray(allowedSchemes) && allowedSchemes.length > 0) {
-    const userSet = new Set(allowedSchemes.map((s) => String(s)));
-    effectiveSchemes = new Set([...userSet].filter((s) => SAFE_SCHEMES.has(s)));
-  }
+  // Determine effective allowed schemes using centralized helper. This
+  // prevents callers from enabling unsafe schemes like 'javascript:' or
+  // 'data:' and ensures production-only policy is enforced consistently.
+  const effectiveSchemes = getEffectiveSchemes(allowedSchemes);
   if (!effectiveSchemes.has(url.protocol)) {
     return {
       ok: false,
@@ -522,8 +539,25 @@ export function encodeHostLabel(
 export function strictDecodeURIComponent(
   str: string,
 ): { ok: true; value: string } | { ok: false; error: Error } {
+  const MAX_DECODE_INPUT_LEN = 4096;
   try {
-    return { ok: true, value: decodeURIComponent(_toStr(str)) };
+    const input = _toStr(str);
+    if (input.length > MAX_DECODE_INPUT_LEN) {
+      return {
+        ok: false,
+        error: new InvalidParameterError("URI component is too long"),
+      };
+    }
+    const decoded = decodeURIComponent(input);
+    if (hasControlChars(decoded)) {
+      return {
+        ok: false,
+        error: new InvalidParameterError(
+          "Decoded URI component contains control characters",
+        ),
+      };
+    }
+    return { ok: true, value: decoded };
   } catch {
     return {
       ok: false,

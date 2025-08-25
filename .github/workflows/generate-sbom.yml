@@ -1,0 +1,76 @@
+# SPDX-License-Identifier: MIT
+# SPDX-FileCopyrightText: © 2025 David Osipov <personal@david-osipov.vision>
+name: Generate SBOM
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - 'sbom.json'
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  generate-sbom:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Use Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Cache node modules
+        uses: actions/cache@v4
+        with:
+          path: ~/.npm
+          key: ${{ runner.os }}-node-${{ hashFiles('package-lock.json', 'package.json') }}
+          restore-keys: |
+            ${{ runner.os }}-node-
+
+      - name: Install dependencies
+        run: |
+          npm ci
+
+      - name: Run tests
+        run: |
+          npm run typecheck
+          npm run lint
+          npm test
+
+      - name: Build
+        run: |
+          npm run build
+
+      - name: Generate SBOM
+        run: |
+          # Pass provenance information so SBOM includes traceability metadata
+          npm run generate:sbom -- --provenance-commit "$GITHUB_SHA" --provenance-run-url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" --provenance-run-id "$GITHUB_RUN_ID" --provenance-builder "$GITHUB_ACTOR" --tool-version "1.0.0"
+
+      - name: Upload SBOM artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom-json
+          path: sbom.json
+
+      - name: Create Pull Request with SBOM (optional)
+        if: github.event_name == 'push'
+        uses: peter-evans/create-pull-request@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          commit-message: 'chore(sbom): update sbom.json'
+          committer: 'SBOM Generator <noreply@github.com>'
+          author: '${{ github.actor }} <${{ github.actor }}@users.noreply.github.com>'
+          branch: 'update-sbom'
+          title: 'chore(sbom): update sbom.json'
+          body: |
+            Automated SBOM update via GitHub Actions.
+          files: |
+            sbom.json
+          delete-branch: true

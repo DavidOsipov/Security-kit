@@ -102,4 +102,12 @@ createSecurePostMessageListener({
 - If messages are being dropped, enable `enableDiagnostics` temporarily and reproduce the drop; examine the logged (salted) fingerprint to correlate events.
 - If you see many fingerprint logs, you are likely under test spam; consider increasing or tuning the diagnostic budget locally.
 
+## Canonical origin format & `freezePayload`
+
+- Canonical origin format: origins are normalized to the form `protocol//hostname[:port]` with default ports removed (e.g., `https://example.com:443` becomes `https://example.com`). Hosts are lowercased and trailing slashes are ignored for allowlist matching. Use the exact canonical origin string in `allowedOrigins` to avoid mismatches.
+
+- `freezePayload` option: listeners deep-freeze sanitized payloads by default to make them immutable before handing them to `onMessage`. High-throughput consumers can opt out by setting `freezePayload: false` in the listener options; doing so shifts responsibility for not mutating the payload to the consumer.
+
+Keep `freezePayload` enabled unless you have measured performance impacts and accept the trade-offs.
+
 \*\*\* End of document

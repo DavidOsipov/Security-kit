@@ -10,7 +10,6 @@
  * @module
  */
 
-import * as DOMPurify from "dompurify";
 import type { Config as DOMPurifyConfig } from "dompurify";
 import { InvalidConfigurationError, InvalidParameterError } from "./errors";
 
@@ -47,23 +46,24 @@ export type SanitizerPolicies = Record<string, DOMPurifyConfig>;
  * must be centralized and named, preventing ad-hoc, insecure configurations.
  */
 export class Sanitizer {
-  readonly #dompurify:
-    | ReturnType<typeof DOMPurify.default>
-    | { sanitize: (s: string, cfg?: DOMPurifyConfig) => string | TrustedHTML };
+  // Use a minimal, compatible type for the DOMPurify instance to avoid complex ReturnType constraints
+  readonly #dompurify: {
+    sanitize: (s: string, cfg?: DOMPurifyConfig) => string | TrustedHTML;
+  };
   readonly #policies: SanitizerPolicies;
   // TrustedTypePolicy shapes vary by environment; store as `TrustedTypePolicy | object` to avoid `any`.
-  #trustedTypePolicies = new Map<string, TrustedTypePolicy | object>();
+  // TrustedTypePolicy shapes vary by environment; store typed policies.
+  // Mark readonly because the Map reference itself is not reassigned.
+  readonly #trustedTypePolicies = new Map<string, TrustedTypePolicy>();
 
   /**
    * @param dompurifyInstance An instance of the DOMPurify library.
    * @param policies A map of named, pre-defined DOMPurify configurations.
    */
   constructor(
-    dompurifyInstance:
-      | ReturnType<typeof DOMPurify>
-      | {
-          sanitize: (s: string, cfg?: DOMPurifyConfig) => string | TrustedHTML;
-        },
+    dompurifyInstance: {
+      sanitize: (s: string, cfg?: DOMPurifyConfig) => string | TrustedHTML;
+    },
     policies: SanitizerPolicies,
   ) {
     if (
@@ -86,9 +86,9 @@ export class Sanitizer {
    * @throws {InvalidConfigurationError} If the policy name is not found.
    */
   public createPolicy(policyName: string): TrustedTypePolicy {
-    if (this.#trustedTypePolicies.has(policyName)) {
-      return this.#trustedTypePolicies.get(policyName)!;
-    }
+    // Return cached policy if already created
+    const existing = this.#trustedTypePolicies.get(policyName);
+    if (existing) return existing;
 
     const config = this.#policies[policyName];
     if (!config) {
@@ -97,36 +97,44 @@ export class Sanitizer {
       );
     }
 
-    if (
-      typeof window.trustedTypes === "undefined" ||
-      !window.trustedTypes.createPolicy
-    ) {
+    // Use optional chaining to detect availability of the Trusted Types API.
+    if (typeof window.trustedTypes?.createPolicy !== "function") {
       throw new Error(
         "Trusted Types API is not available in this environment.",
       );
     }
 
-    const ttPolicy: TrustedTypePolicy = window.trustedTypes.createPolicy(
-      policyName,
-      {
-        createHTML: (input: string) => {
-          // Ensure RETURN_TRUSTED_TYPE is true for the policy to work correctly.
-          return this.#dompurify.sanitize(input, {
-            ...config,
-            RETURN_TRUSTED_TYPE: true,
-          }) as unknown as string;
-        },
-        createScript: () => {
-          throw new TypeError("Dynamic scripts are not allowed");
-        },
-        createScriptURL: () => {
-          throw new TypeError("Dynamic script URLs are not allowed");
-        },
+    // Narrowly typed alias for the Trusted Types createPolicy function
+    type TTCreatePolicy = (
+      name: string,
+      rules: {
+        createHTML: (input: string) => TrustedHTML;
+        createScript?: () => never;
+        createScriptURL?: () => never;
       },
-    );
+    ) => TrustedTypePolicy;
 
-    this.#trustedTypePolicies.set(policyName, ttPolicy as TrustedTypePolicy);
-    return ttPolicy;
+    const createPolicyFn = window.trustedTypes
+      .createPolicy as unknown as TTCreatePolicy;
+
+    const raw = createPolicyFn(policyName, {
+      createHTML: (input: string) => {
+        // Ensure RETURN_TRUSTED_TYPE is true for the policy to work correctly.
+        return this.#dompurify.sanitize(input, {
+          ...config,
+          RETURN_TRUSTED_TYPE: true,
+        }) as TrustedHTML;
+      },
+      createScript: () => {
+        throw new TypeError("Dynamic scripts are not allowed");
+      },
+      createScriptURL: () => {
+        throw new TypeError("Dynamic script URLs are not allowed");
+      },
+    });
+
+    this.#trustedTypePolicies.set(policyName, raw);
+    return raw;
   }
 
   /**
@@ -151,4 +159,53 @@ export class Sanitizer {
       RETURN_TRUSTED_TYPE: false,
     }) as string;
   }
+
+  /**
+   * Attempts to create a Named TrustedTypePolicy if the API is available.
+   * Returns the policy or `null` if the environment doesn't support Trusted Types.
+   * This does not throw when Trusted Types are unavailable.
+   */
+  public createPolicyIfAvailable(policyName: string): TrustedTypePolicy | null {
+    if (!this.#policies[policyName]) {
+      throw new InvalidConfigurationError(
+        `Sanitizer policy "${policyName}" is not defined.`,
+      );
+    }
+    if (typeof window === "undefined") return null;
+    // Optional chaining to detect availability
+    if (typeof (window as any).trustedTypes?.createPolicy !== "function")
+      return null;
+    try {
+      return this.createPolicy(policyName);
+    } catch {
+      // If policy creation fails for any reason, fall back to null
+      return null;
+    }
+  }
+
+  /**
+   * Returns sanitized HTML either as TrustedHTML (when Trusted Types available)
+   * or as a sanitized string for non-TT environments.
+   */
+  /**
+   * Returns a sanitized HTML string using the named policy. This function
+   * always returns a string and never assigns DOM properties (avoids unsafe
+   * side effects and satisfies linting rules). Consumers running in Trusted
+   * Types-enabled environments can still call `createPolicyIfAvailable` and
+   * use the policy directly if they wish to produce TrustedHTML values.
+   */
+  public getSanitizedString(dirtyHtml: string, policyName: string): string {
+    return this.sanitizeForNonTTBrowsers(dirtyHtml, policyName);
+  }
 }
+
+/**
+ * ESLint/Policy recommendations for consumers of this library.
+ * These are suggestions you can paste into your project's ESLint config
+ * or documentation to help enforce safe usage of innerHTML and DOM APIs.
+ */
+export const SANITIZER_ESLINT_RECOMMENDATIONS = Object.freeze([
+  "security/no-unsafe-innerhtml",
+  "no-restricted-syntax (disallow direct innerHTML assignment)",
+  "prefer using Sanitizer.safeSetInnerHTML for DOM updates",
+]);

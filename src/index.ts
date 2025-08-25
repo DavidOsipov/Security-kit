@@ -57,5 +57,8 @@ export * from "./sanitizer";
 // DOM querying and validation utilities
 export * from "./dom";
 
+// Scripts / dev helpers
+export { runStandaloneFuzzHarness } from "./scripts/fuzz-harness";
+
 // Optional: production error reporter for manual emission (rate-limited)
 export { reportProdError } from "./reporting";

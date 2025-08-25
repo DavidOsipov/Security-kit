@@ -42,7 +42,7 @@ export const environment = (() => {
         if (location) {
           const hostname = location.hostname || "";
           const devHostnames = ["localhost", "127.0.0.1", "[::1]", ""];
-          const devSuffixes = [".local", ".test", ".dev"];
+          const devSuffixes = [".local", ".test"];
           const devPrefixes = ["192.168.", "10."];
           result =
             devHostnames.includes(hostname) ||
@@ -58,7 +58,10 @@ export const environment = (() => {
     },
     get isProduction() {
       if (explicitEnv) return explicitEnv === "production";
-      return !this.isDevelopment;
+      // Avoid relying on `this` binding in getters; reference the exported
+      // `environment` object explicitly to ensure correctness if the getter
+      // is extracted or called with a different `this`.
+      return !environment.isDevelopment;
     },
     clearCache() {
       cache.clear();

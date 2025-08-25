@@ -38,21 +38,36 @@ const DEFAULT_CONFIG: DOMValidatorConfig = {
   forbiddenRoots: new Set(["body", "html", "#app", "#root"]),
 };
 
-// Freeze the container object to prevent accidental reassignment of config sets.
-// Note: Set contents remain mutable; applications should provide their own
-// immutable configs at startup for stricter guarantees.
-Object.freeze(DEFAULT_CONFIG);
+// Note: We intentionally do not rely on the immutability of the inner Set
+// contents here. The DOMValidator constructor will clone and normalize any
+// provided configuration to ensure internal copies cannot be mutated by
+// external consumers.
 
 /**
  * A security-focused class for validating and querying DOM elements.
  */
 export class DOMValidator {
   readonly #config: DOMValidatorConfig;
-  #validatedElements = new WeakSet<Element>();
+  readonly #validatedElements = new WeakSet<Element>();
   #resolvedRootsCache: Map<string, Element | null> | null = null;
 
   constructor(config: DOMValidatorConfig = DEFAULT_CONFIG) {
-    this.#config = config;
+    // Clone and normalize the configuration to avoid retaining references to
+    // mutable Sets supplied by callers. This defends against accidental or
+    // malicious mutation of the allowlist at runtime.
+    function cloneConfig(cfg: DOMValidatorConfig): DOMValidatorConfig {
+      const allowed = new Set<string>();
+      for (const s of cfg.allowedRootSelectors) allowed.add(String(s));
+      const forbidden = new Set<string>();
+      for (const s of cfg.forbiddenRoots)
+        forbidden.add(String(s).toLowerCase());
+      return {
+        allowedRootSelectors: allowed,
+        forbiddenRoots: forbidden,
+      };
+    }
+
+    this.#config = Object.freeze(cloneConfig(config));
     // Self-defense mechanism: Validate the provided configuration on instantiation.
     for (const root of this.#config.allowedRootSelectors) {
       if (this.#config.forbiddenRoots.has(root.toLowerCase())) {
@@ -89,6 +104,21 @@ export class DOMValidator {
     if (typeof selector !== "string" || !selector.trim()) {
       throw new InvalidParameterError(
         "Invalid selector: must be a non-empty string.",
+      );
+    }
+    // Reject selectors that are excessively long which may be expensive to
+    // parse or may be used in DoS attempts.
+    const MAX_SELECTOR_LEN = 1024;
+    if (selector.length > MAX_SELECTOR_LEN) {
+      throw new InvalidParameterError("Selector is too long.");
+    }
+
+    // Disallow known expensive or new pseudo-classes that can cause complex
+    // selector evaluation (e.g., :has()). This helps avoid high CPU selectors.
+    const expensiveTokens = /:has\(|:is\(|:where\(|:nth-last|:nth-child/;
+    if (expensiveTokens.test(selector)) {
+      throw new InvalidParameterError(
+        "Selector contains disallowed or expensive pseudo-classes.",
       );
     }
     // Check syntax without actually querying the live DOM if possible.
@@ -173,3 +203,12 @@ export class DOMValidator {
  * Your application should ideally create and configure its own instance.
  */
 export const defaultDOMValidator = new DOMValidator();
+
+/**
+ * Factory helper to create a new, independent `DOMValidator` instance with the
+ * library's default configuration. Prefer creating your own instance in
+ * application code instead of mutating the default singleton.
+ */
+export function createDefaultDOMValidator(): DOMValidator {
+  return new DOMValidator(DEFAULT_CONFIG);
+}

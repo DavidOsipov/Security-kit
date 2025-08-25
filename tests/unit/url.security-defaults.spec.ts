@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { validateURL, createSecureURL } from "../../src/url";
+import { InvalidParameterError } from "../../src/errors";
 
 describe("url security defaults and options", () => {
   it("requires HTTPS by default in validateURL", () => {
@@ -24,12 +25,12 @@ describe("url security defaults and options", () => {
   it("createSecureURL rejects fragments with control characters", () => {
     expect(() =>
       createSecureURL("https://example.test", [], {}, "bad\x01frag"),
-    ).toThrow();
+    ).toThrow(InvalidParameterError);
   });
 
   it("createSecureURL rejects disallowed schemes by default", () => {
     expect(() =>
       createSecureURL("javascript:alert(1)" as unknown as string),
-    ).toThrow();
+    ).toThrow(InvalidParameterError);
   });
 });

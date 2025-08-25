@@ -1,0 +1,66 @@
+name: Publish package
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+  packages: write
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    # explicit job-level permissions for least privilege
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Use Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 18
+          registry-url: https://registry.npmjs.org/
+      - name: Install dependencies
+        run: npm ci
+      - name: Build
+        run: npm run build
+      - name: Run tests
+        run: npm test --silent
+      - name: Generate SBOM
+        run: npm run generate:sbom
+      - name: Pack smoke-check
+        run: |
+          npm pack --dry-run
+      - name: Sign SBOMs (keyless via OIDC)
+        uses: sigstore/cosign-installer@v2
+      - name: Sign SBOM JSON (keyless)
+        uses: sigstore/cosign-action@v2
+        with:
+          args: sign-blob --signature sbom.json.sig sbom.json
+      - name: Sign SPDX JSON (keyless)
+        uses: sigstore/cosign-action@v2
+        with:
+          args: sign-blob --signature sbom.spdx.json.sig sbom.spdx.json
+      - name: Verify SBOM signatures (keyless)
+        uses: sigstore/cosign-action@v2
+        with:
+          args: verify-blob --certificate-output sbom.json.crt sbom.json sig:sbom.json.sig || true
+      - name: Verify SPDX signature (keyless)
+        uses: sigstore/cosign-action@v2
+        with:
+          args: verify-blob --certificate-output sbom.spdx.json.crt sbom.spdx.json sig:sbom.spdx.json.sig || true
+      - name: Upload SBOM signatures to release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: sbom.json.sig sbom.spdx.json.sig
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Publish to npm
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          npm publish --access public

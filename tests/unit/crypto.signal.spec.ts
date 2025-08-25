@@ -11,7 +11,7 @@ describe("crypto signal handling", () => {
     controller.abort();
     await expect(
       getSecureRandomAsync({ signal: controller.signal }),
-    ).rejects.toThrow();
+    ).rejects.toThrow(/Abort|aborted|Operation aborted/);
   });
 
   it("generateSecureStringSync should throw when signal is aborted", () => {
@@ -19,6 +19,6 @@ describe("crypto signal handling", () => {
     controller.abort();
     expect(() =>
       generateSecureStringSync("abc", 8, { signal: controller.signal }),
-    ).toThrow();
+    ).toThrow(/Abort|aborted|Operation aborted|RandomGenerationError/);
   });
 });

@@ -53,6 +53,38 @@ export function _setCrypto(
       "setCrypto() was called in production without allowInProduction=true",
     );
   }
+  // If caller explicitly allows using a custom crypto in production, require an
+  // explicit opt-in via an environment variable or a global override to avoid
+  // accidental weakening of entropy in production deployments.
+  if (environment.isProduction && cryptoLike && allowInProduction) {
+    const envAllow =
+      typeof process !== "undefined" &&
+      process?.env?.["SECURITY_KIT_ALLOW_SET_CRYPTO_IN_PROD"] === "true";
+    const globalAllow = !!(globalThis as unknown as Record<string, unknown>)[
+      "__SECURITY_KIT_ALLOW_SET_CRYPTO_IN_PROD"
+    ];
+    if (!envAllow && !globalAllow) {
+      throw new InvalidConfigurationError(
+        "setCrypto(..., { allowInProduction: true }) in production requires explicit opt-in.\n" +
+          "Set environment variable SECURITY_KIT_ALLOW_SET_CRYPTO_IN_PROD=true or set globalThis.__SECURITY_KIT_ALLOW_SET_CRYPTO_IN_PROD = true to acknowledge the risk.",
+      );
+    }
+
+    // Report a high-severity warning so operators are aware that crypto was
+    // overridden in production. This helps with post-deployment audits.
+    try {
+      reportProdError(
+        new Error("Custom crypto provider set in production (operator opt-in)"),
+        {
+          component: "security-kit",
+          action: "setCrypto",
+          note: "Operator explicitly allowed replacing crypto in production",
+        },
+      );
+    } catch {
+      /* best-effort reporting */
+    }
+  }
 
   _cryptoInitGeneration++;
   _cryptoPromise = null;
@@ -204,18 +236,24 @@ export function ensureCryptoSync(): Crypto {
 }
 
 // --- Test-only Helpers ---
-export let __test_resetCryptoStateForUnitTests: undefined | (() => void);
-if (typeof __TEST__ !== "undefined" && __TEST__) {
-  __test_resetCryptoStateForUnitTests = () => {
-    _cachedCrypto = null;
-    _cryptoPromise = null;
-    _cryptoState = CryptoState.Unconfigured;
-    _cryptoInitGeneration = 0;
-    try {
-      environment.clearCache();
-    } catch {}
-  };
-}
+export const __test_resetCryptoStateForUnitTests: undefined | (() => void) =
+  typeof __TEST__ !== "undefined" && __TEST__
+    ? (() => {
+        // runtime guard to prevent accidental execution in production
+        // import lazily to avoid cycles at module load time
+        const { assertTestApiAllowed } = require("./dev-guards");
+        assertTestApiAllowed();
+        return () => {
+          _cachedCrypto = null;
+          _cryptoPromise = null;
+          _cryptoState = CryptoState.Unconfigured;
+          _cryptoInitGeneration = 0;
+          try {
+            environment.clearCache();
+          } catch {}
+        };
+      })()
+    : undefined;
 
 export function getInternalTestUtils():
   | {

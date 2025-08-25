@@ -45,6 +45,7 @@
   },
   "files": [
     "dist",
+    "sbom.json",
     "Security Consitution.md",
     "README.md",
     "LICENSE"
@@ -64,8 +65,12 @@
     "tslint": "tsc --noEmit",
     "typecheck": "tsc --noEmit",
     "verify:sanitize": "node scripts/verify-sanitize.cjs",
-    "generate:sbom": "node scripts/generate-sbom.cjs",
-    "prepublishOnly": "npm run typecheck && npm run lint && npm run test && npm run verify:sanitize && npm run build && npm run generate:sbom"
+    "generate:sbom": "npx ts-node --transpile-only scripts/generate-sbom.ts",
+    "pack:check": "npm pack --dry-run",
+    "prepare": "npm run typecheck && npm run lint && npm run test && npm run verify:sanitize && npm run build && npm run generate:sbom",
+    "prepublishOnly": "npm run prepare"
+    ,
+    "fuzz:standalone": "npm run build && node -e \"(async function(){const m=await import('./dist/index.mjs');const it=Number(process.env.RUN_FUZZ_ITERATIONS||'100');if(typeof m.runStandaloneFuzzHarness==='function'){const code=await m.runStandaloneFuzzHarness(it);process.exit(code||0);}else{console.error('runStandaloneFuzzHarness not exported');process.exit(1);}})()\""
   },
   "peerDependencies": {
     "dompurify": "^3.0.0"
@@ -89,7 +94,7 @@
     "eslint-plugin-regexp": "^2.10.0",
     "eslint-plugin-security": "^3.0.1",
     "eslint-plugin-security-node": "^1.1.4",
-    "eslint-plugin-sonarjs": "^3.0.4",
+    "eslint-plugin-sonarjs": "^3.0.5",
     "isomorphic-dompurify": "^2.26.0",
     "jsdom": "^26.1.0",
     "prettier": "^3.6.2",

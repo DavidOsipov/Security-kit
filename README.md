@@ -121,6 +121,26 @@ const url = createSecureURL(
 // Returns: "https://api.example.com/users/search?q=John%20Doe&filter=active%2Bpremium#results"
 ```
 
+## Publishing to npm
+
+This repository includes a GitHub Actions workflow that publishes the package when a GitHub Release is published. To enable publishing:
+
+- Add an `NPM_TOKEN` secret to the repository (Settings → Secrets → Actions) containing a token generated from your npm account.
+- Create a Release (tag) in GitHub. The workflow `publish.yml` will run on release and publish the package.
+
+Local pre-publish steps (the project runs these automatically via `npm run prepare`):
+
+```bash
+# Ensure version is bumped in package.json
+npm run typecheck
+npm run lint
+npm test
+npm run build
+npm run generate:sbom
+```
+
+The `sbom.json` is included in the published package files.
+
 #### `createSecurePostMessageListener(options)`
 
 Listens for `postMessage` events while enforcing a strict origin allowlist and validating the payload.
@@ -171,6 +191,11 @@ You can also pass an `AbortSignal` to `getSecureRandomInt(min, max, { signal })`
 ### URL validation: normalized origin allowlist
 
 `validateURL(urlString, { allowedOrigins })` now normalizes origins with the URL standard (e.g., `https://example.com:443` equals `https://example.com`). Provide exact origins; wildcards are not allowed.
+
+### postMessage: canonical origin format and payload freezing
+
+- Origins used in `allowedOrigins` are canonicalized to `protocol//hostname[:port]` with default ports removed. Use the canonical form to avoid mismatches (trailing slashes and case differences are normalized).
+- `createSecurePostMessageListener` deep-freezes sanitized payloads by default to ensure immutability. If your application requires high-throughput handling and you can prove immutability in consumers, set `freezePayload: false` to opt out.
 
 ### HTTPS-only policy for URL helpers
 
@@ -348,6 +373,84 @@ npm test
 # Run only unit tests (if you want to skip integrations you can use --testNamePattern)
 npm test -- --testNamePattern "unit"
 ```
+
+## Keyless signing (GitHub OIDC + sigstore)
+
+This repository uses sigstore/cosign keyless signing in CI for SBOMs. That means the publish workflow signs SBOM artifacts (CycloneDX JSON, SPDX JSON) using GitHub OIDC assertions rather than a long-lived private key stored in secrets. Advantages:
+
+- No long-lived private key in repository secrets.
+- Signatures are tied to the release workflow invocation and issuer (GitHub Actions), improving provenance.
+
+What you need to enable in the repository:
+
+- Ensure the `publish` workflow has `id-token: write` and appropriate permissions (this repository already sets that in `.github/workflows/publish.yml`).
+- Add an `NPM_TOKEN` secret so the workflow can publish to npm.
+
+How the workflow signs and verifies SBOMs:
+
+- The workflow uses `sigstore/cosign-installer` and `sigstore/cosign-action` to sign blobs using OIDC from GitHub Actions.
+- The action produces detached signature files (`sbom.json.sig`, `sbom.spdx.json.sig`) and also fetches a signing certificate which can be uploaded as an artifact for auditing.
+
+Verifying signatures locally (best-effort):
+
+1. Install `cosign` locally (release binary or via Homebrew):
+
+```bash
+# macOS (Homebrew)
+brew install sigstore/tap/cosign
+
+# or download binary from https://github.com/sigstore/cosign/releases
+```
+
+2. Verify the SBOM signature and view the signing certificate:
+
+```bash
+cosign verify-blob --signature sbom.json.sig sbom.json
+```
+
+If the signature is valid, `cosign` will print verification results and the signing certificate information.
+
+Notes and fallbacks:
+
+- If you prefer to manage your own signing keys, the previous private-key flow using a base64 `COSIGN_KEY` secret is still possible; see the commit history for the earlier implementation. Keyless signing is recommended to minimize secret management overhead.
+- For consumers who need to programmatically check signatures, consider publishing the signing certificate alongside SBOM artifacts or leveraging the Rekor transparency log which `cosign` uses by default.
+
+### Example: Minimal keyless signing job
+
+Below is a minimal example you can adopt for your own workflows that signs a single artifact using GitHub OIDC + `sigstore/cosign-action`:
+
+```yaml
+name: Sign SBOM
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  sign:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Generate SBOM
+        run: npm run generate:sbom
+      - name: Install cosign helper
+        uses: sigstore/cosign-installer@v2
+      - name: Sign SBOM (keyless)
+        uses: sigstore/cosign-action@v2
+        with:
+          args: sign-blob --signature sbom.json.sig sbom.json
+      - name: Upload signature
+        uses: softprops/action-gh-release@v1
+        with:
+          files: sbom.json.sig
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+```
+
+This example demonstrates a release-triggered signing job that uses GitHub OIDC (via `id-token: write`) to perform keyless signing.
 
 Notes
 

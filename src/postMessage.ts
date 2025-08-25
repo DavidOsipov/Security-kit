@@ -6,10 +6,17 @@
  * @module
  */
 
-import { InvalidParameterError, sanitizeErrorForLogs } from "./errors";
+import {
+  InvalidParameterError,
+  InvalidConfigurationError,
+  sanitizeErrorForLogs,
+} from "./errors";
 import { ensureCrypto } from "./state";
 import { secureDevLog, _arrayBufferToBase64 } from "./utils";
 import { SHARED_ENCODER } from "./encoding";
+import { isForbiddenKey } from "./constants";
+import { environment } from "./environment";
+import { normalizeOrigin as normalizeUrlOrigin } from "./url";
 
 // --- Interfaces and Types ---
 
@@ -34,17 +41,16 @@ export type CreateSecurePostMessageListenerOptions = {
   expectedSource?: Window | MessagePort; // optional stronger binding
   allowExtraProps?: boolean; // default false when using schema
   enableDiagnostics?: boolean; // default false; gates fingerprints in prod
+  // freezePayload: when true (default), the sanitized payload will be deeply frozen
+  // before being passed to the consumer. When false, callers accept responsibility
+  // for not mutating the payload.
+  freezePayload?: boolean;
 };
 
 // --- Constants ---
 
 export const POSTMESSAGE_MAX_PAYLOAD_BYTES = 32 * 1024;
 export const POSTMESSAGE_MAX_PAYLOAD_DEPTH = 8;
-export const POSTMESSAGE_FORBIDDEN_KEYS = new Set([
-  "__proto__",
-  "prototype",
-  "constructor",
-]);
 
 // Small default limits for diagnostics to prevent DoS via expensive hashing
 const DEFAULT_DIAGNOSTIC_BUDGET = 5; // fingerprints per minute
@@ -79,9 +85,24 @@ function toNullProto(
   }
 
   const out = Object.create(null);
-  for (const [key, value] of Object.entries(obj as Record<string, unknown>)) {
+  // iterate string keys only; ignore symbol-keyed properties to avoid
+  // invoking exotic symbol-based traps or leaking runtime internals
+  for (const key of Object.keys(obj as Record<string, unknown>)) {
+    // Use safe property access to avoid invoking getters
+    let value: unknown;
+    try {
+      const desc = Object.getOwnPropertyDescriptor(obj as object, key as string);
+      if (desc && (typeof desc.get === "function" || typeof desc.set === "function")) {
+        // Skip accessor properties to avoid executing untrusted getters
+        continue;
+      }
+      value = (obj as Record<string, unknown>)[key as string];
+    } catch {
+      // If property access throws, skip it
+      continue;
+    }
     // Skip forbidden keys that could enable prototype pollution
-    if (POSTMESSAGE_FORBIDDEN_KEYS.has(key)) {
+    if (isForbiddenKey(key)) {
       continue;
     }
 
@@ -104,7 +125,7 @@ function deepFreeze<T>(obj: T): T {
       // ignore freeze errors on exotic objects
     }
     if (Array.isArray(obj)) {
-      for (const v of obj as unknown as Array<unknown>) deepFreeze(v as T);
+      for (const v of obj) deepFreeze(v as T);
     } else {
       for (const v of Object.values(obj as object)) deepFreeze(v as T);
     }
@@ -197,30 +218,34 @@ export function createSecurePostMessageListener(
     onMessage = allowedOriginsOrOptions.onMessage;
     validator = allowedOriginsOrOptions.validate;
   }
-
-  if (
-    !Array.isArray(allowedOrigins) ||
-    allowedOrigins.some((o) => typeof o !== "string")
-  ) {
-    throw new InvalidParameterError(
-      "allowedOrigins must be an array of origin strings.",
-    );
+  // In production, require explicit channel binding to avoid creating a
+  // listener that accepts messages from any origin/source. This defaults to
+  // a safe-fail approach (fail loudly) per the Security Constitution.
+  {
+    const hasAllowedOrigins =
+      Array.isArray(allowedOrigins) && allowedOrigins.length > 0;
+    const opts =
+      allowedOriginsOrOptions as CreateSecurePostMessageListenerOptions;
+    const hasExpectedSource = !!opts?.expectedSource;
+    if (environment.isProduction && !(hasAllowedOrigins || hasExpectedSource)) {
+      throw new InvalidConfigurationError(
+        "createSecurePostMessageListener requires 'allowedOrigins' or 'expectedSource' in production.",
+      );
+    }
   }
-  if (typeof onMessage !== "function") {
-    throw new InvalidParameterError("onMessage must be a function.");
-  }
-
   // Normalize origins to canonical form to avoid mismatches like :443 vs default
   function normalizeOrigin(o: string): string {
     try {
+      // Reuse shared URL normalization but enforce https/localhost policies here.
+      const norm = normalizeUrlOrigin(o);
       const u = new URL(o);
       if (u.origin === "null") throw new Error("opaque origin");
-      // Enforce https except for localhost
       const isLocalhost =
         u.hostname === "localhost" || u.hostname === "127.0.0.1";
       if (u.protocol !== "https:" && !isLocalhost)
         throw new Error("insecure origin");
-      return u.origin;
+      // Ensure we return the canonical origin form (protocol//host[:port])
+      return norm;
     } catch {
       throw new InvalidParameterError(
         `Invalid allowed origin '${o}'. Use an absolute origin 'https://example.com' or 'http://localhost'.`,
@@ -247,64 +272,52 @@ export function createSecurePostMessageListener(
     return false;
   }
 
-  const handler = (event: MessageEvent) => {
-    // Opaque origin handling
-    if (event.origin === "null") {
-      // Drop opaque origins by default
-      secureDevLog(
-        "warn",
-        "postMessage",
-        "Dropped message from opaque origin 'null'",
-        {
-          origin: event.origin,
-        },
-      );
-      return;
-    }
-
+  // Module-scoped cache to avoid re-freezing identical object instances.
+  // Stored outside the handler to keep memory use proportional to live objects.
+  function getDeepFreezeCache(): WeakSet<object> | undefined {
     try {
-      if (!allowedOriginSet.has(normalizeOrigin(event.origin))) {
-        secureDevLog(
-          "warn",
-          "postMessage",
-          "Dropped message from non-allowlisted origin",
-          { origin: event.origin },
-        );
-        return;
+      const holder = deepFreeze as unknown as { _cache?: WeakSet<object> };
+      holder._cache ??= new WeakSet<object>();
+      return holder._cache;
+    } catch {
+      return undefined;
+    }
+  }
+
+  function freezePayloadIfNeeded(
+    opts: CreateSecurePostMessageListenerOptions,
+    payload: unknown,
+  ): void {
+    const shouldFreeze = opts.freezePayload !== false; // default true
+    if (!shouldFreeze) return;
+    if (payload == null || typeof payload !== "object") return;
+    const cache = getDeepFreezeCache();
+    if (cache) {
+      if (!cache.has(payload)) {
+        try {
+          deepFreeze(payload);
+        } catch {
+          /* ignore */
+        }
+        try {
+          cache.add(payload);
+        } catch {
+          /* ignore */
+        }
       }
-    } catch (err) {
-      // Include sanitized error details for diagnostics while avoiding leaking sensitive info.
-      secureDevLog(
-        "warn",
-        "postMessage",
-        "Dropped message due to invalid origin format",
-        {
-          origin: event.origin,
-          error: sanitizeErrorForLogs(err),
-        },
-      );
       return;
     }
-
-    // If expectedSource provided, ensure the event.source matches
-    if (
-      typeof (allowedOriginsOrOptions as CreateSecurePostMessageListenerOptions)
-        .expectedSource !== "undefined"
-    ) {
-      const opts =
-        allowedOriginsOrOptions as CreateSecurePostMessageListenerOptions;
-      if (opts.expectedSource && event.source !== opts.expectedSource) {
-        secureDevLog(
-          "warn",
-          "postMessage",
-          "Dropped message from unexpected source",
-          {
-            origin: event.origin,
-          },
-        );
-        return;
-      }
+    try {
+      deepFreeze(payload);
+    } catch {
+      /* ignore */
     }
+  }
+
+  const handler = (event: MessageEvent) => {
+    // Validate origin and source using extracted helpers to reduce cognitive complexity
+    if (!isEventOriginAllowlisted(event)) return;
+    if (!isEventSourceExpected(event)) return;
     try {
       const data = parseMessageEventData(event);
 
@@ -330,48 +343,22 @@ export function createSecurePostMessageListener(
       );
       if (!validationResult.valid) {
         // Gate expensive fingerprinting behind diagnostics and a small budget to avoid DoS
-        const enableDiagnostics = !!(
-          allowedOriginsOrOptions as CreateSecurePostMessageListenerOptions
-        ).enableDiagnostics;
-        if (enableDiagnostics && canConsumeDiagnostic()) {
-          try {
-            queueMicrotask(() => {
-              getPayloadFingerprint(data)
-                .then((fp) => {
-                  secureDevLog(
-                    "warn",
-                    "postMessage",
-                    "Message dropped due to failed validation",
-                    {
-                      origin: event.origin,
-                      reason: validationResult.reason,
-                      fingerprint: fp,
-                    },
-                  );
-                })
-                .catch(() => {
-                  /* ignore */
-                });
-            });
-          } catch {
-            /* ignore scheduling errors */
-          }
-        } else {
-          secureDevLog(
-            "warn",
-            "postMessage",
-            "Message dropped due to failed validation",
-            {
-              origin: event.origin,
-              reason: validationResult.reason,
-            },
-          );
-        }
+        scheduleDiagnosticForFailedValidation(
+          allowedOriginsOrOptions as CreateSecurePostMessageListenerOptions,
+          event.origin,
+          validationResult.reason,
+          data,
+        );
         return;
       }
 
-      // Deep-freeze sanitized payload to enforce immutability
-      onMessage(deepFreeze(data));
+      // Freeze payload by default (immutable) with an identity cache to avoid
+      // repeated work. Consumers can opt out with freezePayload: false.
+      freezePayloadIfNeeded(
+        allowedOriginsOrOptions as CreateSecurePostMessageListenerOptions,
+        data,
+      );
+      onMessage(data);
     } catch (err) {
       secureDevLog("error", "postMessage", "Listener handler error", {
         origin: event.origin,
@@ -379,6 +366,149 @@ export function createSecurePostMessageListener(
       });
     }
   };
+
+  function isEventOriginAllowlisted(event: MessageEvent): boolean {
+    // Opaque origin handling
+    if (event.origin === "null") {
+      secureDevLog(
+        "warn",
+        "postMessage",
+        "Dropped message from opaque origin 'null'",
+        {
+          origin: event.origin,
+        },
+      );
+      return false;
+    }
+    try {
+      if (!allowedOriginSet.has(normalizeOrigin(event.origin))) {
+        secureDevLog(
+          "warn",
+          "postMessage",
+          "Dropped message from non-allowlisted origin",
+          {
+            origin: event.origin,
+          },
+        );
+        return false;
+      }
+    } catch (err) {
+      secureDevLog(
+        "warn",
+        "postMessage",
+        "Dropped message due to invalid origin format",
+        {
+          origin: event.origin,
+          error: sanitizeErrorForLogs(err),
+        },
+      );
+      return false;
+    }
+    return true;
+  }
+
+  function isEventSourceExpected(event: MessageEvent): boolean {
+    const opts =
+      allowedOriginsOrOptions as CreateSecurePostMessageListenerOptions;
+    if (typeof opts.expectedSource === "undefined") return true;
+    if (opts.expectedSource && event.source !== opts.expectedSource) {
+      secureDevLog(
+        "warn",
+        "postMessage",
+        "Dropped message from unexpected source",
+        {
+          origin: event.origin,
+        },
+      );
+      return false;
+    }
+    return true;
+  }
+
+  // Schedule diagnostics for failed validation: use the diagnostic budget and
+  // a salted fingerprint when available. This is extracted to keep handler
+  // cognitive complexity under limits.
+  function scheduleDiagnosticForFailedValidation(
+    opts: CreateSecurePostMessageListenerOptions,
+    origin: string,
+    reason: string | undefined,
+    data: unknown,
+  ): void {
+    const enableDiagnostics = !!opts.enableDiagnostics;
+    if (
+      enableDiagnostics &&
+      canConsumeDiagnostic() &&
+      !_diagnosticsDisabledDueToNoCryptoInProd
+    ) {
+      try {
+        // Probe for crypto availability first. If crypto is unavailable
+        // and we're in production, disable diagnostics that would otherwise
+        // rely on low-entropy fallbacks. This avoids a race where
+        // getPayloadFingerprint() would create a deterministic salt and
+        // produce a fingerprint even when we intended to skip fingerprinting
+        // in production environments without secure RNG.
+        ensureCrypto()
+          .then(() => {
+            try {
+              queueMicrotask(() => {
+                getPayloadFingerprint(data)
+                  .then((fp) => {
+                    const diag = {
+                      origin,
+                      reason,
+                      fingerprint: fp,
+                    };
+                    secureDevLog(
+                      "warn",
+                      "postMessage",
+                      "Message dropped due to failed validation",
+                      diag,
+                    );
+                  })
+                  .catch(() => {
+                    /* ignore */
+                  });
+              });
+            } catch {
+              /* ignore scheduling errors */
+            }
+          })
+          .catch(() => {
+            // No secure crypto available. Respect production policy by
+            // disabling diagnostics that would otherwise produce
+            // low-entropy fingerprints, and emit the diagnostic without
+            // a fingerprint.
+            try {
+              if (environment.isProduction)
+                _diagnosticsDisabledDueToNoCryptoInProd = true;
+            } catch {
+              /* ignore */
+            }
+            secureDevLog(
+              "warn",
+              "postMessage",
+              "Message dropped due to failed validation",
+              {
+                origin,
+                reason,
+              },
+            );
+          });
+      } catch {
+        /* ignore */
+      }
+    } else {
+      secureDevLog(
+        "warn",
+        "postMessage",
+        "Message dropped due to failed validation",
+        {
+          origin,
+          reason,
+        },
+      );
+    }
+  }
 
   function parseMessageEventData(event: MessageEvent): unknown {
     if (typeof event.data !== "string") {
@@ -415,6 +545,9 @@ export function createSecurePostMessageListener(
 // Generated lazily using secure RNG when available.
 const FINGERPRINT_SALT_LENGTH = 16;
 let _payloadFingerprintSalt: Uint8Array | null = null;
+// If secure crypto is not available in production, disable diagnostics that
+// rely on non-crypto fallbacks to avoid producing low-entropy fingerprints.
+let _diagnosticsDisabledDueToNoCryptoInProd = false;
 
 async function ensureFingerprintSalt(): Promise<Uint8Array> {
   if (_payloadFingerprintSalt) return _payloadFingerprintSalt;
@@ -440,6 +573,14 @@ async function ensureFingerprintSalt(): Promise<Uint8Array> {
     } catch {
       // best-effort logging
     }
+    // If we're in production, disable diagnostics that rely on low-entropy
+    // fallbacks to avoid producing linkable or low-quality fingerprints.
+    try {
+      if (environment.isProduction)
+        _diagnosticsDisabledDueToNoCryptoInProd = true;
+    } catch {
+      /* ignore */
+    }
     const timeEntropy =
       String(Date.now()) +
       String(
@@ -464,13 +605,12 @@ async function getPayloadFingerprint(data: unknown): Promise<string> {
     try {
       const crypto = await ensureCrypto();
       const subtle = (crypto as Crypto & { subtle?: SubtleCrypto }).subtle;
-      if (subtle?.digest) {
+      if (subtle && typeof subtle.digest === "function") {
         const payloadBytes = SHARED_ENCODER.encode(s);
-        const input = new Uint8Array(
-          (saltBuf as Uint8Array).length + payloadBytes.length,
-        );
-        input.set(saltBuf as Uint8Array, 0);
-        input.set(payloadBytes, (saltBuf as Uint8Array).length);
+        const saltArr = saltBuf;
+        const input = new Uint8Array(saltArr.length + payloadBytes.length);
+        input.set(saltArr, 0);
+        input.set(payloadBytes, saltArr.length);
         const digest = await subtle.digest("SHA-256", input.buffer);
         return _arrayBufferToBase64(digest).slice(0, 12);
       }
@@ -479,10 +619,10 @@ async function getPayloadFingerprint(data: unknown): Promise<string> {
     }
     // Fallback: salted non-crypto rolling hash
     if (!saltBuf) return "FINGERPRINT_ERR";
-    const sb = saltBuf as Uint8Array;
+    const sb = saltBuf;
     let acc = 2166136261 >>> 0; // FNV-1a init
-    for (let i = 0; i < sb.length; i++) {
-      acc = ((acc ^ sb[i]) * 16777619) >>> 0;
+    for (const byte of sb) {
+      acc = ((acc ^ byte) * 16777619) >>> 0;
     }
     for (let i = 0; i < s.length; i++) {
       acc = ((acc ^ s.charCodeAt(i)) * 16777619) >>> 0;
@@ -515,15 +655,16 @@ export function _validatePayload(
   if (!isPlainOrNullObject(data)) {
     return { valid: false, reason: `Expected object, got ${typeof data}` };
   }
-  const keys = Object.keys(data);
-  if (keys.some((k) => POSTMESSAGE_FORBIDDEN_KEYS.has(k))) {
+  const plainData = data;
+  const keys = Object.keys(plainData);
+  if (keys.some((k) => isForbiddenKey(k))) {
     return { valid: false, reason: "Forbidden property name present" };
   }
   for (const [key, expectedType] of Object.entries(validator)) {
-    if (!Object.prototype.hasOwnProperty.call(data, key)) {
+    if (!Object.prototype.hasOwnProperty.call(plainData, key)) {
       return { valid: false, reason: `Missing property '${key}'` };
     }
-    const value = (data as Record<string, unknown>)[key];
+    const value = plainData[key];
     const actualType = Array.isArray(value) ? "array" : typeof value;
     if (actualType !== expectedType) {
       return {
@@ -535,11 +676,12 @@ export function _validatePayload(
   return { valid: true };
 }
 
-function _validatePayloadWithExtras(
+export function _validatePayloadWithExtras(
   data: unknown,
   validator: ((d: unknown) => boolean) | Record<string, SchemaValue>,
   allowExtraProps = false,
 ): { valid: boolean; reason?: string } {
+  // Validator function path: execute safely and return boolean result.
   if (typeof validator === "function") {
     try {
       return { valid: Boolean((validator as (d: unknown) => boolean)(data)) };
@@ -551,18 +693,21 @@ function _validatePayloadWithExtras(
     }
   }
 
+  // For schema validators, reuse the base validation first.
   const base = _validatePayload(data, validator);
   if (!base.valid) return base;
 
-  if (!allowExtraProps) {
-    if (data && typeof data === "object") {
-      const allowed = new Set(Object.keys(validator));
-      for (const k of Object.keys(data as Record<string, unknown>)) {
-        if (!allowed.has(k)) {
-          return { valid: false, reason: `Unexpected property '${k}'` };
-        }
-      }
+  // If extra properties are allowed, we're done.
+  if (allowExtraProps) return { valid: true };
+
+  // Otherwise, ensure no unexpected keys are present.
+  const allowed = new Set(Object.keys(validator));
+  const plainData = data as Record<string, unknown>;
+  for (const k of Object.keys(plainData)) {
+    if (!allowed.has(k)) {
+      return { valid: false, reason: `Unexpected property '${k}'` };
     }
   }
+
   return { valid: true };
 }

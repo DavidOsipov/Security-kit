@@ -23,8 +23,6 @@ describe("generateSecureStringSync document.hidden behavior", () => {
     hiddenSpy = vi
       .spyOn(document as any, "hidden", "get")
       .mockReturnValue(true);
-    expect(() => generateSecureStringSync("abcd", 8)).toThrow(
-      RandomGenerationError,
-    );
+    expect(() => generateSecureStringSync("abcd", 8)).toThrow(RandomGenerationError);
   });
 });

@@ -1,0 +1,241 @@
+{
+  "bomFormat": "CycloneDX",
+  "specVersion": "1.4",
+  "serialNumber": "urn:uuid:8f4de343-2be2-4548-bd21-babb36f28e4d",
+  "version": 1,
+  "metadata": {
+    "timestamp": "2025-08-25T10:27:44.417Z",
+    "tools": [
+      {
+        "vendor": "security-kit",
+        "name": "generate-sbom",
+        "version": "1.0.0"
+      }
+    ],
+    "component": {
+      "type": "library",
+      "bom-ref": "@david-osipov/security-kit@7.3.1",
+      "name": "@david-osipov/security-kit",
+      "version": "7.3.1",
+      "description": "An opinionated, zero-dependency security toolkit for modern browsers. Implements a verifiable Zero Trust security model in TypeScript, built on the native Web Crypto API.",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "purl": "pkg:npm/%40david-osipov/security-kit@7.3.1"
+    }
+  },
+  "components": [
+    {
+      "type": "library",
+      "bom-ref": "@types/dompurify@^3.2.0",
+      "name": "@types/dompurify",
+      "version": "^3.2.0",
+      "purl": "pkg:npm/%40types/dompurify@^3.2.0",
+      "scope": "optional"
+    },
+    {
+      "type": "library",
+      "bom-ref": "@types/eslint-plugin-security@^3.0.0",
+      "name": "@types/eslint-plugin-security",
+      "version": "^3.0.0",
+      "purl": "pkg:npm/%40types/eslint-plugin-security@^3.0.0",
+      "scope": "optional"
+    },
+    {
+      "type": "library",
+      "bom-ref": "@types/node@^24.3.0",
+      "name": "@types/node",
+      "version": "^24.3.0",
+      "purl": "pkg:npm/%40types/node@^24.3.0",
+      "scope": "optional"
+    },
+    {
+      "type": "library",
+      "bom-ref": "@typescript-eslint/eslint-plugin@^8.40.0",
+      "name": "@typescript-eslint/eslint-plugin",
+      "version": "^8.40.0",
+      "purl": "pkg:npm/%40typescript-eslint/eslint-plugin@^8.40.0",
+      "scope": "optional"
+    },
+    {
+      "type": "library",
+      "bom-ref": "@typescript-eslint/parser@^8.40.0",
+      "name": "@typescript-eslint/parser",
+      "version": "^8.40.0",
+      "purl": "pkg:npm/%40typescript-eslint/parser@^8.40.0",
+      "scope": "optional"
+    },
+    {
+      "type": "library",
+      "bom-ref": "@vitest/coverage-v8@^3.2.4",
+      "name": "@vitest/coverage-v8",
+      "version": "^3.2.4",
+      "purl": "pkg:npm/%40vitest/coverage-v8@^3.2.4",
+      "scope": "optional"
+    },
+    {
+      "type": "library",
+      "bom-ref": "@vitest/eslint-plugin@^1.3.4",
+      "name": "@vitest/eslint-plugin",
+      "version": "^1.3.4",
+      "purl": "pkg:npm/%40vitest/eslint-plugin@^1.3.4",
+      "scope": "optional"
+    },
+    {
+      "type": "library",
+      "bom-ref": "eslint@^9.34.0",
+      "name": "eslint",
+      "version": "^9.34.0",
+      "purl": "pkg:npm/eslint@^9.34.0",
+      "scope": "optional"
+    },
+    {
+      "type": "library",
+      "bom-ref": "eslint-import-resolver-typescript@^4.4.4",
+      "name": "eslint-import-resolver-typescript",
+      "version": "^4.4.4",
+      "purl": "pkg:npm/eslint-import-resolver-typescript@^4.4.4",
+      "scope": "optional"
+    },
+    {
+      "type": "library",
+      "bom-ref": "eslint-plugin-astro@^1.3.1",
+      "name": "eslint-plugin-astro",
+      "version": "^1.3.1",
+      "purl": "pkg:npm/eslint-plugin-astro@^1.3.1",
+      "scope": "optional"
+    },
+    {
+      "type": "library",
+      "bom-ref": "eslint-plugin-import@^2.32.0",
+      "name": "eslint-plugin-import",
+      "version": "^2.32.0",
+      "purl": "pkg:npm/eslint-plugin-import@^2.32.0",
+      "scope": "optional"
+    },
+    {
+      "type": "library",
+      "bom-ref": "eslint-plugin-jsx-a11y@^6.10.2",
+      "name": "eslint-plugin-jsx-a11y",
+      "version": "^6.10.2",
+      "purl": "pkg:npm/eslint-plugin-jsx-a11y@^6.10.2",
+      "scope": "optional"
+    },
+    {
+      "type": "library",
+      "bom-ref": "eslint-plugin-n@^17.21.3",
+      "name": "eslint-plugin-n",
+      "version": "^17.21.3",
+      "purl": "pkg:npm/eslint-plugin-n@^17.21.3",
+      "scope": "optional"
+    },
+    {
+      "type": "library",
+      "bom-ref": "eslint-plugin-no-unsanitized@^4.1.2",
+      "name": "eslint-plugin-no-unsanitized",
+      "version": "^4.1.2",
+      "purl": "pkg:npm/eslint-plugin-no-unsanitized@^4.1.2",
+      "scope": "optional"
+    },
+    {
+      "type": "library",
+      "bom-ref": "eslint-plugin-prettier@^5.5.4",
+      "name": "eslint-plugin-prettier",
+      "version": "^5.5.4",
+      "purl": "pkg:npm/eslint-plugin-prettier@^5.5.4",
+      "scope": "optional"
+    },
+    {
+      "type": "library",
+      "bom-ref": "eslint-plugin-regexp@^2.10.0",
+      "name": "eslint-plugin-regexp",
+      "version": "^2.10.0",
+      "purl": "pkg:npm/eslint-plugin-regexp@^2.10.0",
+      "scope": "optional"
+    },
+    {
+      "type": "library",
+      "bom-ref": "eslint-plugin-security@^3.0.1",
+      "name": "eslint-plugin-security",
+      "version": "^3.0.1",
+      "purl": "pkg:npm/eslint-plugin-security@^3.0.1",
+      "scope": "optional"
+    },
+    {
+      "type": "library",
+      "bom-ref": "eslint-plugin-security-node@^1.1.4",
+      "name": "eslint-plugin-security-node",
+      "version": "^1.1.4",
+      "purl": "pkg:npm/eslint-plugin-security-node@^1.1.4",
+      "scope": "optional"
+    },
+    {
+      "type": "library",
+      "bom-ref": "eslint-plugin-sonarjs@^3.0.4",
+      "name": "eslint-plugin-sonarjs",
+      "version": "^3.0.4",
+      "purl": "pkg:npm/eslint-plugin-sonarjs@^3.0.4",
+      "scope": "optional"
+    },
+    {
+      "type": "library",
+      "bom-ref": "isomorphic-dompurify@^2.26.0",
+      "name": "isomorphic-dompurify",
+      "version": "^2.26.0",
+      "purl": "pkg:npm/isomorphic-dompurify@^2.26.0",
+      "scope": "optional"
+    },
+    {
+      "type": "library",
+      "bom-ref": "jsdom@^26.1.0",
+      "name": "jsdom",
+      "version": "^26.1.0",
+      "purl": "pkg:npm/jsdom@^26.1.0",
+      "scope": "optional"
+    },
+    {
+      "type": "library",
+      "bom-ref": "prettier@^3.6.2",
+      "name": "prettier",
+      "version": "^3.6.2",
+      "purl": "pkg:npm/prettier@^3.6.2",
+      "scope": "optional"
+    },
+    {
+      "type": "library",
+      "bom-ref": "snyk@^1.1298.3",
+      "name": "snyk",
+      "version": "^1.1298.3",
+      "purl": "pkg:npm/snyk@^1.1298.3",
+      "scope": "optional"
+    },
+    {
+      "type": "library",
+      "bom-ref": "tsup@^8.5.0",
+      "name": "tsup",
+      "version": "^8.5.0",
+      "purl": "pkg:npm/tsup@^8.5.0",
+      "scope": "optional"
+    },
+    {
+      "type": "library",
+      "bom-ref": "typescript@^5.9.2",
+      "name": "typescript",
+      "version": "^5.9.2",
+      "purl": "pkg:npm/typescript@^5.9.2",
+      "scope": "optional"
+    },
+    {
+      "type": "library",
+      "bom-ref": "vitest@^3.2.4",
+      "name": "vitest",
+      "version": "^3.2.4",
+      "purl": "pkg:npm/vitest@^3.2.4",
+      "scope": "optional"
+    }
+  ]
+}

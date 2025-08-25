@@ -65,7 +65,38 @@ export function sanitizeErrorForLogs(err: unknown): {
       name: err.name,
       message: String(err.message || "").slice(0, 256),
       ...(code ? { code } : {}),
+      ...(getStackFingerprint(err.stack)
+        ? { stackHash: getStackFingerprint(err.stack) }
+        : {}),
     };
   }
   return { message: String(err).slice(0, 256) };
+}
+
+// Lightweight FNV-1a 32-bit hash for stable stack fingerprinting. We avoid
+// heavy crypto dependencies here to keep reporting cheap and synchronous.
+function fnv1a32(input: string): number {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < input.length; i++) {
+    h ^= input.charCodeAt(i);
+    h = (h >>> 0) * 0x01000193;
+    h = h >>> 0;
+  }
+  return h >>> 0;
+}
+
+export function getStackFingerprint(stack?: string | null): string | null {
+  if (!stack) return null;
+  try {
+    // Normalize stack by stripping memory addresses, absolute paths and line numbers
+    const normalized = stack
+      .split("\n")
+      .map((l) =>
+        l.replace(/\([^)]{0,256}:\d{1,6}:\d{1,6}\)/g, "(FILE:LINE)").trim(),
+      )
+      .join("\n");
+    return fnv1a32(normalized).toString(16).padStart(8, "0");
+  } catch {
+    return null;
+  }
 }
