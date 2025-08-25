@@ -36,7 +36,7 @@ jobs:
         run: |
           npm pack --dry-run
       - name: Sign SBOMs (keyless via OIDC)
-        uses: sigstore/cosign-installer@v2
+        uses: sigstore/cosign-installer@v3
       - name: Sign SBOM JSON (keyless)
         uses: sigstore/cosign-action@v2
         with:

@@ -32,7 +32,7 @@ jobs:
           ref: ${{ steps.vars.outputs.tag }}
 
       - name: Install Cosign
-        uses: sigstore/cosign-installer@v1
+        uses: sigstore/cosign-installer@v3
 
       - name: Ensure SBOM exists
         run: |
