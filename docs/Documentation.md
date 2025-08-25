@@ -138,6 +138,25 @@ Notes for callers:
 - Treat all thrown errors as recoverable: if randomness generation fails, prefer failing loudly and preventing use of degraded randomness sources.
 - Use `try { await getSecureRandomAsync({ signal }) } catch (err) { /* handle */ }` and do not fall back to `Math.random()`.
 
+## Timing-safe comparisons
+
+- Prefer `secureCompareAsync(a, b, { requireCrypto: true })` for security-critical string comparisons (tokens, signatures). When `requireCrypto` is set, the call will throw a `CryptoUnavailableError` if the platform SubtleCrypto is not available, enforcing the Constitution's "Fail Loudly" requirement instead of silently falling back to a weaker sync path.
+
+Usage example:
+
+```js
+try {
+  const equal = await secureCompareAsync(userToken, serverToken, {
+    requireCrypto: true,
+  });
+  if (equal) {
+    /* proceed */
+  }
+} catch (err) {
+  // handle missing crypto or other errors explicitly
+}
+```
+
 ---
 
 ## Testing & maintenance notes

@@ -1,4 +1,4 @@
-# The Official Security & Engineering Constitution (v6.5.9 - Living Document)
+# The Official Security & Engineering Constitution (v6.6.0 - Living Document)
 
 **Document Status:** Final, Mandatory
 **SPDX-License-Identifier:** MIT
@@ -1733,7 +1733,14 @@ This section provides prescriptive, code-level rules for all developers. Each ru
   import { secureCompare } from "@utils/security-kit";
 
   // This function's execution time depends only on string length, not content.
-  if (secureCompare(userInputToken, storedToken)) {
+  // Prefer the strict async variant in security-critical checks so the
+  // operation fails loudly when platform crypto is unavailable. Example:
+  // if (await secureCompareAsync(userInputToken, storedToken, { requireCrypto: true })) {
+  if (
+    await secureCompareAsync(userInputToken, storedToken, {
+      requireCrypto: true,
+    })
+  ) {
     // ... proceed
   }
   ```
@@ -1759,7 +1766,7 @@ This section provides prescriptive, code-level rules for all developers. Each ru
   }
   ```
 - **Tests:** Unit tests for constant-time helpers must verify they do not contain data-dependent branches. Performance benchmarks can help identify significant timing variations, but static analysis is the primary enforcement mechanism.
-- **CI Check:** A static analysis tool or custom ESLint rule should flag the use of `===` for comparing variables with names like `token`, `secret`, or `key` and recommend `secureCompare`.
+- **CI Check:** A static analysis tool or custom ESLint rule should flag the use of `===` for comparing variables with names like `token`, `secret`, or `key` and recommend `secureCompareAsync(..., { requireCrypto: true })` for security-critical comparisons.
 
 #### RULE: Software Bill of Materials (SBOM) Generation (MUST)
 
@@ -1813,10 +1820,15 @@ const iv = createAesGcmNonce(); // 12-byte IV for GCM
 // ... use with SubtleCrypto ...
 
     // Timing-safe-ish comparisons for short secrets
-    if (secureCompare(provided, expected)) {
-      // proceed
-    }
-    ```
+
+// For security-critical comparisons prefer the async strict compare which
+// throws if SubtleCrypto is unavailable. Example (recommended):
+// if (await secureCompareAsync(provided, expected, { requireCrypto: true })) {
+if (await secureCompareAsync(provided, expected, { requireCrypto: true })) {
+// proceed
+}
+
+````
 
 - **Forbidden:** Storing secrets in `localStorage`, `sessionStorage`, IndexedDB, URL params, or logging secrets (even in dev).
 - **CI Check:** Linters ban direct storage APIs for secret-like keys; tests verify read-once semantics and wiping behavior.
@@ -1840,7 +1852,7 @@ const iv = createAesGcmNonce(); // 12-byte IV for GCM
 
   // Also good for simple objects:
   const makeVector = (x, y) => ({ x, y });
-  ```
+````
 
 - **Bad (Inconsistent order):**
   ````javascript

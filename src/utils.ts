@@ -94,49 +94,70 @@ export function secureWipe(
     );
   }
   try {
-    // Node.js Buffer explicit handling for clarity
-    if (
-      typeof Buffer !== "undefined" &&
-      (Buffer as unknown as { isBuffer?: (x: unknown) => boolean }).isBuffer?.(
-        typedArray,
-      )
-    ) {
+    // Delegate specific wiping strategies to helpers to keep this function
+    // small and auditable for static analysis.
+    const tryNodeBufferWipe = () => {
+      const isNodeBuffer =
+        typeof Buffer !== "undefined" &&
+        (
+          Buffer as unknown as {
+            isBuffer?: (x: unknown) => boolean;
+          }
+        ).isBuffer?.(typedArray);
+      if (!isNodeBuffer) return false;
       (typedArray as unknown as Buffer).fill(0);
-      return;
-    }
-    // DataView: wipe underlying bytes of the exact view range
-    if (typeof DataView !== "undefined" && typedArray instanceof DataView) {
+      return true;
+    };
+
+    const tryDataViewWipe = () => {
+      if (typeof DataView === "undefined" || !(typedArray instanceof DataView))
+        return false;
       new Uint8Array(
         typedArray.buffer,
         typedArray.byteOffset,
         typedArray.byteLength,
       ).fill(0);
-      return;
-    }
-    if (
-      typeof BigUint64Array !== "undefined" &&
-      typedArray instanceof BigUint64Array
-    ) {
-      (typedArray as BigUint64Array).fill(0n);
-      return;
-    }
-    if (
-      typeof BigInt64Array !== "undefined" &&
-      typedArray instanceof BigInt64Array
-    ) {
-      (typedArray as BigInt64Array).fill(0n);
-      return;
-    }
-    if (typeof (typedArray as Uint8Array).fill === "function") {
-      (typedArray as Uint8Array).fill(0);
-      return;
-    }
-    const view = new Uint8Array(
-      typedArray.buffer,
-      typedArray.byteOffset,
-      typedArray.byteLength,
-    );
-    view.fill(0);
+      return true;
+    };
+
+    const tryBigIntWipe = () => {
+      if (
+        typeof BigUint64Array !== "undefined" &&
+        typedArray instanceof BigUint64Array
+      ) {
+        (typedArray as BigUint64Array).fill(0n);
+        return true;
+      }
+      if (
+        typeof BigInt64Array !== "undefined" &&
+        typedArray instanceof BigInt64Array
+      ) {
+        (typedArray as BigInt64Array).fill(0n);
+        return true;
+      }
+      return false;
+    };
+
+    const tryGenericWipe = () => {
+      // Only perform a generic wipe when the underlying buffer looks usable.
+      if (!typedArray || !typedArray.buffer) return false;
+      if (typeof (typedArray as Uint8Array).fill === "function") {
+        (typedArray as Uint8Array).fill(0);
+        return true;
+      }
+      const view = new Uint8Array(
+        typedArray.buffer,
+        typedArray.byteOffset,
+        typedArray.byteLength,
+      );
+      view.fill(0);
+      return true;
+    };
+
+    if (tryNodeBufferWipe()) return;
+    if (tryDataViewWipe()) return;
+    if (tryBigIntWipe()) return;
+    tryGenericWipe();
   } catch {
     /* best-effort */
   }
@@ -232,7 +253,8 @@ export async function secureCompareAsync(
     }
   } catch (error) {
     // If caller requested a strict crypto requirement, surface a Cryptounavailable error
-    if (options?.requireCrypto && error instanceof CryptoUnavailableError) throw error;
+    if (options?.requireCrypto && error instanceof CryptoUnavailableError)
+      throw error;
     secureDevLog(
       "error",
       "security-kit",
@@ -244,30 +266,31 @@ export async function secureCompareAsync(
 }
 
 // --- Safe Logging & Redaction ---
-export function _redact(data: unknown, depth = 0): unknown {
-  const MAX_DEPTH = 8;
-  const SECRET_KEY_REGEX =
-    /token|secret|password|pass|auth|key|bearer|session|credential|jwt|signature|cookie|private|cert/i;
-  const JWT_LIKE_REGEX = /^eyJ[\w-]{5,}\.[\w-]{5,}\.[\w-]{5,}$/;
-  const REDACTED_VALUE = "[REDACTED]";
-  const SAFE_KEY_REGEX = /^[\w.-]{1,64}$/;
-  const MAX_LOG_STRING = 8192;
+const MAX_REDACT_DEPTH = 8;
+const SECRET_KEY_REGEX =
+  /token|secret|password|pass|auth|key|bearer|session|credential|jwt|signature|cookie|private|cert/i;
+const JWT_LIKE_REGEX = /^eyJ[\w-]{5,}\.[\w-]{5,}\.[\w-]{5,}$/;
+const REDACTED_VALUE = "[REDACTED]";
+const SAFE_KEY_REGEX = /^[\w.-]{1,64}$/;
+const MAX_LOG_STRING = 8192;
 
-  if (depth >= MAX_DEPTH) return "[REDACTED_MAX_DEPTH]";
-  if (data === null || typeof data !== "object") {
-    if (typeof data === "string") {
-      if (JWT_LIKE_REGEX.test(data)) return REDACTED_VALUE;
-      if (data.length > MAX_LOG_STRING)
-        return data.slice(0, MAX_LOG_STRING) +
-          `...[TRUNCATED ${data.length - MAX_LOG_STRING} chars]`;
-      return data;
-    }
-    return data;
-  }
-  if (Array.isArray(data)) return data.map((item) => _redact(item, depth + 1));
+function _truncateIfLong(s: string): string {
+  return s.length > MAX_LOG_STRING
+    ? s.slice(0, MAX_LOG_STRING) +
+        `...[TRUNCATED ${s.length - MAX_LOG_STRING} chars]`
+    : s;
+}
 
+function _redactPrimitive(value: unknown): unknown {
+  if (typeof value !== "string") return value;
+  if (JWT_LIKE_REGEX.test(value)) return REDACTED_VALUE;
+  if (value.length > MAX_LOG_STRING) return _truncateIfLong(value);
+  return value;
+}
+
+function _redactObject(obj: Record<string, unknown>, depth: number): unknown {
   const out: Record<string, unknown> = Object.create(null);
-  for (const [key, rawVal] of Object.entries(data as Record<string, unknown>)) {
+  for (const [key, rawVal] of Object.entries(obj)) {
     if (key === "__proto__" || key === "prototype" || key === "constructor")
       continue;
     if (SECRET_KEY_REGEX.test(key)) {
@@ -275,14 +298,17 @@ export function _redact(data: unknown, depth = 0): unknown {
       continue;
     }
     if (!SAFE_KEY_REGEX.test(key)) continue;
-    if (typeof rawVal === "string" && rawVal.length > MAX_LOG_STRING) {
-      out[key] = (rawVal as string).slice(0, MAX_LOG_STRING) +
-        `...[TRUNCATED ${(rawVal as string).length - MAX_LOG_STRING} chars]`;
-    } else {
-      out[key] = _redact(rawVal, depth + 1);
-    }
+    if (typeof rawVal === "string") out[key] = _truncateIfLong(rawVal);
+    else out[key] = _redact(rawVal, depth + 1);
   }
   return out;
+}
+
+export function _redact(data: unknown, depth = 0): unknown {
+  if (depth >= MAX_REDACT_DEPTH) return "[REDACTED_MAX_DEPTH]";
+  if (data === null || typeof data !== "object") return _redactPrimitive(data);
+  if (Array.isArray(data)) return data.map((item) => _redact(item, depth + 1));
+  return _redactObject(data as Record<string, unknown>, depth);
 }
 
 type LogLevel = "debug" | "info" | "warn" | "error";

@@ -81,7 +81,7 @@ initializeApp();
   - High-performance, unbiased secure string generation (inspired by `nanoid`).
   - RFC 4122 v4 UUID generation.
   - Secure, non-extractable `CryptoKey` generation for AES-GCM.
-  - Timing-attack resistant `secureCompare` and `secureCompareAsync` functions.
+  - Timing-attack resistant `secureCompare` and `secureCompareAsync` functions (prefer `secureCompareAsync(..., { requireCrypto: true })` for security-critical comparisons).
 - **Secure Development Helpers:**
   - `secureDevLog`: A development-only logger with automatic redaction of sensitive data.
   - `secureWipe`: Best-effort memory wiping for sensitive buffers.

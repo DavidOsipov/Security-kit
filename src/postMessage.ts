@@ -136,7 +136,16 @@ export function sendSecurePostMessage(options: SecurePostMessageOptions): void {
         "targetOrigin must use https: (localhost allowed for dev).",
       );
     }
-  } catch (e) {
+  } catch (err) {
+    // Log sanitized parse error and fail loudly per "Fail Loudly, Fail Safely" policy.
+    try {
+      secureDevLog("warn", "postMessage", "Invalid targetOrigin provided", {
+        targetOrigin,
+        error: sanitizeErrorForLogs(err),
+      });
+    } catch {
+      // best-effort logging; do not leak raw error details
+    }
     throw new InvalidParameterError(
       "targetOrigin must be an absolute origin, e.g. 'https://example.com'.",
     );
@@ -264,12 +273,14 @@ export function createSecurePostMessageListener(
         return;
       }
     } catch (err) {
+      // Include sanitized error details for diagnostics while avoiding leaking sensitive info.
       secureDevLog(
         "warn",
         "postMessage",
         "Dropped message due to invalid origin format",
         {
           origin: event.origin,
+          error: sanitizeErrorForLogs(err),
         },
       );
       return;
@@ -413,12 +424,33 @@ async function ensureFingerprintSalt(): Promise<Uint8Array> {
     crypto.getRandomValues(salt);
     _payloadFingerprintSalt = salt;
     return salt;
-  } catch {
-    // Fallback: non-cryptographic seed, still better than raw payload
-    const s = String(Date.now()) + Math.random();
+  } catch (err) {
+    // No secure crypto available. Fail loudly but produce a deterministic, time-based
+    // salt to avoid throwing in environments where fingerprinting must continue.
+    // Per the security constitution, we avoid using Math.random() and log the event.
+    try {
+      secureDevLog(
+        "warn",
+        "postMessage",
+        "Falling back to non-crypto fingerprint salt",
+        {
+          error: sanitizeErrorForLogs(err),
+        },
+      );
+    } catch {
+      // best-effort logging
+    }
+    const timeEntropy =
+      String(Date.now()) +
+      String(
+        typeof performance !== "undefined" &&
+          typeof performance.now === "function"
+          ? performance.now()
+          : 0,
+      );
     const buf = new Uint8Array(FINGERPRINT_SALT_LENGTH);
     for (let i = 0; i < buf.length; i++) {
-      buf[i] = s.charCodeAt(i % s.length) & 0xff;
+      buf[i] = timeEntropy.charCodeAt(i % timeEntropy.length) & 0xff;
     }
     _payloadFingerprintSalt = buf;
     return buf;
@@ -447,9 +479,10 @@ async function getPayloadFingerprint(data: unknown): Promise<string> {
     }
     // Fallback: salted non-crypto rolling hash
     if (!saltBuf) return "FINGERPRINT_ERR";
+    const sb = saltBuf as Uint8Array;
     let acc = 2166136261 >>> 0; // FNV-1a init
-    for (let i = 0; i < saltBuf.length; i++) {
-      acc = ((acc ^ saltBuf[i]) * 16777619) >>> 0;
+    for (let i = 0; i < sb.length; i++) {
+      acc = ((acc ^ sb[i]) * 16777619) >>> 0;
     }
     for (let i = 0; i < s.length; i++) {
       acc = ((acc ^ s.charCodeAt(i)) * 16777619) >>> 0;

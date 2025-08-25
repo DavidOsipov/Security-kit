@@ -23,6 +23,7 @@ function isSafeKey(key: string): boolean {
 
 // Type alias for expected parameter typing to avoid repeating unions
 type ParamType = "string" | "number" | "boolean";
+type UnsafeKeyAction = "throw" | "warn" | "skip";
 
 function normalizeOrigin(o: string): string {
   try {
@@ -36,7 +37,8 @@ function normalizeOrigin(o: string): string {
       "https:": "443",
     };
     const includePort = port && port !== defaultPorts[proto];
-    return `${proto}//${hostname}${includePort ? `:${port}` : ""}`;
+    const portPart = includePort ? ":" + port : "";
+    return `${proto}//${hostname}${portPart}`;
   } catch {
     return o.toLowerCase();
   }
@@ -55,6 +57,115 @@ function isOriginAllowed(origin: string, allowlist?: string[]): boolean {
 // --- Secure URL Construction ---
 // SAFE_SCHEMES is now managed by `src/url-policy.ts` for controlled configuration.
 import { getSafeSchemes } from "./url-policy";
+
+function getEffectiveSchemes(allowedSchemes?: string[]): Set<string> {
+  const SAFE_SCHEMES = new Set(getSafeSchemes());
+  if (!Array.isArray(allowedSchemes) || allowedSchemes.length === 0)
+    return SAFE_SCHEMES;
+  const userSet = new Set(allowedSchemes.map((s) => String(s)));
+  return new Set([...userSet].filter((s) => SAFE_SCHEMES.has(s)));
+}
+
+function enforceSchemeAndLength(
+  url: URL,
+  allowedSchemes?: string[],
+  maxLengthOpt?: number,
+): void {
+  const effectiveSchemes = getEffectiveSchemes(allowedSchemes);
+  if (!effectiveSchemes.has(url.protocol))
+    throw new InvalidParameterError(
+      `Resulting URL scheme '${url.protocol}' is not allowed.`,
+    );
+  if (typeof maxLengthOpt === "number" && url.href.length > maxLengthOpt)
+    throw new InvalidParameterError(
+      `Resulting URL exceeds maxLength ${maxLengthOpt}.`,
+    );
+}
+
+// Shared set of keys that are never allowed as query or update keys.
+const GLOBAL_DANGEROUS_KEYS = new Set([
+  ...POSTMESSAGE_FORBIDDEN_KEYS,
+  "__proto__",
+  "constructor",
+  "prototype",
+]);
+
+function _checkForDangerousKeys(
+  obj: Record<string, unknown>,
+  onUnsafeKey: UnsafeKeyAction,
+  componentName: string,
+  baseRef: string,
+): void {
+  const protoIsNull = Object.getPrototypeOf(obj) === null;
+  if (Object.prototype.hasOwnProperty.call(obj, "__proto__") || protoIsNull) {
+    const msg = `Unsafe key '__proto__' present on ${componentName} object.`;
+    if (onUnsafeKey === "throw") throw new InvalidParameterError(msg);
+    if (onUnsafeKey === "warn")
+      secureDevLog("warn", componentName, msg, { base: baseRef });
+  }
+
+  const ownKeyNames = new Set<string>([
+    ...Object.keys(obj),
+    ...Object.getOwnPropertyNames(obj),
+    ...Reflect.ownKeys(obj).map(String),
+  ]);
+
+  for (const dangerous of GLOBAL_DANGEROUS_KEYS) {
+    if (dangerous === "__proto__") continue;
+    if (ownKeyNames.has(dangerous)) {
+      const msg = `Unsafe key '${dangerous}' present on ${componentName} object.`;
+      if (onUnsafeKey === "throw") throw new InvalidParameterError(msg);
+      if (onUnsafeKey === "warn")
+        secureDevLog("warn", componentName, msg, { base: baseRef, dangerous });
+    }
+  }
+}
+
+function processQueryParams(
+  url: URL,
+  params: Record<string, unknown>,
+  onUnsafeKey: UnsafeKeyAction,
+  base: string,
+): void {
+  _checkForDangerousKeys(params, onUnsafeKey, "createSecureURL", base);
+  for (const [key, value] of Object.entries(params)) {
+    const unsafe = POSTMESSAGE_FORBIDDEN_KEYS.has(key) || !isSafeKey(key);
+    if (unsafe) {
+      const msg = `Skipping unsafe query key '${key}' when building URL.`;
+      if (onUnsafeKey === "throw") throw new InvalidParameterError(msg);
+      if (onUnsafeKey === "warn")
+        secureDevLog("warn", "createSecureURL", msg, { base, key });
+      continue;
+    }
+    const stringValue = value == null ? "" : String(value);
+    url.searchParams.append(key, stringValue);
+  }
+}
+
+function processUpdateParams(
+  url: URL,
+  updates: Record<string, unknown>,
+  removeUndefined: boolean,
+  onUnsafeKey: UnsafeKeyAction,
+  baseUrl: string,
+): void {
+  _checkForDangerousKeys(updates, onUnsafeKey, "updateURLParams", baseUrl);
+  for (const [key, value] of Object.entries(updates)) {
+    const unsafe = POSTMESSAGE_FORBIDDEN_KEYS.has(key) || !isSafeKey(key);
+    if (unsafe) {
+      const msg = `Skipping unsafe query key '${key}' when updating URL.`;
+      if (onUnsafeKey === "throw") throw new InvalidParameterError(msg);
+      if (onUnsafeKey === "warn")
+        secureDevLog("warn", "updateURLParams", msg, { baseUrl, key });
+      continue;
+    }
+    if (value === undefined && removeUndefined) {
+      url.searchParams.delete(key);
+    } else {
+      url.searchParams.set(key, value === null ? "" : String(value));
+    }
+  }
+}
 
 function appendPathSegments(url: URL, pathSegments: string[]): void {
   for (const segment of pathSegments) {
@@ -115,76 +226,25 @@ export function createSecureURL(
 
   appendPathSegments(url, pathSegments);
 
-  const { allowedSchemes, maxLength: maxLengthOpt, onUnsafeKey = "throw" } = options;
-  // Defensive check: detect forbidden or unsafe keys present as own property names
-  // Special-case '__proto__' because object literals may set a non-enumerable prototype entry
-  const protoIsNull = Object.getPrototypeOf(queryParams) === null;
-  if (
-    Object.prototype.hasOwnProperty.call(queryParams, "__proto__") ||
-    protoIsNull
-  ) {
-    const msg = `Unsafe query key '__proto__' present on params object.`;
-    if (onUnsafeKey === "throw") throw new InvalidParameterError(msg);
-    if (onUnsafeKey === "warn")
-      secureDevLog("warn", "createSecureURL", msg, { base });
-  }
-  const DANGEROUS_KEYS = new Set([
-    ...POSTMESSAGE_FORBIDDEN_KEYS,
-    "__proto__",
-    "constructor",
-    "prototype",
-  ]);
-  const ownKeyNames = new Set<string>([
-    ...Object.keys(queryParams),
-    ...Object.getOwnPropertyNames(queryParams),
-    ...Reflect.ownKeys(queryParams).map(String),
-  ]);
-  for (const dangerous of DANGEROUS_KEYS) {
-    if (dangerous === "__proto__") continue; // already handled above
-    if (ownKeyNames.has(dangerous)) {
-      const msg = `Unsafe query key '${dangerous}' present on params object.`;
-      if (onUnsafeKey === "throw") throw new InvalidParameterError(msg);
-      if (onUnsafeKey === "warn")
-        secureDevLog("warn", "createSecureURL", msg, { base, dangerous });
-    }
-  }
+  const {
+    allowedSchemes,
+    maxLength: maxLengthOpt,
+    onUnsafeKey = "throw",
+  } = options;
+  // Run a focused dangerous-key check that centralizes prototype-pollution and
+  // forbidden-key detection in one place. This keeps the function smaller and
+  // easier for auditors to reason about.
+  _checkForDangerousKeys(
+    queryParams,
+    onUnsafeKey as UnsafeKeyAction,
+    "createSecureURL",
+    base,
+  );
 
-  for (const [key, value] of Object.entries(queryParams)) {
-    const unsafe = POSTMESSAGE_FORBIDDEN_KEYS.has(key) || !isSafeKey(key);
-    if (unsafe) {
-      const msg = `Skipping unsafe query key '${key}' when building URL.`;
-      if (onUnsafeKey === "throw") throw new InvalidParameterError(msg);
-      if (onUnsafeKey === "warn")
-        secureDevLog("warn", "createSecureURL", msg, { base, key });
-      // skip when onUnsafeKey is "skip" or after warning
-      continue;
-    }
-    const stringValue = value == null ? "" : String(value);
-    // Use the robust URLSearchParams API for query handling
-    url.searchParams.append(key, stringValue);
-  }
+  processQueryParams(url, queryParams, onUnsafeKey as UnsafeKeyAction, base);
 
-  // Enforce optional builders-level constraints
-  // Scheme checks: prefer explicit allowedSchemes; if not provided, requireHTTPSOpt
-  // Scheme checks: only allow schemes in the currently configured safe schemes.
-  const SAFE_SCHEMES = new Set(getSafeSchemes());
-  let effectiveSchemes = SAFE_SCHEMES;
-  if (Array.isArray(allowedSchemes) && allowedSchemes.length > 0) {
-    const userSet = new Set(allowedSchemes.map((s) => String(s)));
-    // Intersect to prevent callers enabling unsafe schemes
-    effectiveSchemes = new Set([...userSet].filter((s) => SAFE_SCHEMES.has(s)));
-  }
-  if (!effectiveSchemes.has(url.protocol)) {
-    throw new InvalidParameterError(
-      `Resulting URL scheme '${url.protocol}' is not allowed.`,
-    );
-  }
-  if (typeof maxLengthOpt === "number") {
-    if (url.href.length > maxLengthOpt)
-      throw new InvalidParameterError(
-        `Resulting URL exceeds maxLength ${maxLengthOpt}.`,
-      );
-  }
+  // Enforce scheme allowlist and optional max-length in a small helper.
+  enforceSchemeAndLength(url, allowedSchemes, maxLengthOpt);
 
   if (fragment !== undefined) {
     if (typeof fragment !== "string")
@@ -227,67 +287,23 @@ export function updateURLParams(
     maxLength: maxLengthOpt,
   } = options;
 
-  // Defensive check for dangerous keys present on update object (own or inherited)
-  const DANGEROUS_KEYS = new Set([
-    ...POSTMESSAGE_FORBIDDEN_KEYS,
-    "__proto__",
-    "constructor",
-    "prototype",
-  ]);
-  // Special-case '__proto__' detection: only when own property or prototype is null
-  const protoUpIsNull = Object.getPrototypeOf(updates) === null;
-  if (
-    Object.prototype.hasOwnProperty.call(updates, "__proto__") ||
-    protoUpIsNull
-  ) {
-    const msg = `Unsafe update key '__proto__' present on updates object.`;
-    if (onUnsafeKey === "throw") throw new InvalidParameterError(msg);
-    if (onUnsafeKey === "warn")
-      secureDevLog("warn", "updateURLParams", msg, { baseUrl });
-  }
-  const ownUpdateKeys = new Set<string>([
-    ...Object.keys(updates),
-    ...Object.getOwnPropertyNames(updates),
-    ...Reflect.ownKeys(updates).map(String),
-  ]);
-  for (const dangerous of DANGEROUS_KEYS) {
-    if (ownUpdateKeys.has(dangerous)) {
-      const msg = `Unsafe update key '${dangerous}' present on updates object.`;
-      if (onUnsafeKey === "throw") throw new InvalidParameterError(msg);
-      if (onUnsafeKey === "warn")
-        secureDevLog("warn", "updateURLParams", msg, { baseUrl, dangerous });
-    }
-  }
+  // Centralized dangerous-key check for update objects.
+  _checkForDangerousKeys(
+    updates,
+    onUnsafeKey as UnsafeKeyAction,
+    "updateURLParams",
+    baseUrl,
+  );
 
-  for (const [key, value] of Object.entries(updates)) {
-    const unsafe = POSTMESSAGE_FORBIDDEN_KEYS.has(key) || !isSafeKey(key);
-    if (unsafe) {
-      const msg = `Skipping unsafe query key '${key}' when updating URL.`;
-      if (onUnsafeKey === "throw") throw new InvalidParameterError(msg);
-      if (onUnsafeKey === "warn")
-        secureDevLog("warn", "updateURLParams", msg, { baseUrl, key });
-      continue;
-    }
-    if (value === undefined && removeUndefined) {
-      url.searchParams.delete(key);
-    } else {
-      url.searchParams.set(key, value === null ? "" : String(value));
-    }
-  }
+  processUpdateParams(
+    url,
+    updates,
+    removeUndefined,
+    onUnsafeKey as UnsafeKeyAction,
+    baseUrl,
+  );
 
-  if (requireHTTPSOpt) {
-    // Apply the same SAFE_SCHEMES enforcement as createSecureURL
-    const SAFE_SCHEMES = new Set(getSafeSchemes());
-    let effectiveSchemes = SAFE_SCHEMES;
-    if (Array.isArray(allowedSchemes) && allowedSchemes.length > 0) {
-      const userSet = new Set(allowedSchemes.map((s) => String(s)));
-      effectiveSchemes = new Set([...userSet].filter((s) => SAFE_SCHEMES.has(s)));
-    }
-    if (!effectiveSchemes.has(url.protocol))
-      throw new InvalidParameterError(
-        `Resulting URL scheme '${url.protocol}' is not allowed.`,
-      );
-  }
+  if (requireHTTPSOpt) enforceSchemeAndLength(url, allowedSchemes);
   if (typeof maxLengthOpt === "number") {
     if (url.href.length > maxLengthOpt)
       throw new InvalidParameterError(

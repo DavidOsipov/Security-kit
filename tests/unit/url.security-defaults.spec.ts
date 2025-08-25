@@ -15,7 +15,9 @@ describe("url security defaults and options", () => {
   });
 
   it("empty allowedOrigins array denies all origins", () => {
-    const res = validateURL("https://example.test/path", { allowedOrigins: [] });
+    const res = validateURL("https://example.test/path", {
+      allowedOrigins: [],
+    });
     expect(res.ok).toBe(false);
   });
 
@@ -26,6 +28,8 @@ describe("url security defaults and options", () => {
   });
 
   it("createSecureURL rejects disallowed schemes by default", () => {
-    expect(() => createSecureURL("javascript:alert(1)" as unknown as string)).toThrow();
+    expect(() =>
+      createSecureURL("javascript:alert(1)" as unknown as string),
+    ).toThrow();
   });
 });

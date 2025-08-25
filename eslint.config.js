@@ -2,6 +2,7 @@
 import tseslintPlugin from "@typescript-eslint/eslint-plugin";
 import tsParser from "@typescript-eslint/parser";
 import securityPlugin from "eslint-plugin-security";
+/* eslint-disable-next-line import/no-named-as-default-member -- plugin is CommonJS; access `configs` via the default export */
 const securityConfigs = (securityPlugin && securityPlugin.configs) || {};
 import noUnsanitized from "eslint-plugin-no-unsanitized";
 import importPlugin from "eslint-plugin-import";
@@ -11,6 +12,7 @@ import prettierPlugin from "eslint-plugin-prettier";
 import vitestPlugin from "@vitest/eslint-plugin";
 import { configs as sonarConfigs } from "eslint-plugin-sonarjs";
 import * as regexpPlugin from "eslint-plugin-regexp";
+import localPlugin from "./tools/eslint-plugin-local/index.js";
 
 export default [
   // Global ignores
@@ -59,8 +61,17 @@ export default [
   // NOTE: Node-specific rules must not apply to browser-targeted `src/**`.
   // We'll enable a focused set of `n/*` rules only for tooling/config files.
   {
-    files: ["scripts/**", "*.config.*", "eslint.config.js"],
-    plugins: { n: nodePlugin },
+    files: ["scripts/**", "scripts/**/*.ts", "*.config.*", "eslint.config.js"],
+    languageOptions: {
+      parser: tsParser,
+      parserOptions: {
+        ecmaVersion: "latest",
+        sourceType: "module",
+        tsconfigRootDir: process.cwd(),
+        project: false,
+      },
+    },
+    plugins: { n: nodePlugin, "@typescript-eslint": tseslintPlugin },
     rules: {
       "n/no-unsupported-features/node-builtins": "warn",
       "n/no-missing-import": "warn",
@@ -100,6 +111,8 @@ export default [
       "no-unsanitized": noUnsanitized,
       "security-node": securityNode,
       prettier: prettierPlugin,
+      // local plugin mapping (resolves to tools/eslint-plugin-local)
+      local: localPlugin,
     },
     rules: {
       // Allow slightly higher cognitive complexity for complex crypto/url logic
@@ -210,6 +223,14 @@ export default [
       "no-restricted-properties": "off",
       "no-unsanitized/property": "warn",
       "security/detect-unsafe-regex": "warn",
+    },
+  },
+  // Local rule: warn on secret-like identifier equality comparisons
+  {
+    files: ["src/**"],
+    rules: {
+      // Use a relative require to load the local rule implementation.
+      "local/no-secret-eq": "warn",
     },
   },
 ];

@@ -10,7 +10,8 @@
  * @module
  */
 
-import DOMPurify, { Config as DOMPurifyConfig } from "dompurify";
+import * as DOMPurify from "dompurify";
+import type { Config as DOMPurifyConfig } from "dompurify";
 import { InvalidConfigurationError, InvalidParameterError } from "./errors";
 
 // --- Pre-defined, Hardened Policies (as per Security Constitution Appendix C) ---
@@ -47,11 +48,11 @@ export type SanitizerPolicies = Record<string, DOMPurifyConfig>;
  */
 export class Sanitizer {
   readonly #dompurify:
-    | ReturnType<typeof DOMPurify>
+    | ReturnType<typeof DOMPurify.default>
     | { sanitize: (s: string, cfg?: DOMPurifyConfig) => string | TrustedHTML };
   readonly #policies: SanitizerPolicies;
-  // TrustedTypePolicy shapes vary by environment; keep stored value as `any` to avoid tight coupling with lib types
-  #trustedTypePolicies = new Map<string, any>();
+  // TrustedTypePolicy shapes vary by environment; store as `TrustedTypePolicy | object` to avoid `any`.
+  #trustedTypePolicies = new Map<string, TrustedTypePolicy | object>();
 
   /**
    * @param dompurifyInstance An instance of the DOMPurify library.
@@ -105,23 +106,26 @@ export class Sanitizer {
       );
     }
 
-    const ttPolicy: any = window.trustedTypes.createPolicy(policyName, {
-      createHTML: (input: string) => {
-        // Ensure RETURN_TRUSTED_TYPE is true for the policy to work correctly.
-        return this.#dompurify.sanitize(input, {
-          ...config,
-          RETURN_TRUSTED_TYPE: true,
-        }) as unknown as string;
+    const ttPolicy: TrustedTypePolicy = window.trustedTypes.createPolicy(
+      policyName,
+      {
+        createHTML: (input: string) => {
+          // Ensure RETURN_TRUSTED_TYPE is true for the policy to work correctly.
+          return this.#dompurify.sanitize(input, {
+            ...config,
+            RETURN_TRUSTED_TYPE: true,
+          }) as unknown as string;
+        },
+        createScript: () => {
+          throw new TypeError("Dynamic scripts are not allowed");
+        },
+        createScriptURL: () => {
+          throw new TypeError("Dynamic script URLs are not allowed");
+        },
       },
-      createScript: () => {
-        throw new TypeError("Dynamic scripts are not allowed");
-      },
-      createScriptURL: () => {
-        throw new TypeError("Dynamic script URLs are not allowed");
-      },
-    });
+    );
 
-    this.#trustedTypePolicies.set(policyName, ttPolicy);
+    this.#trustedTypePolicies.set(policyName, ttPolicy as TrustedTypePolicy);
     return ttPolicy;
   }
 
