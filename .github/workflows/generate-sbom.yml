@@ -61,7 +61,7 @@ jobs:
 
       - name: Create Pull Request with SBOM (optional)
         if: github.event_name == 'push'
-        uses: peter-evans/create-pull-request@v4
+        uses: peter-evans/create-pull-request@v7
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           commit-message: 'chore(sbom): update sbom.json'
