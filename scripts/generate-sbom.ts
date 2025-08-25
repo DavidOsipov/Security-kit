@@ -1235,6 +1235,20 @@ export function convertToCycloneDxXml(sbom: SBOM): string {
   return lines.join("\n");
 }
 
+// Expose a small set of internal helpers for unit tests. This script is a
+// developer tool; exporting these helpers makes it easier to write focused
+// tests without changing runtime behavior.
+export const __test_helpers = {
+  generateUUID,
+  collectFilesRecursively,
+  safeVersionLookup,
+  extractRegistryMeta,
+  resolveAndValidateUserPath,
+  assertPathAllowed,
+  safeReadJSON,
+  atomicWriteFileSync,
+};
+
 /**
  * Write SBOM outputs based on requested formats. Supports CycloneDX JSON (primary),
  * SPDX JSON, and CycloneDX XML. Uses atomic writes for safety.

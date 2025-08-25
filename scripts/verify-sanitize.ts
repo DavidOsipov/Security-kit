@@ -343,6 +343,30 @@ function checkErrorCodes(resultMap: Map<string, ESLint.LintResult>) {
   return errors;
 }
 
+// Expose a small set of helpers for unit tests. This file is a developer
+// utility; exporting these functions is safe for test-time use only.
+export const __test_helpers = {
+  isDevIdentifierNode,
+  isEnvironmentIsProductionNode,
+  isIdentifier,
+  isMemberAccess,
+  nodeContainsDevGuard,
+  iterateChildNodes,
+  processFallback,
+  isNamedDevHelperNode,
+  hasIfGuardInFunctionNode,
+  isAncestorAllowedNode,
+  handleCallExpressionNode,
+  walkNode,
+  getLintResults,
+  buildResultMap,
+  findConsoleViolations,
+  isConsoleAllowed,
+  checkPrototypeProtections,
+  checkCryptoGuards,
+  checkErrorCodes,
+};
+
 async function run() {
   // Use a typed options object; ESLint reads .eslintrc by default so we omit useEslintrc
   const eslintOptions: ConstructorParameters<typeof ESLint>[0] = {

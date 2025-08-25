@@ -11,10 +11,12 @@ export const environment = (() => {
   let explicitEnv: "development" | "production" | null = null;
 
   function isPrivate172(hostname: string) {
-    const parts = hostname.split(".");
+    if (typeof hostname !== "string") return false;
+    const parts = hostname.trim().split(".");
     if (parts.length !== 4) return false;
     const first = Number(parts[0]);
     const second = Number(parts[1]);
+    if (!Number.isFinite(first) || !Number.isFinite(second)) return false;
     return first === 172 && second >= 16 && second <= 31;
   }
 
@@ -40,7 +42,7 @@ export const environment = (() => {
       try {
         const location = (globalThis as { location?: Location }).location;
         if (location) {
-          const hostname = location.hostname || "";
+          const hostname = (location.hostname || "").trim().toLowerCase();
           const devHostnames = ["localhost", "127.0.0.1", "[::1]", ""];
           const devSuffixes = [".local", ".test"];
           const devPrefixes = ["192.168.", "10."];

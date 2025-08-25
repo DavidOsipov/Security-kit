@@ -24,6 +24,14 @@ export const CryptoState = Object.freeze({
 } as const);
 export type CryptoState = (typeof CryptoState)[keyof typeof CryptoState];
 
+function isCryptoLike(v: unknown): v is Crypto {
+  return (
+    !!v &&
+    typeof v === "object" &&
+    typeof (v as { getRandomValues?: unknown }).getRandomValues === "function"
+  );
+}
+
 let _cachedCrypto: Crypto | null = null;
 let _cryptoPromise: Promise<Crypto> | null = null;
 let _cryptoState: CryptoState = CryptoState.Unconfigured;
@@ -94,11 +102,7 @@ export function _setCrypto(
     _cryptoState = CryptoState.Unconfigured;
     return;
   }
-  if (
-    typeof cryptoLike !== "object" ||
-    typeof (cryptoLike as { getRandomValues?: unknown }).getRandomValues !==
-      "function"
-  ) {
+  if (!isCryptoLike(cryptoLike)) {
     throw new InvalidParameterError(
       "setCrypto: provided object must implement crypto.getRandomValues(Uint8Array).",
     );
@@ -131,10 +135,10 @@ export async function ensureCrypto(): Promise<Crypto> {
       throw new CryptoUnavailableError(
         "Security kit is sealed, but no crypto provider was configured.",
       );
-    return _cachedCrypto;
+    return _cachedCrypto!;
   }
   if (_cryptoState === CryptoState.Configured && _cachedCrypto) {
-    return _cachedCrypto;
+    return _cachedCrypto!;
   }
   if (_cryptoPromise) {
     return _cryptoPromise;
@@ -148,7 +152,7 @@ export async function ensureCrypto(): Promise<Crypto> {
       if (myGeneration !== _cryptoInitGeneration) {
         if (_cachedCrypto) {
           _cryptoState = CryptoState.Configured;
-          return _cachedCrypto;
+          return _cachedCrypto!;
         }
         _cryptoState = CryptoState.Unconfigured;
         throw new CryptoUnavailableError(
@@ -157,10 +161,10 @@ export async function ensureCrypto(): Promise<Crypto> {
       }
       if (_cachedCrypto) {
         _cryptoState = CryptoState.Configured;
-        return _cachedCrypto;
+        return _cachedCrypto!;
       }
       const globalCrypto = (globalThis as { crypto?: Crypto }).crypto;
-      if (globalCrypto && typeof globalCrypto.getRandomValues === "function") {
+      if (isCryptoLike(globalCrypto)) {
         if (myGeneration === _cryptoInitGeneration) {
           _cachedCrypto = globalCrypto;
           _cryptoState = CryptoState.Configured;
@@ -225,7 +229,7 @@ export function ensureCryptoSync(): Crypto {
     );
   }
   const globalCrypto = (globalThis as { crypto?: Crypto }).crypto;
-  if (globalCrypto && typeof globalCrypto.getRandomValues === "function") {
+  if (isCryptoLike(globalCrypto)) {
     _cachedCrypto = globalCrypto;
     _cryptoState = CryptoState.Configured;
     return _cachedCrypto;
@@ -267,6 +271,14 @@ export function getInternalTestUtils():
       _getCryptoGenerationForTest: () => _cryptoInitGeneration,
       _getCryptoStateForTest: () => _cryptoState,
     };
+  }
+  return undefined;
+}
+
+// Small test helper to inspect cached crypto in unit tests when allowed.
+export function __test_getCachedCrypto(): Crypto | null | undefined {
+  if (typeof __TEST__ !== "undefined" && __TEST__) {
+    return _cachedCrypto;
   }
   return undefined;
 }

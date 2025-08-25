@@ -124,7 +124,28 @@ function toNullProto(
 }
 
 function deepFreeze<T>(obj: T): T {
-  if (obj && typeof obj === "object") {
+  // Use a temporary WeakSet to track objects currently being processed to
+  // avoid infinite recursion on cyclic structures.
+  if (!(obj && typeof obj === "object")) return obj;
+
+  // _processing guard is stored on the function object to avoid creating a
+  // new WeakSet on every call when nested recursion occurs.
+  const holder = deepFreeze as unknown as { _processing?: WeakSet<object> };
+  let created = false;
+  if (!holder._processing) {
+    holder._processing = new WeakSet<object>();
+    created = true;
+  }
+  const processing = holder._processing!;
+
+  // If we're already processing this object, bail out to avoid cycles.
+  if (processing.has(obj as object)) {
+    if (created) delete holder._processing;
+    return obj;
+  }
+
+  processing.add(obj as object);
+  try {
     try {
       Object.freeze(obj as object);
     } catch {
@@ -135,6 +156,9 @@ function deepFreeze<T>(obj: T): T {
     } else {
       for (const v of Object.values(obj as object)) deepFreeze(v as T);
     }
+  } finally {
+    processing.delete(obj as object);
+    if (created) delete holder._processing;
   }
   return obj;
 }
@@ -364,7 +388,32 @@ export function createSecurePostMessageListener(
         allowedOriginsOrOptions as CreateSecurePostMessageListenerOptions,
         data,
       );
-      onMessage(data);
+      // Call the consumer. If the consumer returns a promise that rejects,
+      // attach a rejection handler so we can sanitize and log the error and
+      // avoid unhandled promise rejections in environments where consumers
+      // implement async handlers.
+      try {
+        const result = onMessage(data);
+        // Attach an async rejection handler without awaiting to preserve
+        // synchronous handler behavior for callers.
+        Promise.resolve(result).catch((asyncErr) => {
+          try {
+            secureDevLog("error", "postMessage", "Listener handler error", {
+              origin: event.origin,
+              error: sanitizeErrorForLogs(asyncErr),
+            });
+          } catch {
+            /* best-effort logging */
+          }
+        });
+      } catch (err) {
+        // Synchronous consumer errors are handled by the outer catch below,
+        // but handle here to ensure sanitized logging too.
+        secureDevLog("error", "postMessage", "Listener handler error", {
+          origin: event.origin,
+          error: sanitizeErrorForLogs(err),
+        });
+      }
     } catch (err) {
       secureDevLog("error", "postMessage", "Listener handler error", {
         origin: event.origin,
@@ -705,4 +754,89 @@ export function _validatePayloadWithExtras(
   }
 
   return { valid: true };
+}
+
+// Test-only accessors for internal helpers. Guarded by a runtime check to avoid
+// leaking internals in production builds. These are only available when the
+// build defines `__TEST__` and the runtime allows test APIs via dev-guards.
+export const __test_internals:
+  | {
+      toNullProto: (obj: unknown, depth?: number, maxDepth?: number) => unknown;
+      getPayloadFingerprint: (data: unknown) => Promise<string>;
+      ensureFingerprintSalt: () => Promise<Uint8Array>;
+      deepFreeze: <T>(obj: T) => T;
+    }
+  | undefined =
+  typeof __TEST__ !== "undefined" && __TEST__
+    ? (() => {
+        // runtime guard for test-only API usage
+        // use require to avoid static circular imports in some bundlers
+        const { assertTestApiAllowed } = require("./dev-guards");
+        assertTestApiAllowed();
+        return {
+          toNullProto: toNullProto as any,
+          getPayloadFingerprint: getPayloadFingerprint as any,
+          ensureFingerprintSalt: ensureFingerprintSalt as any,
+          deepFreeze: deepFreeze as any,
+        };
+      })()
+    : undefined;
+
+// Runtime-guarded test helpers: these call a runtime dev-guard to ensure they
+// are not used in production by accident. Prefer these in unit tests instead
+// of relying on build-time __TEST__ macros which may not be available in all
+// execution environments used by test runners.
+function _assertTestApiAllowedInline(): void {
+  // Mirror of dev-guards.assertTestApiAllowed to avoid requiring the module
+  // at runtime during tests. This keeps the runtime check local and avoids
+  // loader resolution differences in test environments.
+  try {
+    if (!environment.isProduction) return;
+  } catch {
+    return;
+  }
+  const envAllow =
+    typeof process !== "undefined" &&
+    process?.env?.["SECURITY_KIT_ALLOW_TEST_APIS"] === "true";
+  const globalAllow = !!(globalThis as unknown as Record<string, unknown>)[
+    "__SECURITY_KIT_ALLOW_TEST_APIS"
+  ];
+  if (envAllow || globalAllow) return;
+  throw new Error(
+    "Test-only APIs are disabled in production. Set SECURITY_KIT_ALLOW_TEST_APIS=true or set globalThis.__SECURITY_KIT_ALLOW_TEST_APIS = true to explicitly allow.",
+  );
+}
+
+export function __test_getPayloadFingerprint(data: unknown): Promise<string> {
+  _assertTestApiAllowedInline();
+  return getPayloadFingerprint(data);
+}
+
+export function __test_ensureFingerprintSalt(): Promise<Uint8Array> {
+  _assertTestApiAllowedInline();
+  return ensureFingerprintSalt();
+}
+
+export function __test_toNullProto(
+  obj: unknown,
+  depth?: number,
+  maxDepth?: number,
+): unknown {
+  _assertTestApiAllowedInline();
+  return toNullProto(
+    obj,
+    depth ?? 0,
+    maxDepth ?? POSTMESSAGE_MAX_PAYLOAD_DEPTH,
+  );
+}
+
+export function __test_deepFreeze<T>(obj: T): T {
+  _assertTestApiAllowedInline();
+  return deepFreeze(obj);
+}
+
+export function __test_resetForUnitTests(): void {
+  _assertTestApiAllowedInline();
+  _payloadFingerprintSalt = null;
+  _diagnosticsDisabledDueToNoCryptoInProd = false;
 }

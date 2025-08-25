@@ -58,7 +58,7 @@ export * from "./sanitizer";
 export * from "./dom";
 
 // Scripts / dev helpers
-export { runStandaloneFuzzHarness } from "./scripts/fuzz-harness";
+// Note: test-only harness moved into the test tree. Do not export test harness from public API.
 
 // Optional: production error reporter for manual emission (rate-limited)
 export { reportProdError } from "./reporting";

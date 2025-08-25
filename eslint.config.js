@@ -163,6 +163,25 @@ export default [
       // Node-specific hardening
       ...securityNode.configs.recommended.rules,
       "security-node/detect-unhandled-async-errors": "off",
+      // UPGRADE: Change from "warn" to "error". There is no excuse for `any`.
+      "@typescript-eslint/no-explicit-any": "error",
+
+      // UPGRADE: Change from "warn" to "error". Force developers to justify suppression.
+      "@typescript-eslint/ban-ts-comment": [
+        "error",
+        {
+          "ts-expect-error": "allow-with-description",
+          "ts-ignore": "allow-with-description", // Keep this for now, but be strict
+          "ts-nocheck": true,
+          "ts-check": false,
+          "minimumDescriptionLength": 10 // Force a real explanation
+        }
+      ],
+      // NEW: Add rules that leverage your type information
+      "@typescript-eslint/no-unsafe-assignment": "error",
+      "@typescript-eslint/no-unsafe-call": "error",
+      "@typescript-eslint/no-unsafe-member-access": "error",
+      "@typescript-eslint/no-unsafe-return": "error",
 
       // Project-specific: forbid insecure/forbidden APIs
       "no-restricted-properties": [

@@ -3,36 +3,19 @@
 // Resolve runtime imports: prefer compiled `dist/` when present so this script can run
 // with plain `node` after `npm run build`. Otherwise fall back to importing source
 // TS files (useful when running via ts-node).
+import helpers from "./fuzz-helpers";
+const { safeUrlForImport, safeImport, randomString, makeHostilePayload } = helpers as any;
 let Sanitizer: any;
 let STRICT_HTML_POLICY_CONFIG: any;
 let postMessageMod: any;
 
-function safeUrlForImport(u: string) {
-  try {
-    const parsed = new URL(u);
-    // Allow only file: or http(s): imports in this script
-    if (parsed.protocol === "file:" || parsed.protocol === "http:" || parsed.protocol === "https:") return u;
-  } catch {
-    // invalid URL - treat as unsafe
-  }
-  return undefined;
-}
-
-async function safeImport(url: string) {
-  const safe = safeUrlForImport(url);
-  if (!safe) throw new Error("Unsafe import URL");
-  // The dynamic import target is validated above. Silence the rule because
-  // we perform our own URL validation to prevent unsafe imports.
-  // eslint-disable-next-line no-unsanitized/method
-  return import(safe);
-}
-
-async function resolveImports() {
+export async function resolveImports() {
+  // original resolveImports logic moved here for testability
   // First try to import from compiled dist/ using a computed file URL so bundlers
   // won't try to resolve the path at build-time.
-    try {
-      const distUrl = new URL("../dist/index.mjs", import.meta.url).href;
-      const d = await safeImport(distUrl);
+  try {
+    const distUrl = new URL("../dist/index.mjs", import.meta.url).href;
+    const d = await safeImport(distUrl);
     Sanitizer = d.Sanitizer ?? d.default?.Sanitizer;
     STRICT_HTML_POLICY_CONFIG = d.STRICT_HTML_POLICY_CONFIG ?? d.default?.STRICT_HTML_POLICY_CONFIG;
     try {
@@ -50,10 +33,8 @@ async function resolveImports() {
 
   // Fallback to source TypeScript imports (this works when running via ts-node).
   try {
-    // eslint-disable-next-line n/no-missing-import
-    const s = await import("../src/sanitizer");
-    // eslint-disable-next-line n/no-missing-import
-    const p = await import("../src/postMessage");
+    const s = await safeImport(new URL("../src/sanitizer", import.meta.url).href);
+    const p = await safeImport(new URL("../src/postMessage", import.meta.url).href);
     Sanitizer = s.Sanitizer;
     STRICT_HTML_POLICY_CONFIG = s.STRICT_HTML_POLICY_CONFIG;
     postMessageMod = p;
@@ -65,63 +46,9 @@ async function resolveImports() {
   }
 }
 
-(async () => {
-  await resolveImports();
-})();
+// Use helpers from ./fuzz-helpers (randomString, makeHostilePayload)
 
-import * as crypto from "crypto";
-
-function randomString(len = 6) {
-  const chars = "abcdefghijklmnopqrstuvwxyz0123456789";
-  const buf = Buffer.alloc(len);
-  crypto.randomFillSync(buf);
-  let s = "";
-  for (let i = 0; i < len; i++) {
-  // buf is a local Buffer filled by crypto.randomFillSync; this index
-  // usage is safe. Suppress the object-injection rule for this line.
-  // eslint-disable-next-line security/detect-object-injection
-  const idx = buf[i] % chars.length;
-    s += chars.charAt(idx);
-  }
-  return s;
-}
-
-function makeHostilePayload(i: number) {
-  const buf = Buffer.alloc(1);
-  crypto.randomFillSync(buf);
-  const r = buf[0] / 256;
-  if (r < 0.2) {
-    return { __proto__: { hacked: i } };
-  }
-  if (r < 0.4) {
-  const o: any = { a: 1 };
-  const s = Symbol(randomString());
-  // eslint-disable-next-line security/detect-object-injection
-  o[s] = { evil: i };
-    return o;
-  }
-  if (r < 0.6) {
-    const o: any = { a: 1 };
-    Object.defineProperty(o, "b", {
-      get() {
-        throw new Error("hostile getter");
-      },
-      enumerable: true,
-    });
-    return o;
-  }
-  if (r < 0.8) {
-    const o: any = { nested: {} };
-    o.nested.deep = { __proto__: { p: i } };
-    return o;
-  }
-  // circular
-  const a: any = { x: 1 };
-  a.self = a;
-  return a;
-}
-
-async function main() {
+export async function main() {
   const dp: any = { sanitize: (s: string) => s };
   const sanitizer = new Sanitizer(dp, { strict: STRICT_HTML_POLICY_CONFIG });
 
@@ -153,7 +80,17 @@ async function main() {
   console.log("Fuzz finished: no prototype pollution detected in 100 iterations");
 }
 
-main().catch((e) => {
-  console.error(e);
-  process.exit(1);
-});
+// Only run the script when executed directly and when explicitly enabled
+if (typeof require !== "undefined" && require.main === module) {
+  if (process.env.RUN_FUZZ_SCRIPT === "1") {
+    resolveImports()
+      .then(() => main())
+      .catch((e) => {
+        console.error(e);
+        process.exit(1);
+      });
+  } else {
+    // Not enabled; avoid accidental long-running fuzz execution when imported
+    console.info("fuzz-prototype-pollution: not running fuzz loop (RUN_FUZZ_SCRIPT not set)");
+  }
+}

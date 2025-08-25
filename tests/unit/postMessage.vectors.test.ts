@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { runStandaloneFuzzHarness } from "../../src/scripts/fuzz-harness";
+import { runStandaloneFuzzHarness } from "../fuzz/fuzz-harness";
 
 describe("fuzz harness smoke (deterministic)", () => {
   it("runs a small deterministic harness with seed", async () => {
