@@ -91,12 +91,18 @@ function toNullProto(
     // Use safe property access to avoid invoking getters
     let value: unknown;
     try {
-      const desc = Object.getOwnPropertyDescriptor(obj as object, key as string);
-      if (desc && (typeof desc.get === "function" || typeof desc.set === "function")) {
+      const desc = Object.getOwnPropertyDescriptor(
+        obj as Record<string, unknown>,
+        key,
+      );
+      if (
+        desc &&
+        (typeof desc.get === "function" || typeof desc.set === "function")
+      ) {
         // Skip accessor properties to avoid executing untrusted getters
         continue;
       }
-      value = (obj as Record<string, unknown>)[key as string];
+      value = (obj as Record<string, unknown>)[key];
     } catch {
       // If property access throws, skip it
       continue;
@@ -436,68 +442,10 @@ export function createSecurePostMessageListener(
   ): void {
     const enableDiagnostics = !!opts.enableDiagnostics;
     if (
-      enableDiagnostics &&
-      canConsumeDiagnostic() &&
-      !_diagnosticsDisabledDueToNoCryptoInProd
+      !enableDiagnostics ||
+      !canConsumeDiagnostic() ||
+      _diagnosticsDisabledDueToNoCryptoInProd
     ) {
-      try {
-        // Probe for crypto availability first. If crypto is unavailable
-        // and we're in production, disable diagnostics that would otherwise
-        // rely on low-entropy fallbacks. This avoids a race where
-        // getPayloadFingerprint() would create a deterministic salt and
-        // produce a fingerprint even when we intended to skip fingerprinting
-        // in production environments without secure RNG.
-        ensureCrypto()
-          .then(() => {
-            try {
-              queueMicrotask(() => {
-                getPayloadFingerprint(data)
-                  .then((fp) => {
-                    const diag = {
-                      origin,
-                      reason,
-                      fingerprint: fp,
-                    };
-                    secureDevLog(
-                      "warn",
-                      "postMessage",
-                      "Message dropped due to failed validation",
-                      diag,
-                    );
-                  })
-                  .catch(() => {
-                    /* ignore */
-                  });
-              });
-            } catch {
-              /* ignore scheduling errors */
-            }
-          })
-          .catch(() => {
-            // No secure crypto available. Respect production policy by
-            // disabling diagnostics that would otherwise produce
-            // low-entropy fingerprints, and emit the diagnostic without
-            // a fingerprint.
-            try {
-              if (environment.isProduction)
-                _diagnosticsDisabledDueToNoCryptoInProd = true;
-            } catch {
-              /* ignore */
-            }
-            secureDevLog(
-              "warn",
-              "postMessage",
-              "Message dropped due to failed validation",
-              {
-                origin,
-                reason,
-              },
-            );
-          });
-      } catch {
-        /* ignore */
-      }
-    } else {
       secureDevLog(
         "warn",
         "postMessage",
@@ -507,7 +455,54 @@ export function createSecurePostMessageListener(
           reason,
         },
       );
+      return;
     }
+
+    // Async helper: attempt to compute fingerprint and log it.
+    const computeAndLog = async () => {
+      try {
+        await ensureCrypto();
+      } catch {
+        // No secure crypto available: respect production policy and avoid
+        // creating low-entropy fingerprints. If in production, disable
+        // future diagnostics that would rely on non-crypto fallbacks.
+        try {
+          if (environment.isProduction)
+            _diagnosticsDisabledDueToNoCryptoInProd = true;
+        } catch {
+          /* ignore */
+        }
+        secureDevLog(
+          "warn",
+          "postMessage",
+          "Message dropped due to failed validation",
+          { origin, reason },
+        );
+        return;
+      }
+
+      // Attempt fingerprinting and log result (async). Errors handled per-case.
+      getPayloadFingerprint(data)
+        .then((fp) => {
+          secureDevLog(
+            "warn",
+            "postMessage",
+            "Message dropped due to failed validation",
+            { origin, reason, fingerprint: fp },
+          );
+        })
+        .catch(() => {
+          secureDevLog(
+            "warn",
+            "postMessage",
+            "Message dropped due to failed validation",
+            { origin, reason },
+          );
+        });
+    };
+
+    // Fire-and-forget the async helper; errors are handled internally.
+    void computeAndLog();
   }
 
   function parseMessageEventData(event: MessageEvent): unknown {

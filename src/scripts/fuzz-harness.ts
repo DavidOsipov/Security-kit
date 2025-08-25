@@ -1,16 +1,37 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { Sanitizer, STRICT_HTML_POLICY_CONFIG } from "../sanitizer";
 import * as postMessageMod from "../postMessage";
+import * as crypto from "crypto";
 
-function randomString(len = 6, rnd = Math.random) {
+function randomString(len = 6, rnd?: () => number) {
   const chars = "abcdefghijklmnopqrstuvwxyz0123456789";
   let s = "";
-  for (let i = 0; i < len; i++) {
-    s += chars[Math.floor(rnd() * chars.length)];
+  if (typeof rnd === "function") {
+    for (let i = 0; i < len; i++) s += chars[Math.floor(rnd() * chars.length)];
+    return s;
   }
+  const buf = Buffer.alloc(len);
+  crypto.randomFillSync(buf);
+  for (let i = 0; i < len; i++) s += chars[(buf[i] as number) % chars.length];
   return s;
 }
 
-function makeHostilePayload(i: number, rnd = Math.random, randString = randomString, randInt?: (n: number)=>number) {
+// Secure RNG returning a float in [0,1)
+function secureRandom(): number {
+  const buf = Buffer.alloc(6);
+  crypto.randomFillSync(buf);
+  let v = 0;
+  for (let i = 0; i < 6; i++) v = (v << 8) + buf.readUInt8(i);
+  return v / 2 ** 48;
+}
+
+function makeHostilePayload(
+  i: number,
+  rnd = secureRandom,
+  randString = randomString,
+  randInt?: (n: number) => number,
+) {
+  if (!randInt) randInt = (n: number) => Math.floor(rnd() * n);
   const r = rnd();
   if (r < 0.2) {
     return { __proto__: { hacked: i } };
@@ -69,12 +90,20 @@ function makeHostilePayload(i: number, rnd = Math.random, randString = randomStr
     const o: any = { a: { b: 1 } };
     try {
       Object.setPrototypeOf(o.a, { poisoned: true });
-    } catch {}
+    } catch (err) {
+      console.warn(
+        "setPrototypeOf failed during fuzz harness",
+        (err as Error).message,
+      );
+    }
     return o;
   }
 
   // long key names
-  const key = new Array(512).fill(0).map(() => randomString(4, rnd)).join(":");
+  const key = new Array(512)
+    .fill(0)
+    .map(() => randomString(4, rnd))
+    .join(":");
   const obj: any = {};
   obj[key] = { huge: i };
   return obj;
@@ -90,10 +119,20 @@ export async function runStandaloneFuzzHarness(iterations = 100) {
     try {
       try {
         sanitizer.getSanitizedString(JSON.stringify(p), "strict");
-      } catch {}
+      } catch (err) {
+        console.warn(
+          "sanitizer error during fuzz iteration:",
+          (err as Error).message,
+        );
+      }
       try {
         postMessageMod._validatePayload?.(p, (_d: any) => true as any);
-      } catch {}
+      } catch (err) {
+        console.warn(
+          "postMessage validator error during fuzz iteration:",
+          (err as Error).message,
+        );
+      }
     } catch (e) {
       console.error("Unexpected crash", e);
       return 1;
@@ -104,6 +143,8 @@ export async function runStandaloneFuzzHarness(iterations = 100) {
       return 2;
     }
   }
-  console.log(`Fuzz finished: no prototype pollution detected in ${iterations} iterations`);
+  console.info(
+    `Fuzz finished: no prototype pollution detected in ${iterations} iterations`,
+  );
   return 0;
 }

@@ -173,8 +173,9 @@ export class Sanitizer {
     }
     if (typeof window === "undefined") return null;
     // Optional chaining to detect availability
-    if (typeof (window as any).trustedTypes?.createPolicy !== "function")
-      return null;
+    const win = window as unknown as Record<string, unknown>;
+    const tt = win["trustedTypes"] as undefined | { createPolicy?: unknown };
+    if (typeof tt?.createPolicy !== "function") return null;
     try {
       return this.createPolicy(policyName);
     } catch {

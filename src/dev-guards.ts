@@ -18,7 +18,9 @@ export function assertTestApiAllowed(): void {
   const envAllow =
     typeof process !== "undefined" &&
     process?.env?.["SECURITY_KIT_ALLOW_TEST_APIS"] === "true";
-  const globalAllow = !!(globalThis as any).__SECURITY_KIT_ALLOW_TEST_APIS;
+  const globalAllow = !!(globalThis as unknown as Record<string, unknown>)[
+    "__SECURITY_KIT_ALLOW_TEST_APIS"
+  ];
   if (envAllow || globalAllow) return;
 
   throw new InvalidConfigurationError(

@@ -456,3 +456,13 @@ Notes
 
 - The test setup file `tests/setup/global-dompurify.ts` initializes a DOMPurify instance and exposes it to tests; the helper `tests/setup/domPurify.ts` is reusable for additional integration tests.
 - `dompurify` is a peer dependency for this library (consumers should provide it). We use `isomorphic-dompurify` as a dev-time helper so integration tests can run in Node.
+
+## Author and License
+
+- **Author:** This project was architected and directed by **David Osipov**, an AI-Driven B2B Lead Product Manager. You can learn more about my work and philosophy at [david-osipov.vision](https://david-osipov.vision).
+- **ISNI:** [0000 0005 1802 960X](https://isni.org/isni/000000051802960X)
+- **ORCID:** [0009-0005-2713-9242](https://orcid.org/0009-0005-2713-9242)
+- **VIAF:** [139173726847611590332](https://viaf.org/viaf/139173726847611590332/)
+- **Wikidata:** [Q130604188](https://www.wikidata.org/wiki/Q130604188)
+- **Contact:** <personal@david-osipov.vision>
+- **License:** MIT License. The license is specified using the [SPDX-License-Identifier](https://spdx.org/licenses/) standard, which is a machine-readable way to declare licenses.

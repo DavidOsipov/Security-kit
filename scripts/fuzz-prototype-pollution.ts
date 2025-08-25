@@ -7,55 +7,97 @@ let Sanitizer: any;
 let STRICT_HTML_POLICY_CONFIG: any;
 let postMessageMod: any;
 
-import { fileURLToPath } from "node:url";
+function safeUrlForImport(u: string) {
+  try {
+    const parsed = new URL(u);
+    // Allow only file: or http(s): imports in this script
+    if (parsed.protocol === "file:" || parsed.protocol === "http:" || parsed.protocol === "https:") return u;
+  } catch {
+    // invalid URL - treat as unsafe
+  }
+  return undefined;
+}
+
+async function safeImport(url: string) {
+  const safe = safeUrlForImport(url);
+  if (!safe) throw new Error("Unsafe import URL");
+  // The dynamic import target is validated above. Silence the rule because
+  // we perform our own URL validation to prevent unsafe imports.
+  // eslint-disable-next-line no-unsanitized/method
+  return import(safe);
+}
 
 async function resolveImports() {
   // First try to import from compiled dist/ using a computed file URL so bundlers
   // won't try to resolve the path at build-time.
-  try {
-    const distUrl = new URL("../dist/index.mjs", import.meta.url).href;
-    const d = await import(distUrl);
+    try {
+      const distUrl = new URL("../dist/index.mjs", import.meta.url).href;
+      const d = await safeImport(distUrl);
     Sanitizer = d.Sanitizer ?? d.default?.Sanitizer;
     STRICT_HTML_POLICY_CONFIG = d.STRICT_HTML_POLICY_CONFIG ?? d.default?.STRICT_HTML_POLICY_CONFIG;
     try {
       const pmUrl = new URL("../dist/scripts/fuzz-prototype-pollution.mjs", import.meta.url).href.replace("fuzz-prototype-pollution.mjs", "src/postMessage.mjs");
-      postMessageMod = await import(pmUrl);
+      postMessageMod = await safeImport(pmUrl);
     } catch (e) {
+      console.warn("fallback to postMessage from dist bundle failed:", e && (e as Error).message);
       postMessageMod = d.postMessage ?? d.default?.postMessage ?? {};
     }
     return;
   } catch (e) {
-    // fall through to source imports
+    // Dist bundle import failed — log and fall back to source imports below
+    console.warn("fallback to dist bundle import failed:", e && (e as Error).message);
   }
 
   // Fallback to source TypeScript imports (this works when running via ts-node).
-  const s = await import("../src/sanitizer");
-  const p = await import("../src/postMessage");
-  Sanitizer = s.Sanitizer;
-  STRICT_HTML_POLICY_CONFIG = s.STRICT_HTML_POLICY_CONFIG;
-  postMessageMod = p;
+  try {
+    // eslint-disable-next-line n/no-missing-import
+    const s = await import("../src/sanitizer");
+    // eslint-disable-next-line n/no-missing-import
+    const p = await import("../src/postMessage");
+    Sanitizer = s.Sanitizer;
+    STRICT_HTML_POLICY_CONFIG = s.STRICT_HTML_POLICY_CONFIG;
+    postMessageMod = p;
+  } catch (err) {
+    console.warn("Could not import source modules for fuzz harness:", (err as Error).message);
+    Sanitizer = (globalThis as any).Sanitizer || function () { return null; };
+    STRICT_HTML_POLICY_CONFIG = {};
+    postMessageMod = {};
+  }
 }
 
 (async () => {
   await resolveImports();
 })();
 
+import * as crypto from "crypto";
+
 function randomString(len = 6) {
   const chars = "abcdefghijklmnopqrstuvwxyz0123456789";
+  const buf = Buffer.alloc(len);
+  crypto.randomFillSync(buf);
   let s = "";
-  for (let i = 0; i < len; i++) s += chars[Math.floor(Math.random() * chars.length)];
+  for (let i = 0; i < len; i++) {
+  // buf is a local Buffer filled by crypto.randomFillSync; this index
+  // usage is safe. Suppress the object-injection rule for this line.
+  // eslint-disable-next-line security/detect-object-injection
+  const idx = buf[i] % chars.length;
+    s += chars.charAt(idx);
+  }
   return s;
 }
 
 function makeHostilePayload(i: number) {
-  const r = Math.random();
+  const buf = Buffer.alloc(1);
+  crypto.randomFillSync(buf);
+  const r = buf[0] / 256;
   if (r < 0.2) {
     return { __proto__: { hacked: i } };
   }
   if (r < 0.4) {
-    const o: any = { a: 1 };
-    const s = Symbol(randomString());
-    o[s] = { evil: i };
+  const o: any = { a: 1 };
+  const s = Symbol(randomString());
+  // eslint-disable-next-line security/detect-object-injection
+  o[s] = { evil: i };
     return o;
   }
   if (r < 0.6) {
@@ -90,11 +132,15 @@ async function main() {
       // run through sanitizer
       try {
         sanitizer.getSanitizedString(JSON.stringify(p), "strict");
-      } catch {}
+      } catch (err) {
+        console.warn("sanitizer threw during fuzz iteration:", (err as Error).message);
+      }
       // run through postMessage validator
       try {
         postMessageMod._validatePayload?.(p, (d: any) => true as any);
-      } catch {}
+      } catch (err) {
+        console.warn("postMessage validator threw during fuzz iteration:", (err as Error).message);
+      }
     } catch (e) {
       console.error("Unexpected crash", e);
     }

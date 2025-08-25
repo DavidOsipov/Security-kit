@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { sendSecurePostMessage, createSecurePostMessageListener } from "../../src/postMessage";
-import { InvalidParameterError, InvalidConfigurationError } from "../../src/errors";
+import { InvalidParameterError } from "../../src/errors";
 
 describe("postMessage module (unit)", () => {
   it("sendSecurePostMessage rejects '*' origin and invalid origins", () => {
@@ -17,10 +17,8 @@ describe("postMessage module (unit)", () => {
   });
 
   it("createSecurePostMessageListener enforces production constraints", () => {
-    // Pass options without allowedOrigins in production-like environment simulation
-    const opts: any = { allowedOrigins: [], onMessage: () => {} };
-    // When allowedOrigins empty in production, the function throws; emulate by setting environment.isProduction
-    // This test asserts that the API validates inputs; implementation has environment checks in runtime tests elsewhere.
+    // This unit test ensures the API validates its inputs; environment-specific
+    // production checks are exercised in integration tests.
     expect(() => createSecurePostMessageListener(["https://example.com"], () => {})).not.toThrow();
   });
 });
