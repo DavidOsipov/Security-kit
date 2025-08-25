@@ -35,6 +35,7 @@ export function getCryptoState(): CryptoState {
 }
 
 // --- Internal Configuration API ---
+/** @internal - Do not export from package entry; used by config.ts only */
 export function _setCrypto(
   cryptoLike: Crypto | null | undefined,
   { allowInProduction = false }: { allowInProduction?: boolean } = {},
@@ -75,6 +76,7 @@ export function _setCrypto(
   _cryptoState = CryptoState.Configured;
 }
 
+/** @internal - Do not export from package entry; used by config.ts only */
 export function _sealSecurityKit(): void {
   if (_cryptoState === CryptoState.Sealed) return;
   if (_cryptoState === CryptoState.Configuring) {
@@ -221,17 +223,12 @@ export function getInternalTestUtils():
       _getCryptoStateForTest: () => string;
     }
   | undefined {
-  const isNodeTestEnv =
-    typeof process !== "undefined" && process.env?.["NODE_ENV"] === "test";
-  const isSecurityKitTestFlag =
-    typeof process !== "undefined" &&
-    process.env?.["SECURITY_KIT_TEST"] === "1";
-
-  if (!isDevelopment() && !isNodeTestEnv && !isSecurityKitTestFlag) {
-    return undefined;
+  // This entire block will be removed in production if __TEST__ is false.
+  if (typeof __TEST__ !== "undefined" && __TEST__) {
+    return {
+      _getCryptoGenerationForTest: () => _cryptoInitGeneration,
+      _getCryptoStateForTest: () => _cryptoState,
+    };
   }
-  return {
-    _getCryptoGenerationForTest: () => _cryptoInitGeneration,
-    _getCryptoStateForTest: () => _cryptoState,
-  };
+  return undefined;
 }

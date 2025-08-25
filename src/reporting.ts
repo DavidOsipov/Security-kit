@@ -7,10 +7,12 @@
  */
 
 import { environment } from "./environment";
-import { _redact, sanitizeErrorForLogs, validateNumericParam } from "./utils";
-import { InvalidParameterError } from "./errors";
+import { _redact, validateNumericParam } from "./utils";
+import { InvalidParameterError, sanitizeErrorForLogs } from "./errors";
 
-let _prodErrorHook: ((error: Error, context: object) => void) | null = null;
+let _prodErrorHook:
+  | ((error: Error, context: Record<string, unknown>) => void)
+  | null = null;
 const _prodErrorReportState = {
   tokens: 5,
   maxTokens: 5,
@@ -23,7 +25,7 @@ export function getProdErrorHook() {
 }
 
 export function setProdErrorHook(
-  hook: ((error: Error, context: object) => void) | null,
+  hook: ((error: Error, context: Record<string, unknown>) => void) | null,
 ) {
   if (hook !== null && typeof hook !== "function") {
     throw new InvalidParameterError(
@@ -49,10 +51,12 @@ export function reportProdError(err: Error, context: unknown = {}) {
   try {
     if (!environment.isProduction || !_prodErrorHook) return;
     const now = Date.now();
-    if (_prodErrorReportState.lastRefillTs === 0)
+    if (_prodErrorReportState.lastRefillTs === 0) {
       _prodErrorReportState.lastRefillTs = now;
-
-    const elapsedMs = now - _prodErrorReportState.lastRefillTs;
+    }
+    const elapsedMs = Math.max(0, now - _prodErrorReportState.lastRefillTs);
+    // Update timestamp before spending tokens to reduce race conditions
+    _prodErrorReportState.lastRefillTs = now;
     const tokensToAdd =
       (elapsedMs / 1000) * _prodErrorReportState.refillRatePerSec;
     if (tokensToAdd > 0) {
@@ -60,7 +64,6 @@ export function reportProdError(err: Error, context: unknown = {}) {
         _prodErrorReportState.maxTokens,
         _prodErrorReportState.tokens + tokensToAdd,
       );
-      _prodErrorReportState.lastRefillTs = now;
     }
     if (_prodErrorReportState.tokens < 1) return;
     _prodErrorReportState.tokens -= 1;
@@ -71,7 +74,7 @@ export function reportProdError(err: Error, context: unknown = {}) {
     };
     _prodErrorHook(
       new Error(`${sanitized.name}: ${sanitized.message}`),
-      _redact(context) as object,
+      _redact(context) as Record<string, unknown>,
     );
   } catch {
     // Never throw from the reporter

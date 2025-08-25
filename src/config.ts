@@ -66,7 +66,7 @@ export function setAppEnvironment(env: "development" | "production") {
  * @param hook A function to call with the error and context.
  */
 export function setProductionErrorHandler(
-  hook: ((error: Error, context: object) => void) | null,
+  hook: ((error: Error, context: Record<string, unknown>) => void) | null,
 ): void {
   if (getCryptoState() === CryptoState.Sealed) {
     throw new InvalidConfigurationError(

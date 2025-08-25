@@ -20,10 +20,6 @@ This constitution is mandatory for all personnel contributing code to the projec
 
 This constitution is versioned semantically (e.g., v6.0.1). Any change requires a formal security review and sign-off by at least one designated security owner. Emergency bypass procedures must be documented, logged, and followed by a retrospective analysis.
 
-- **Owner:** Security Team Lead
-- **Approvers:** Lead Engineers, Security Team
-- **Changelog:** All changes are tracked in a `CHANGELOG.md` accompanying this document.
-
 ### 0.4. ASVS Alignment
 
 This Security & Engineering Constitution aims to achieve compliance with **OWASP Application Security Verification Standard (ASVS) Version 5.0.0 Level 3**. This means the application is designed to demonstrate the highest levels of security assurance, suitable for applications handling highly sensitive data or critical business functions. All requirements marked as `MUST` in this document are intended to meet or exceed the combined requirements of ASVS Levels 1, 2, and 3 where applicable to a static web application supported by serverless functions.
@@ -136,8 +132,6 @@ This principle serves as the ultimate tie-breaker. When faced with two potential
 - Implementation:
 
 1.  A verification script scans the built output and exits non-zero on unsafe constructs without mutating files (to preserve CSP hash integrity):
-
-
     - Path: `scripts/verify-sanitize-dist.mjs`
     - Scope: `dist/**/*.html` (overridable via `SANITIZE_DIST_GLOB`)
     - Checks:
@@ -146,8 +140,6 @@ This principle serves as the ultimate tie-breaker. When faced with two potential
     - Non-goals: Does not strip or rewrite content; JSON-LD `<script type="application/ld+json">` is allowed; relies on CSP/TT for script control.
 
 2.  CI hook (post-build):
-
-
     - `npm run verify:sanitize` — runs the verification script
     - `npm run build:secure:verify:sanitize` — runs secure build + CSP/structured-data verification, then sanitizer
 

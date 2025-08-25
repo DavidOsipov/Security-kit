@@ -12,7 +12,7 @@ import {
   InvalidParameterError,
   RandomGenerationError,
 } from "./errors";
-import { ensureCrypto, ensureCryptoSync } from "./state";
+import { ensureCrypto } from "./state";
 import { isDevelopment } from "./environment";
 import {
   secureWipe,
@@ -21,9 +21,86 @@ import {
   _arrayBufferToBase64,
   secureCompare,
   secureCompareAsync,
+  secureDevLog,
 } from "./utils";
+import { SHARED_ENCODER } from "./encoding";
 
-const ENCODER = new TextEncoder();
+// --- Sync Crypto Guard ---
+/**
+ * Asserts that synchronous crypto primitives are available.
+ * Throws a typed CryptoUnavailableError with stable code if not available.
+ * @throws {CryptoUnavailableError} When sync crypto is unavailable
+ */
+export function assertCryptoAvailableSync(): Crypto {
+  const crypto = (globalThis as { crypto?: Crypto }).crypto;
+  if (!crypto || typeof crypto.getRandomValues !== "function") {
+    const error = new CryptoUnavailableError(
+      "Synchronous Web Crypto API is not available in this environment",
+    );
+    (error as { code?: string }).code = "CRYPTO_UNAVAILABLE_SYNC";
+    throw error;
+  }
+  return crypto;
+}
+// Internal helpers to reduce complexity and keep logic auditable
+function computeAlphabetParams(
+  alphabet: string,
+  size: number,
+): {
+  len: number;
+  mask: number;
+  step: number;
+} {
+  validateNumericParam(size, "size", 1, 1024);
+  const isValidAlphabetInput =
+    typeof alphabet === "string" &&
+    alphabet.length > 0 &&
+    alphabet.length <= 256;
+  if (!isValidAlphabetInput) {
+    throw new InvalidParameterError(
+      "Alphabet must be a string with 1 to 256 characters.",
+    );
+  }
+  const hasUniqueChars = (s: string) => new Set(s).size === s.length;
+  if (!hasUniqueChars(alphabet)) {
+    throw new InvalidParameterError(
+      "Alphabet must contain only unique characters.",
+    );
+  }
+  const len = alphabet.length;
+  if (len === 1) return { len, mask: 0, step: size };
+
+  const bits = Math.ceil(Math.log2(len));
+  const mask = (1 << bits) - 1;
+  const acceptanceRatio = len / (mask + 1);
+  if (acceptanceRatio > 0 && 1 / acceptanceRatio > 30) {
+    throw new InvalidParameterError(
+      `Alphabet size ${len} is inefficient for sampling.`,
+    );
+  }
+
+  const rawStep = Math.ceil((1.6 * mask * size) / len);
+  const step = Math.min(rawStep, 4096);
+  if (rawStep > 4096) {
+    throw new InvalidParameterError(
+      "Combination of alphabet/size requires too many random bytes.",
+    );
+  }
+  return { len, mask, step };
+}
+
+function checkAbortOrHidden(signal?: AbortSignal): void {
+  if (signal?.aborted) {
+    throw typeof DOMException !== "undefined"
+      ? new DOMException("Operation aborted", "AbortError")
+      : new Error("Operation aborted");
+  }
+  if (typeof document !== "undefined" && document.hidden) {
+    throw new RandomGenerationError(
+      "Aborted due to hidden document (see Constitution §2.11).",
+    );
+  }
+}
 
 // --- Constants ---
 export const URL_ALPHABET =
@@ -33,14 +110,19 @@ const HEX_ALPHABET = "0123456789abcdef";
 // --- Random Data Generation ---
 export function getSecureRandomBytesSync(length = 1): Uint8Array {
   validateNumericParam(length, "length", 1, 4096);
-  const crypto = ensureCryptoSync();
+  const crypto = assertCryptoAvailableSync();
   const out = new Uint8Array(length);
   crypto.getRandomValues(out);
   return out;
 }
 
-export async function getSecureRandomAsync(): Promise<number> {
+// Backwards-compatible async random with optional abort/visibility checks.
+export async function getSecureRandomAsync(options?: {
+  signal?: AbortSignal;
+}): Promise<number> {
   const crypto = await ensureCrypto();
+  // Check abort/visibility early to comply with Constitution §2.11
+  checkAbortOrHidden(options?.signal);
   if (typeof BigUint64Array !== "undefined") {
     try {
       const buffer = new BigUint64Array(1);
@@ -48,6 +130,8 @@ export async function getSecureRandomAsync(): Promise<number> {
       const value = buffer[0];
       if (value === undefined)
         throw new CryptoUnavailableError("Failed to generate random value.");
+      // Final visibility/abort check before returning
+      checkAbortOrHidden(options?.signal);
       return Number(value >> BigInt(12)) / 2 ** 52;
     } catch {
       /* Fall through */
@@ -55,11 +139,12 @@ export async function getSecureRandomAsync(): Promise<number> {
   }
   const buffer = new Uint32Array(1);
   crypto.getRandomValues(buffer);
+  checkAbortOrHidden(options?.signal);
   return (buffer[0] ?? 0) / (0xffffffff + 1);
 }
 
 export function getSecureRandom(): number {
-  const crypto = ensureCryptoSync();
+  const crypto = assertCryptoAvailableSync();
   const buffer = new Uint32Array(1);
   crypto.getRandomValues(buffer);
   return (buffer[0] ?? 0) / (0xffffffff + 1);
@@ -68,6 +153,7 @@ export function getSecureRandom(): number {
 export async function getSecureRandomInt(
   min: number,
   max: number,
+  options?: { signal?: AbortSignal },
 ): Promise<number> {
   const MAX_SAFE_RANGE = 2 ** 31;
   validateNumericParam(min, "min", -MAX_SAFE_RANGE, MAX_SAFE_RANGE);
@@ -79,34 +165,72 @@ export async function getSecureRandomInt(
   const crypto = await ensureCrypto();
   const rangeBig = BigInt(max) - BigInt(min) + BigInt(1);
 
-  if (rangeBig <= BigInt(0x100000000)) {
+  // Keep iteration caps bounded to avoid long blocking loops
+  const RANDOM_ITERATION_CAP = 5000;
+  const tryUint32 = async () => {
     const range = Number(rangeBig);
     const arr = new Uint32Array(1);
     const threshold = Math.floor(0x100000000 / range) * range;
     try {
-      for (let i = 0; i < 1000; i++) {
-        // Reduced iteration limit for typical cases
+      for (let i = 0; i < RANDOM_ITERATION_CAP; i++) {
+        // Abort & visibility checks to preserve data integrity (§2.11)
+        if (options?.signal?.aborted) {
+          // Prefer DOMException when available for interoperable AbortError
+          throw typeof DOMException !== "undefined"
+            ? new DOMException("Operation aborted", "AbortError")
+            : new Error("Operation aborted");
+        }
+        if (typeof document !== "undefined" && document.hidden) {
+          throw new RandomGenerationError(
+            "Aborted due to hidden document (see Constitution §2.11).",
+          );
+        }
+        // Generous iteration limit to avoid undue failures; still bounded
         crypto.getRandomValues(arr);
         const r = (arr[0] ?? 0) >>> 0;
         if (r < threshold) return min + (r % range);
+        // Yield periodically to avoid monopolizing the event loop in edge cases
+        if (i % 128 === 127) await Promise.resolve();
       }
     } finally {
-      secureWipe(arr);
+      secureWipe(arr, { forbidShared: true });
     }
-  } else if (typeof BigUint64Array !== "undefined") {
+    return undefined;
+  };
+  const tryUint64 = async () => {
     const arr64 = new BigUint64Array(1);
     const space = BigInt(1) << BigInt(64);
     const threshold64 = space - (space % rangeBig);
     try {
-      for (let i = 0; i < 1000; i++) {
+      for (let i = 0; i < RANDOM_ITERATION_CAP; i++) {
+        if (options?.signal?.aborted) {
+          throw typeof DOMException !== "undefined"
+            ? new DOMException("Operation aborted", "AbortError")
+            : new Error("Operation aborted");
+        }
+        if (typeof document !== "undefined" && document.hidden) {
+          throw new RandomGenerationError(
+            "Aborted due to hidden document (see Constitution §2.11).",
+          );
+        }
         crypto.getRandomValues(arr64);
         const r = arr64[0];
         if (r !== undefined && r < threshold64)
           return min + Number(r % rangeBig);
+        if (i % 128 === 127) await Promise.resolve();
       }
     } finally {
-      secureWipe(arr64);
+      secureWipe(arr64, { forbidShared: true });
     }
+    return undefined;
+  };
+
+  if (rangeBig <= BigInt(0x100000000)) {
+    const v = await tryUint32();
+    if (v !== undefined) return v;
+  } else if (typeof BigUint64Array !== "undefined") {
+    const v = await tryUint64();
+    if (v !== undefined) return v;
   } else {
     throw new InvalidParameterError("Range too large for this platform.");
   }
@@ -157,58 +281,40 @@ export function shouldExecuteThrottled(probability: number): boolean {
 export function generateSecureStringSync(
   alphabet: string,
   size: number,
+  options?: { signal?: AbortSignal },
 ): string {
-  validateNumericParam(size, "size", 1, 1024);
-  if (
-    typeof alphabet !== "string" ||
-    alphabet.length === 0 ||
-    alphabet.length > 256
-  ) {
-    throw new InvalidParameterError(
-      "Alphabet must be a string with 1 to 256 characters.",
-    );
-  }
-  if (new Set(alphabet).size !== alphabet.length) {
-    throw new InvalidParameterError(
-      "Alphabet must contain only unique characters.",
-    );
-  }
-  const len = alphabet.length;
+  const { len, mask, step } = computeAlphabetParams(alphabet, size);
   if (len === 1) return alphabet.repeat(size);
 
-  const bits = Math.ceil(Math.log2(len));
-  const mask = (1 << bits) - 1;
-  const acceptanceRatio = len / (mask + 1);
-  if (acceptanceRatio > 0 && 1 / acceptanceRatio > 30) {
-    throw new InvalidParameterError(
-      `Alphabet size ${len} is inefficient for sampling.`,
-    );
-  }
-
-  const rawStep = Math.ceil((1.6 * mask * size) / len);
-  const step = Math.min(rawStep, 4096);
-  if (rawStep > 4096) {
-    throw new InvalidParameterError(
-      "Combination of alphabet/size requires too many random bytes.",
-    );
-  }
-
   let id = "";
-  const crypto = ensureCryptoSync();
+  const crypto = assertCryptoAvailableSync();
   const bytes = new Uint8Array(step);
-  try {
-    for (let iter = 0; iter < 1000; iter++) {
+  const sampleId = (
+    targetSize: number,
+    alpha: string,
+    alphaLen: number,
+    bitMask: number,
+    byteStep: number,
+  ): string => {
+    let out = "";
+    // Cap attempts to avoid long blocking behavior on pathological alphabets
+    for (let iter = 0; iter < 500 && out.length < targetSize; iter++) {
+      // Abort & visibility checks to preserve data integrity (§2.11)
+      checkAbortOrHidden(options?.signal);
       crypto.getRandomValues(bytes);
-      for (let i = 0; i < step; i++) {
-        const charIndex = (bytes[i] as number) & mask;
-        if (charIndex < len) {
-          id += alphabet[charIndex] as string;
-          if (id.length === size) return id;
-        }
+      for (let i = 0; i < byteStep && out.length < targetSize; i++) {
+        const charIndex = (bytes[i] as number) & bitMask;
+        if (charIndex < alphaLen) out += alpha[charIndex] as string;
       }
+      if (out.length === targetSize) return out;
     }
+    return out;
+  };
+  try {
+    id = sampleId(size, alphabet, len, mask, step);
+    if (id.length === size) return id;
   } finally {
-    secureWipe(bytes);
+    secureWipe(bytes, { forbidShared: true });
   }
   throw new RandomGenerationError(
     "Failed to generate secure string within safety limits.",
@@ -224,6 +330,48 @@ export async function generateSecureId(length = 64): Promise<string> {
 export function generateSecureIdSync(length = 64): string {
   validateNumericParam(length, "length", 1, 256);
   return generateSecureStringSync(HEX_ALPHABET, length);
+}
+
+/**
+ * Async, yielding variant of secure string generation. Mirrors the sync algorithm
+ * but yields back to the event loop between random byte batches to avoid long
+ * blocking on the main thread. This is not a drop-in replacement for
+ * generateSecureStringSync but provides similar guarantees with better
+ * responsiveness in UI contexts.
+ */
+export async function generateSecureStringAsync(
+  alphabet: string,
+  size: number,
+  options?: { signal?: AbortSignal },
+): Promise<string> {
+  const { len, mask, step } = computeAlphabetParams(alphabet, size);
+  if (len === 1) return alphabet.repeat(size);
+
+  let id = "";
+  const crypto = await ensureCrypto();
+  const bytes = new Uint8Array(step);
+  const MAX_ITER = 500;
+  try {
+    for (let iter = 0; iter < MAX_ITER && id.length < size; iter++) {
+      // Abort & visibility checks to preserve data integrity (§2.11)
+      checkAbortOrHidden(options?.signal);
+      crypto.getRandomValues(bytes);
+      for (let i = 0; i < step && id.length < size; i++) {
+        const charIndex = (bytes[i] as number) & mask;
+        if (charIndex < len) id += alphabet[charIndex] as string;
+      }
+      if (id.length === size) return id;
+      // Yield to event loop to keep UI responsive
+      await Promise.resolve();
+      // Check abort again after yielding
+      checkAbortOrHidden(options?.signal);
+    }
+  } finally {
+    secureWipe(bytes, { forbidShared: true });
+  }
+  throw new RandomGenerationError(
+    "Failed to generate secure string within safety limits.",
+  );
 }
 
 export async function generateSecureUUID(): Promise<string> {
@@ -246,12 +394,13 @@ export async function generateSecureUUID(): Promise<string> {
     ).join("");
     return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20, 32)}`;
   } finally {
-    secureWipe(bytes);
+    secureWipe(bytes, { forbidShared: true });
   }
 }
 
 // --- Key & Nonce Generation ---
 type KeyUsageAlias = "encrypt" | "decrypt" | "wrapKey" | "unwrapKey";
+type KeyUsagesArray = Array<KeyUsageAlias>;
 
 const ALLOWED_KEY_USAGES = new Set<KeyUsageAlias>([
   "encrypt",
@@ -265,7 +414,7 @@ export async function createOneTimeCryptoKey(
     lengthBits?: 128 | 256;
     /** @deprecated Use `lengthBits`. */
     length?: 128 | 256;
-    usages?: Array<"encrypt" | "decrypt" | "wrapKey" | "unwrapKey">;
+    usages?: KeyUsagesArray;
   } = {},
 ): Promise<CryptoKey> {
   const { lengthBits, usages = ["encrypt", "decrypt"] } = options;
@@ -278,8 +427,10 @@ export async function createOneTimeCryptoKey(
     );
   }
   if (deprecatedLength !== undefined && isDevelopment()) {
-    console.warn(
-      "[security-kit] DEPRECATION: `length` is deprecated. Use `lengthBits`.",
+    secureDevLog(
+      "warn",
+      "security-kit",
+      "DEPRECATION: `length` is deprecated. Use `lengthBits`.",
     );
   }
 
@@ -314,12 +465,12 @@ export async function createOneTimeCryptoKey(
     return await subtle.importKey(
       "raw",
       keyData,
-      { name: "AES-GCM" },
+      { name: "AES-GCM", length: bitLength },
       extractable,
       usages as KeyUsage[],
     );
   } finally {
-    secureWipe(keyData);
+    secureWipe(keyData, { forbidShared: true });
   }
 }
 
@@ -329,19 +480,13 @@ export function createAesGcmNonce(byteLength = 12): Uint8Array {
 }
 
 export function createAesGcmKey128(
-  usages: Array<"encrypt" | "decrypt" | "wrapKey" | "unwrapKey"> = [
-    "encrypt",
-    "decrypt",
-  ],
+  usages: KeyUsagesArray = ["encrypt", "decrypt"],
 ): Promise<CryptoKey> {
   return createOneTimeCryptoKey({ lengthBits: 128, usages });
 }
 
 export function createAesGcmKey256(
-  usages: Array<"encrypt" | "decrypt" | "wrapKey" | "unwrapKey"> = [
-    "encrypt",
-    "decrypt",
-  ],
+  usages: KeyUsagesArray = ["encrypt", "decrypt"],
 ): Promise<CryptoKey> {
   return createOneTimeCryptoKey({ lengthBits: 256, usages });
 }
@@ -373,15 +518,39 @@ export async function generateSRI(
     );
   }
 
-  const isString = typeof input === "string";
-  const dataForDigest = isString ? ENCODER.encode(input) : input;
+  // IMPORTANT: If callers pass a string here, JavaScript strings are immutable
+  // and cannot be reliably wiped from memory. We therefore create an internal
+  // Uint8Array copy which we wipe after use, but any original string data may
+  // remain in memory and is not erasable. For sensitive secrets prefer passing
+  // an ArrayBuffer or Uint8Array so callers can securely wipe the source buffer
+  // after use.
+
+  /**
+   * @security-note
+   * For sensitive content prefer passing an ArrayBuffer/Uint8Array so callers
+   * can securely wipe the source buffer after use. Passing strings will leave
+   * immutable copies in engine memory that cannot be zeroed.
+   */
+  let internalView: Uint8Array | null = null;
   let digest: ArrayBuffer | undefined;
+
   try {
-    digest = await subtle.digest(subtleAlgo, dataForDigest);
+    if (typeof input === "string") {
+      // Create internal copy from string
+      internalView = SHARED_ENCODER.encode(input);
+    } else {
+      // Create internal copy from ArrayBuffer to avoid mutating caller data
+      const buf = input;
+      internalView = new Uint8Array(buf.byteLength);
+      internalView.set(new Uint8Array(buf));
+    }
+
+    digest = await subtle.digest(subtleAlgo, internalView as BufferSource);
     return `${algorithm}-${_arrayBufferToBase64(digest)}`;
   } finally {
-    if (digest) secureWipe(new Uint8Array(digest));
-    if (isString) secureWipe(dataForDigest as Uint8Array);
+    // Only wipe our internal copies, never mutate caller data
+    if (digest) secureWipe(new Uint8Array(digest), { forbidShared: true });
+    if (internalView) secureWipe(internalView, { forbidShared: true });
   }
 }
 

@@ -56,7 +56,7 @@
     "noErrorTruncation": true,
     "pretty": true
   },
-  "include": ["src/index.ts", "src/globals.d.ts"],
+  "include": ["src/**/*", "src/globals.d.ts"],
   "exclude": [
     "node_modules",
     "dist",

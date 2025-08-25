@@ -36,6 +36,8 @@ export * from "./crypto";
 
 // URL Utilities
 export * from "./url";
+// URL policy configuration (controlled opt-in)
+export { configureUrlPolicy, getSafeSchemes } from "./url-policy";
 
 // PostMessage Utilities
 export * from "./postMessage";
@@ -49,3 +51,11 @@ export {
   secureDevNotify,
   __test_arrayBufferToBase64,
 } from "./utils";
+
+// Sanitizer Utilities (requires peer dependency 'dompurify')
+export * from "./sanitizer";
+// DOM querying and validation utilities
+export * from "./dom";
+
+// Optional: production error reporter for manual emission (rate-limited)
+export { reportProdError } from "./reporting";

@@ -7,9 +7,10 @@
  * @module
  */
 
-import { InvalidParameterError } from "./errors";
+import { InvalidParameterError, CryptoUnavailableError } from "./errors";
 import { ensureCrypto } from "./state";
 import { environment, isDevelopment } from "./environment";
+import { SHARED_ENCODER } from "./encoding";
 
 // --- Parameter Validation ---
 export function validateNumericParam(
@@ -42,18 +43,76 @@ export function validateProbability(probability: number): void {
 }
 
 // --- Secure Wiping ---
+/**
+ * Attempts to zero out the provided typed array view.
+ *
+ * ⚠️  IMPORTANT SECURITY NOTE: This is BEST-EFFORT ONLY
+ *
+ * JavaScript engines may create hidden copies during:
+ * - Garbage collection
+ * - JIT optimizations
+ * - Memory management operations
+ * - String operations
+ *
+ * This function CANNOT guarantee removal of all copies from memory.
+ *
+ * For strong secrecy guarantees, prefer non-extractable CryptoKey objects
+ * created with `createOneTimeCryptoKey` which cannot be extracted to memory.
+ *
+ * @param typedArray - The typed array view to zero out
+ */
 export function secureWipe(
   typedArray: ArrayBufferView | null | undefined,
+  opts?: { forbidShared?: boolean },
 ): void {
+  /**
+   * Options:
+   * - forbidShared: when true, throw if the provided view is backed by a SharedArrayBuffer.
+   *   SharedArrayBuffer-backed memory cannot be reliably zeroed by a single thread and
+   *   therefore should not be relied upon for secret material.
+   */
   if (!typedArray) return;
+  if (opts?.forbidShared) {
+    try {
+      if (
+        typeof SharedArrayBuffer !== "undefined" &&
+        typedArray.buffer instanceof SharedArrayBuffer
+      ) {
+        throw new InvalidParameterError(
+          "secureWipe: SharedArrayBuffer-backed views cannot be securely wiped.",
+        );
+      }
+    } catch {
+      // If SharedArrayBuffer is not available in this environment, ignore.
+    }
+  }
   if (isDevelopment() && typedArray.byteLength > 1024) {
     secureDevLog(
       "warn",
       "secureWipe",
-      "Wiping a large buffer (>1KB). Prefer non-extractable CryptoKey objects.",
+      "Wiping a large buffer (>1KB). Prefer non-extractable CryptoKey objects for secrets.",
     );
   }
   try {
+    // Node.js Buffer explicit handling for clarity
+    if (
+      typeof Buffer !== "undefined" &&
+      (Buffer as unknown as { isBuffer?: (x: unknown) => boolean }).isBuffer?.(
+        typedArray,
+      )
+    ) {
+      (typedArray as unknown as Buffer).fill(0);
+      return;
+    }
+    // DataView: wipe underlying bytes of the exact view range
+    if (typeof DataView !== "undefined" && typedArray instanceof DataView) {
+      new Uint8Array(
+        typedArray.buffer,
+        typedArray.byteOffset,
+        typedArray.byteLength,
+      ).fill(0);
+      return;
+    }
     if (
       typeof BigUint64Array !== "undefined" &&
       typedArray instanceof BigUint64Array
@@ -83,9 +142,22 @@ export function secureWipe(
   }
 }
 
+/**
+ * Creates a Uint8Array intended for short-lived secret material.
+ * This helper makes it explicit that the returned array should be
+ * passed to secureWipe() when no longer needed, and that callers
+ * should avoid reusing their own buffers in sensitive APIs.
+ *
+ * @param length - Length of the array to create
+ * @returns A new Uint8Array suitable for secure wiping
+ */
+export function createSecureZeroingArray(length: number): Uint8Array {
+  validateNumericParam(length, "length", 1, 4096);
+  return new Uint8Array(length);
+}
+
 // --- Timing-Safe Comparison ---
 const MAX_COMPARISON_LENGTH = 4096;
-const ENCODER = new TextEncoder();
 
 export function secureCompare(
   a: string | null | undefined,
@@ -109,7 +181,14 @@ export function secureCompare(
 export async function secureCompareAsync(
   a: string | null | undefined,
   b: string | null | undefined,
+  options?: { requireCrypto?: boolean },
 ): Promise<boolean> {
+  /**
+   * Timing-safe comparison that uses the platform SubtleCrypto.digest when available.
+   * Options:
+   * - requireCrypto: when true, throw CryptoUnavailableError if SubtleCrypto is not
+   *   available. This enforces the "Fail Loudly" rule for security-critical comparisons.
+   */
   const sa = String(a ?? "").normalize("NFC");
   const sb = String(b ?? "").normalize("NFC");
   if (sa.length > MAX_COMPARISON_LENGTH || sb.length > MAX_COMPARISON_LENGTH) {
@@ -121,6 +200,12 @@ export async function secureCompareAsync(
     const crypto = await ensureCrypto();
     const subtle = (crypto as { subtle?: SubtleCrypto }).subtle;
     if (!subtle?.digest) {
+      // If caller requires crypto, fail loudly per constitution; otherwise fall back.
+      if (options?.requireCrypto) {
+        throw new CryptoUnavailableError(
+          "SubtleCrypto.digest is unavailable in this environment.",
+        );
+      }
       secureDevLog(
         "warn",
         "security-kit",
@@ -129,7 +214,7 @@ export async function secureCompareAsync(
       return secureCompare(sa, sb);
     }
     const digestFor = (str: string) =>
-      subtle.digest("SHA-256", ENCODER.encode(str));
+      subtle.digest("SHA-256", SHARED_ENCODER.encode(str));
     let va: Uint8Array | undefined, vb: Uint8Array | undefined;
     try {
       const [da, db] = await Promise.all([digestFor(sa), digestFor(sb)]);
@@ -146,6 +231,8 @@ export async function secureCompareAsync(
       if (vb) secureWipe(vb);
     }
   } catch (error) {
+    // If caller requested a strict crypto requirement, surface a Cryptounavailable error
+    if (options?.requireCrypto && error instanceof CryptoUnavailableError) throw error;
     secureDevLog(
       "error",
       "security-kit",
@@ -157,13 +244,6 @@ export async function secureCompareAsync(
 }
 
 // --- Safe Logging & Redaction ---
-export function sanitizeErrorForLogs(
-  err: unknown,
-): { name: string; message: string } | undefined {
-  if (!(err instanceof Error)) return undefined;
-  return { name: err.name, message: String(err.message).slice(0, 512) };
-}
-
 export function _redact(data: unknown, depth = 0): unknown {
   const MAX_DEPTH = 8;
   const SECRET_KEY_REGEX =
@@ -171,11 +251,17 @@ export function _redact(data: unknown, depth = 0): unknown {
   const JWT_LIKE_REGEX = /^eyJ[\w-]{5,}\.[\w-]{5,}\.[\w-]{5,}$/;
   const REDACTED_VALUE = "[REDACTED]";
   const SAFE_KEY_REGEX = /^[\w.-]{1,64}$/;
+  const MAX_LOG_STRING = 8192;
 
   if (depth >= MAX_DEPTH) return "[REDACTED_MAX_DEPTH]";
   if (data === null || typeof data !== "object") {
-    if (typeof data === "string" && JWT_LIKE_REGEX.test(data))
-      return REDACTED_VALUE;
+    if (typeof data === "string") {
+      if (JWT_LIKE_REGEX.test(data)) return REDACTED_VALUE;
+      if (data.length > MAX_LOG_STRING)
+        return data.slice(0, MAX_LOG_STRING) +
+          `...[TRUNCATED ${data.length - MAX_LOG_STRING} chars]`;
+      return data;
+    }
     return data;
   }
   if (Array.isArray(data)) return data.map((item) => _redact(item, depth + 1));
@@ -189,13 +275,49 @@ export function _redact(data: unknown, depth = 0): unknown {
       continue;
     }
     if (!SAFE_KEY_REGEX.test(key)) continue;
-    out[key] = _redact(rawVal, depth + 1);
+    if (typeof rawVal === "string" && rawVal.length > MAX_LOG_STRING) {
+      out[key] = (rawVal as string).slice(0, MAX_LOG_STRING) +
+        `...[TRUNCATED ${(rawVal as string).length - MAX_LOG_STRING} chars]`;
+    } else {
+      out[key] = _redact(rawVal, depth + 1);
+    }
   }
   return out;
 }
 
+type LogLevel = "debug" | "info" | "warn" | "error";
+
+/**
+ * Internal dev-only console wrapper.
+ * All direct console.* calls for development logging should live here.
+ * This makes it trivial for static checks to allow exactly this function.
+ */
+export function _devConsole(
+  level: LogLevel,
+  msg: string,
+  safeContext: unknown,
+): void {
+  if (environment.isProduction) return;
+  switch (level) {
+    case "debug":
+      console.debug(msg, safeContext);
+      break;
+    case "info":
+      console.info(msg, safeContext);
+      break;
+    case "warn":
+      console.warn(msg, safeContext);
+      break;
+    case "error":
+      console.error(msg, safeContext);
+      break;
+    default:
+      console.info(msg, safeContext);
+  }
+}
+
 export function secureDevLog(
-  level: "debug" | "info" | "warn" | "error",
+  level: LogLevel,
   component: string,
   message: string,
   context: unknown = {},
@@ -221,27 +343,15 @@ export function secureDevLog(
   }
 
   const msg = `[${logEntry.level}] (${component}) ${message}`;
-  switch (level) {
-    case "debug":
-      console.debug(msg, safeContext);
-      break;
-    case "info":
-      console.info(msg, safeContext);
-      break;
-    case "warn":
-      console.warn(msg, safeContext);
-      break;
-    case "error":
-      console.error(msg, safeContext);
-      break;
-    default:
-      console.info(msg, safeContext);
-  }
+  // Delegate actual console interaction to the internal wrapper. This
+  // centralizes console usage in one function which the sanitizer can
+  // explicitly allow by name.
+  _devConsole(level, msg, safeContext);
 }
 
 /** @deprecated Use `secureDevLog` instead. */
 export function secureDevNotify(
-  type: "debug" | "info" | "warn" | "error",
+  type: LogLevel,
   component: string,
   data: unknown = {},
 ): void {

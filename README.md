@@ -52,10 +52,16 @@ async function initializeApp() {
   const uuid = await SIMPLE_API.generateSecureUUID();
   console.log("Secure UUID:", uuid);
 
-  // Perform a timing-attack-resistant string comparison
+  // Perform a timing-attack-resistant string comparison.
+  // For security-critical comparisons (tokens, signatures), prefer the async
+  // variant and require platform crypto to avoid falling back to a weaker path.
   const userInput = "user-provided-token";
   const secretToken = "a-very-secret-token-from-server";
-  const areTokensEqual = SIMPLE_API.secureCompare(userInput, secretToken);
+  const areTokensEqual = await SIMPLE_API.secureCompareAsync(
+    userInput,
+    secretToken,
+    { requireCrypto: true }, // fail loudly if SubtleCrypto is unavailable
+  );
 
   console.log("Tokens are equal (timing-safe):", areTokensEqual);
 
@@ -137,6 +143,67 @@ const listener = createSecurePostMessageListener({
 // listener.destroy();
 ```
 
+### Async secure string generation
+
+For UI contexts where long synchronous CPU work could block the main thread, prefer the async, yielding generator:
+
+```typescript
+import { generateSecureStringAsync } from "@david-osipov/security-kit";
+
+// Generate a 32-character ID using a small alphabet without blocking the UI
+const controller = new AbortController();
+const id = await generateSecureStringAsync(
+  "abcdef0123456789",
+  32,
+  { signal: controller.signal }, // optional abort
+);
+```
+
+Notes:
+
+- `generateSecureStringAsync` mirrors the synchronous algorithm but yields between random-byte batches to keep the event loop responsive.
+- It follows the same validation rules as the sync variant (alphabet size, uniqueness, and length bounds).
+- It accepts an optional `AbortSignal` and will also abort automatically when `document.hidden` is `true` to preserve data integrity in background tabs (see Security Constitution §2.11).
+- Use the async variant in performance-sensitive contexts (main thread, UI) and the synchronous one in short-lived background tasks or scripts where blocking is acceptable.
+
+You can also pass an `AbortSignal` to `getSecureRandomInt(min, max, { signal })` — it will abort similarly and yield periodically during generation.
+
+### URL validation: normalized origin allowlist
+
+`validateURL(urlString, { allowedOrigins })` now normalizes origins with the URL standard (e.g., `https://example.com:443` equals `https://example.com`). Provide exact origins; wildcards are not allowed.
+
+### HTTPS-only policy for URL helpers
+
+As a project-wide security policy, the URL helpers (`createSecureURL`, `updateURLParams`, `validateURL`) enforce HTTPS-only schemes by default. Consumers may pass an `allowedSchemes` option, but the library will only honor schemes that intersect with the internal SAFE_SCHEMES set (currently only `https:`). This prevents callers from accidentally enabling unsafe schemes like `javascript:` or `data:`.
+
+```ts
+import { validateURL } from "@david-osipov/security-kit";
+
+const result = validateURL("https://example.com:443/path", {
+  allowedOrigins: ["https://example.com"],
+  requireHTTPS: true,
+});
+
+if (result.ok) {
+  console.log(result.url.origin); // "https://example.com"
+}
+```
+
+### Typed URL param parsing overload
+
+`parseURLParams(url)` returns a frozen `Record<string, string>` with safe keys. When you know the expected params, use the typed overload for better DX:
+
+```ts
+import { parseURLParams } from "@david-osipov/security-kit";
+
+const params = parseURLParams("https://example.com/?page=2&mode=compact", {
+  page: "number",
+  mode: "string",
+} as const);
+// params has type: Partial<Record<"page"|"mode", string>> & Record<string, string>
+// Missing or type-mismatched keys are logged via secureDevLog warnings (dev only)
+```
+
 #### `secureDevLog(level, component, message, context?)`
 
 A development-only logger that automatically redacts sensitive keys from context objects to prevent accidental secret leakage in console output.
@@ -157,6 +224,55 @@ secureDevLog("info", "AuthComponent", "User logged in", sensitiveData);
 
 ## For Library Consumers & Test Environments
 
+### Sanitization and DOM utilities
+
+This library exposes a small, hardened sanitization API and a DOM validator utility:
+
+- `Sanitizer` - a class that manages named DOMPurify configurations and (optionally) creates Trusted Types policies via `window.trustedTypes`. It accepts a DOMPurify instance in the constructor, which keeps the library environment-agnostic and testable.
+
+- `STRICT_HTML_POLICY_CONFIG` - a conservative DOMPurify configuration that enables only basic HTML formatting and disables SVG/MathML. Use this as your default policy for general text content.
+
+- `HARDENED_SVG_POLICY_CONFIG` - a hardened configuration for allowing sanitized SVG content while forbidding dangerous tags and attributes. Use only when you intentionally accept SVG input from trusted sources.
+
+- `DOMValidator` and `defaultDOMValidator` - utilities that perform allowlist-based DOM querying and element validation. `DOMValidator` can be configured with a set of allowed root selectors; `defaultDOMValidator` is a convenience instance pre-configured for typical app layouts.
+
+Example (browser):
+
+```ts
+import {
+  Sanitizer,
+  STRICT_HTML_POLICY_CONFIG,
+} from "@david-osipov/security-kit";
+import DOMPurify from "dompurify";
+
+const dp = DOMPurify(window as any);
+const sanitizer = new Sanitizer(dp, { strict: STRICT_HTML_POLICY_CONFIG });
+
+// In browsers that support Trusted Types, createPolicy will register a TrustedHTML policy.
+if (typeof window.trustedTypes !== "undefined") {
+  sanitizer.createPolicy("my-app-strict");
+}
+
+// Fallback sanitization for non-TT environments
+const safe = sanitizer.sanitizeForNonTTBrowsers(
+  "<img src=x onerror=alert(1)>",
+  "strict",
+);
+```
+
+Example (tests / Node):
+
+```ts
+import createDOMPurify from "isomorphic-dompurify";
+import {
+  Sanitizer,
+  STRICT_HTML_POLICY_CONFIG,
+} from "@david-osipov/security-kit";
+
+const DOMPurify = createDOMPurify(new (require("jsdom").JSDOM)().window);
+const s = new Sanitizer(DOMPurify, { strict: STRICT_HTML_POLICY_CONFIG });
+```
+
 This library includes test-only code that is automatically removed from production builds using a global `__TEST__` flag. To leverage this Dead Code Elimination (DCE), you must configure your bundler.
 
 **Example for Vite (`vite.config.ts`):**
@@ -174,25 +290,66 @@ export default defineConfig({
 
 This ensures that functions like `__test_resetCryptoStateForUnitTests` do not exist in your final production bundle.
 
-## Contributing
+## Production error reporting (optional)
 
-Contributions are welcome! If you find a bug or have a feature request, please open an issue. If you'd like to contribute code, please fork the repository and submit a pull request.
+This package exposes a rate-limited, centralized production error reporter which applications can configure or call directly. The reporter enforces token-bucket rate limiting, sanitizes errors for logging, and redacts sensitive context before forwarding to your handler.
 
-Please note that this is a personal project maintained on a best-effort basis.
+Public API:
 
-1.  Fork the repository.
-2.  Create your feature branch (`git checkout -b feature/AmazingFeature`).
-3.  Commit your changes (`git commit -m 'Add some AmazingFeature'`).
-4.  Push to the branch (`git push origin feature/AmazingFeature`).
-5.  Open a Pull Request.
+- `setProductionErrorHandler(fn | null)` — set a global handler that receives (error: Error, context: Record<string, unknown>). Pass `null` to disable.
+- `configureErrorReporter({ burst, refillRatePerSec })` — tune the token-bucket parameters.
+- `reportProdError(error, context?)` — manually emit an error to the configured handler (rate-limited). This is exported from the package root.
 
-## License
+Example usage:
 
-This project is licensed under the MIT License - see the [LICENSE.md](LICENSE.md) file for details.
+```ts
+import {
+  setProductionErrorHandler,
+  configureErrorReporter,
+  reportProdError,
+} from "@david-osipov/security-kit";
 
----
+// Configure the reporter on app startup
+configureErrorReporter({ burst: 10, refillRatePerSec: 2 });
+setProductionErrorHandler((err, ctx) => {
+  // Forward to your telemetry pipeline (Sentry, Datadog, etc.)
+  sendToTelemetry(err, ctx);
+});
 
-Authored and maintained by **David Osipov**.
+// When you need to report a critical issue:
+try {
+  riskyOperation();
+} catch (err) {
+  reportProdError(err instanceof Error ? err : new Error(String(err)), {
+    module: "payment",
+    operation: "chargeCustomer",
+  });
+}
+```
 
-- Website: [https://david-osipov.vision](https://david-osipov.vision)
-- ISNI: [0000 0005 1802 960X](https://isni.org/isni/000000051802960X)
+Note: `reportProdError` will be a no-op if no production handler is configured or if the app is not running in a production environment (use `setAppEnvironment` to explicitly control environment detection during startup).
+
+## Testing
+
+This repository includes both fast unit tests and a small set of integration tests that exercise DOMPurify in a Node environment via `jsdom` + `isomorphic-dompurify`.
+
+- Unit tests (fast): run with Vitest. These use lightweight mocks where appropriate and are intended to run in every CI job.
+- Integration tests (jsdom + DOMPurify): run in the same Vitest job — we provide a global setup that initializes a shared JSDOM + DOMPurify instance for tests that need a realistic DOM.
+
+Commands
+
+```bash
+# Run typecheck
+npm run typecheck
+
+# Run all tests (unit + integration)
+npm test
+
+# Run only unit tests (if you want to skip integrations you can use --testNamePattern)
+npm test -- --testNamePattern "unit"
+```
+
+Notes
+
+- The test setup file `tests/setup/global-dompurify.ts` initializes a DOMPurify instance and exposes it to tests; the helper `tests/setup/domPurify.ts` is reusable for additional integration tests.
+- `dompurify` is a peer dependency for this library (consumers should provide it). We use `isomorphic-dompurify` as a dev-time helper so integration tests can run in Node.

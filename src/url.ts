@@ -10,12 +10,96 @@ import { InvalidParameterError } from "./errors";
 import { POSTMESSAGE_FORBIDDEN_KEYS } from "./postMessage";
 import { secureDevLog } from "./utils";
 
+// Allowed query/param key pattern and safe-key checker
+const SAFE_KEY_REGEX = /^[\w.-]{1,128}$/;
+function isSafeKey(key: string): boolean {
+  return (
+    SAFE_KEY_REGEX.test(key) &&
+    key !== "__proto__" &&
+    key !== "constructor" &&
+    key !== "prototype"
+  );
+}
+
+// Type alias for expected parameter typing to avoid repeating unions
+type ParamType = "string" | "number" | "boolean";
+
+function normalizeOrigin(o: string): string {
+  try {
+    const u = new URL(o);
+    // Normalize by removing default ports for http/https for consistent allowlist matching
+    const proto = u.protocol; // includes trailing ':'
+    const hostname = u.hostname.toLowerCase();
+    const port = u.port;
+    const defaultPorts: Record<string, string> = {
+      "http:": "80",
+      "https:": "443",
+    };
+    const includePort = port && port !== defaultPorts[proto];
+    return `${proto}//${hostname}${includePort ? `:${port}` : ""}`;
+  } catch {
+    return o.toLowerCase();
+  }
+}
+
+function isOriginAllowed(origin: string, allowlist?: string[]): boolean {
+  // If caller omitted allowlist -> permissive (backwards compatible).
+  // If caller passed an empty array -> deny all (strict, explicit deny).
+  if (!allowlist) return true;
+  if (Array.isArray(allowlist) && allowlist.length === 0) return false;
+  const allowed = new Set(allowlist.map(normalizeOrigin));
+  const normalized = normalizeOrigin(origin);
+  return allowed.has(normalized);
+}
+
 // --- Secure URL Construction ---
+// SAFE_SCHEMES is now managed by `src/url-policy.ts` for controlled configuration.
+import { getSafeSchemes } from "./url-policy";
+
+function appendPathSegments(url: URL, pathSegments: string[]): void {
+  for (const segment of pathSegments) {
+    if (
+      typeof segment !== "string" ||
+      segment.length === 0 ||
+      segment.length > 1024
+    ) {
+      throw new InvalidParameterError(
+        "Path segments must be non-empty strings shorter than 1024 chars.",
+      );
+    }
+
+    // 1. Validate the DECODED segment for traversal characters
+    const decoded = strictDecodeURIComponentOrThrow(segment);
+    if (
+      decoded.includes("/") ||
+      decoded.includes("\\") ||
+      decoded === "." ||
+      decoded === ".."
+    ) {
+      throw new InvalidParameterError(
+        `Path segments must not contain separators or navigation.`,
+      );
+    }
+
+    if (!url.pathname.endsWith("/")) url.pathname += "/";
+
+    // 2. Append the ORIGINAL, RAW segment. The URL API will handle encoding.
+    // This prevents double-encoding and ensures characters are handled correctly.
+    url.pathname += segment;
+  }
+}
+
 export function createSecureURL(
   base: string,
   pathSegments: string[] = [],
   queryParams: Record<string, unknown> = {},
   fragment?: string,
+  options: {
+    requireHTTPS?: boolean;
+    allowedSchemes?: string[]; // e.g. ["https:", "mailto:"]
+    maxLength?: number;
+    onUnsafeKey?: "throw" | "warn" | "skip";
+  } = {},
 ): string {
   if (typeof base !== "string" || base.length === 0) {
     throw new InvalidParameterError("Base URL must be a non-empty string.");
@@ -29,54 +113,85 @@ export function createSecureURL(
     );
   }
 
-  for (const segment of pathSegments) {
-    if (
-      typeof segment !== "string" ||
-      segment.length === 0 ||
-      segment.length > 1024
-    ) {
-      throw new InvalidParameterError(
-        "Path segments must be non-empty strings shorter than 1024 chars.",
-      );
+  appendPathSegments(url, pathSegments);
+
+  const { allowedSchemes, maxLength: maxLengthOpt, onUnsafeKey = "throw" } = options;
+  // Defensive check: detect forbidden or unsafe keys present as own property names
+  // Special-case '__proto__' because object literals may set a non-enumerable prototype entry
+  const protoIsNull = Object.getPrototypeOf(queryParams) === null;
+  if (
+    Object.prototype.hasOwnProperty.call(queryParams, "__proto__") ||
+    protoIsNull
+  ) {
+    const msg = `Unsafe query key '__proto__' present on params object.`;
+    if (onUnsafeKey === "throw") throw new InvalidParameterError(msg);
+    if (onUnsafeKey === "warn")
+      secureDevLog("warn", "createSecureURL", msg, { base });
+  }
+  const DANGEROUS_KEYS = new Set([
+    ...POSTMESSAGE_FORBIDDEN_KEYS,
+    "__proto__",
+    "constructor",
+    "prototype",
+  ]);
+  const ownKeyNames = new Set<string>([
+    ...Object.keys(queryParams),
+    ...Object.getOwnPropertyNames(queryParams),
+    ...Reflect.ownKeys(queryParams).map(String),
+  ]);
+  for (const dangerous of DANGEROUS_KEYS) {
+    if (dangerous === "__proto__") continue; // already handled above
+    if (ownKeyNames.has(dangerous)) {
+      const msg = `Unsafe query key '${dangerous}' present on params object.`;
+      if (onUnsafeKey === "throw") throw new InvalidParameterError(msg);
+      if (onUnsafeKey === "warn")
+        secureDevLog("warn", "createSecureURL", msg, { base, dangerous });
     }
-    const decoded = strictDecodeURIComponentOrThrow(segment);
-    if (
-      decoded.includes("/") ||
-      decoded.includes("\\") ||
-      decoded === "." ||
-      decoded === ".."
-    ) {
-      throw new InvalidParameterError(
-        `Path segments must not contain separators or navigation.`,
-      );
-    }
-    if (!url.pathname.endsWith("/")) url.pathname += "/";
-    url.pathname += encodePathSegment(decoded);
   }
 
-  const SAFE_KEY_REGEX = /^[\w.-]{1,128}$/;
-  function isSafeKey(key: string): boolean {
-    return (
-      SAFE_KEY_REGEX.test(key) &&
-      key !== "__proto__" &&
-      key !== "constructor" &&
-      key !== "prototype"
+  for (const [key, value] of Object.entries(queryParams)) {
+    const unsafe = POSTMESSAGE_FORBIDDEN_KEYS.has(key) || !isSafeKey(key);
+    if (unsafe) {
+      const msg = `Skipping unsafe query key '${key}' when building URL.`;
+      if (onUnsafeKey === "throw") throw new InvalidParameterError(msg);
+      if (onUnsafeKey === "warn")
+        secureDevLog("warn", "createSecureURL", msg, { base, key });
+      // skip when onUnsafeKey is "skip" or after warning
+      continue;
+    }
+    const stringValue = value == null ? "" : String(value);
+    // Use the robust URLSearchParams API for query handling
+    url.searchParams.append(key, stringValue);
+  }
+
+  // Enforce optional builders-level constraints
+  // Scheme checks: prefer explicit allowedSchemes; if not provided, requireHTTPSOpt
+  // Scheme checks: only allow schemes in the currently configured safe schemes.
+  const SAFE_SCHEMES = new Set(getSafeSchemes());
+  let effectiveSchemes = SAFE_SCHEMES;
+  if (Array.isArray(allowedSchemes) && allowedSchemes.length > 0) {
+    const userSet = new Set(allowedSchemes.map((s) => String(s)));
+    // Intersect to prevent callers enabling unsafe schemes
+    effectiveSchemes = new Set([...userSet].filter((s) => SAFE_SCHEMES.has(s)));
+  }
+  if (!effectiveSchemes.has(url.protocol)) {
+    throw new InvalidParameterError(
+      `Resulting URL scheme '${url.protocol}' is not allowed.`,
     );
   }
-  const pairs: string[] = [];
-  for (const [key, value] of Object.entries(queryParams)) {
-    if (POSTMESSAGE_FORBIDDEN_KEYS.has(key) || !isSafeKey(key)) continue;
-    const stringValue = value == null ? "" : String(value);
-    pairs.push(`${encodeQueryValue(key)}=${encodeQueryValue(stringValue)}`);
-  }
-  if (pairs.length > 0) {
-    url.search =
-      (url.search ? `${url.search.slice(1)}&` : "") + pairs.join("&");
+  if (typeof maxLengthOpt === "number") {
+    if (url.href.length > maxLengthOpt)
+      throw new InvalidParameterError(
+        `Resulting URL exceeds maxLength ${maxLengthOpt}.`,
+      );
   }
 
   if (fragment !== undefined) {
     if (typeof fragment !== "string")
       throw new InvalidParameterError("Fragment must be a string.");
+    if (hasControlChars(fragment))
+      throw new InvalidParameterError("Fragment contains control characters.");
+    // URL.hash setter will encode as needed; set without leading '#'
     url.hash = fragment;
   }
   return url.href;
@@ -85,7 +200,13 @@ export function createSecureURL(
 export function updateURLParams(
   baseUrl: string,
   updates: Record<string, unknown>,
-  options: { removeUndefined?: boolean } = {},
+  options: {
+    removeUndefined?: boolean;
+    requireHTTPS?: boolean;
+    allowedSchemes?: string[];
+    maxLength?: number;
+    onUnsafeKey?: "throw" | "warn" | "skip";
+  } = {},
 ): string {
   const { removeUndefined = true } = options;
   if (typeof baseUrl !== "string")
@@ -99,16 +220,101 @@ export function updateURLParams(
     );
   }
 
-  const SAFE_KEY_REGEX = /^[\w.-]{1,128}$/;
+  const {
+    onUnsafeKey = "throw",
+    requireHTTPS: requireHTTPSOpt,
+    allowedSchemes,
+    maxLength: maxLengthOpt,
+  } = options;
+
+  // Defensive check for dangerous keys present on update object (own or inherited)
+  const DANGEROUS_KEYS = new Set([
+    ...POSTMESSAGE_FORBIDDEN_KEYS,
+    "__proto__",
+    "constructor",
+    "prototype",
+  ]);
+  // Special-case '__proto__' detection: only when own property or prototype is null
+  const protoUpIsNull = Object.getPrototypeOf(updates) === null;
+  if (
+    Object.prototype.hasOwnProperty.call(updates, "__proto__") ||
+    protoUpIsNull
+  ) {
+    const msg = `Unsafe update key '__proto__' present on updates object.`;
+    if (onUnsafeKey === "throw") throw new InvalidParameterError(msg);
+    if (onUnsafeKey === "warn")
+      secureDevLog("warn", "updateURLParams", msg, { baseUrl });
+  }
+  const ownUpdateKeys = new Set<string>([
+    ...Object.keys(updates),
+    ...Object.getOwnPropertyNames(updates),
+    ...Reflect.ownKeys(updates).map(String),
+  ]);
+  for (const dangerous of DANGEROUS_KEYS) {
+    if (ownUpdateKeys.has(dangerous)) {
+      const msg = `Unsafe update key '${dangerous}' present on updates object.`;
+      if (onUnsafeKey === "throw") throw new InvalidParameterError(msg);
+      if (onUnsafeKey === "warn")
+        secureDevLog("warn", "updateURLParams", msg, { baseUrl, dangerous });
+    }
+  }
+
   for (const [key, value] of Object.entries(updates)) {
-    if (POSTMESSAGE_FORBIDDEN_KEYS.has(key) || !isSafeKey(key)) continue;
+    const unsafe = POSTMESSAGE_FORBIDDEN_KEYS.has(key) || !isSafeKey(key);
+    if (unsafe) {
+      const msg = `Skipping unsafe query key '${key}' when updating URL.`;
+      if (onUnsafeKey === "throw") throw new InvalidParameterError(msg);
+      if (onUnsafeKey === "warn")
+        secureDevLog("warn", "updateURLParams", msg, { baseUrl, key });
+      continue;
+    }
     if (value === undefined && removeUndefined) {
       url.searchParams.delete(key);
     } else {
       url.searchParams.set(key, value === null ? "" : String(value));
     }
   }
+
+  if (requireHTTPSOpt) {
+    // Apply the same SAFE_SCHEMES enforcement as createSecureURL
+    const SAFE_SCHEMES = new Set(getSafeSchemes());
+    let effectiveSchemes = SAFE_SCHEMES;
+    if (Array.isArray(allowedSchemes) && allowedSchemes.length > 0) {
+      const userSet = new Set(allowedSchemes.map((s) => String(s)));
+      effectiveSchemes = new Set([...userSet].filter((s) => SAFE_SCHEMES.has(s)));
+    }
+    if (!effectiveSchemes.has(url.protocol))
+      throw new InvalidParameterError(
+        `Resulting URL scheme '${url.protocol}' is not allowed.`,
+      );
+  }
+  if (typeof maxLengthOpt === "number") {
+    if (url.href.length > maxLengthOpt)
+      throw new InvalidParameterError(
+        `Resulting URL exceeds maxLength ${maxLengthOpt}.`,
+      );
+  }
+
   return url.href;
+}
+
+export function validateURLStrict(
+  urlString: string,
+  options: { allowedOrigins?: string[]; maxLength?: number } = {},
+): { ok: true; url: URL } | { ok: false; error: Error } {
+  const vopts: {
+    allowedOrigins?: string[];
+    requireHTTPS?: boolean;
+    allowedSchemes?: string[];
+    maxLength?: number;
+  } = {
+    // strict variant defaults to HTTPS required
+    requireHTTPS: true,
+    maxLength: options.maxLength ?? 2048,
+  };
+  if (options.allowedOrigins !== undefined)
+    vopts.allowedOrigins = options.allowedOrigins;
+  return validateURL(urlString, vopts);
 }
 
 export function validateURL(
@@ -116,10 +322,11 @@ export function validateURL(
   options: {
     allowedOrigins?: string[];
     requireHTTPS?: boolean;
+    allowedSchemes?: string[];
     maxLength?: number;
   } = {},
 ): { ok: true; url: URL } | { ok: false; error: Error } {
-  const { allowedOrigins, requireHTTPS = false, maxLength = 2048 } = options;
+  const { allowedOrigins, allowedSchemes, maxLength = 2048 } = options;
   if (typeof urlString !== "string")
     return {
       ok: false,
@@ -143,16 +350,25 @@ export function validateURL(
     };
   }
 
-  if (requireHTTPS && url.protocol !== "https:")
+  // Determine effective allowed schemes: intersection of SAFE_SCHEMES and
+  // user-provided allowedSchemes (if any). This prevents callers from
+  // enabling unsafe schemes like 'javascript:' or 'data:'.
+  const SAFE_SCHEMES = new Set(getSafeSchemes());
+  let effectiveSchemes = SAFE_SCHEMES;
+  if (Array.isArray(allowedSchemes) && allowedSchemes.length > 0) {
+    const userSet = new Set(allowedSchemes.map((s) => String(s)));
+    effectiveSchemes = new Set([...userSet].filter((s) => SAFE_SCHEMES.has(s)));
+  }
+  if (!effectiveSchemes.has(url.protocol)) {
     return {
       ok: false,
-      error: new InvalidParameterError("URL must use HTTPS."),
+      error: new InvalidParameterError(
+        `URL scheme '${url.protocol}' is not allowed.`,
+      ),
     };
-  if (
-    allowedOrigins &&
-    allowedOrigins.length > 0 &&
-    !allowedOrigins.includes(url.origin)
-  )
+  }
+
+  if (!isOriginAllowed(url.origin, allowedOrigins))
     return {
       ok: false,
       error: new InvalidParameterError(
@@ -163,64 +379,82 @@ export function validateURL(
   return { ok: true, url };
 }
 
+function _logParamWarn(
+  kind: string,
+  key: string,
+  urlString: string,
+  extra?: string,
+): void {
+  secureDevLog(
+    "warn",
+    "parseURLParams",
+    extra ? `${kind} '${key}': ${extra}` : `${kind} '${key}'`,
+    { url: urlString },
+  );
+}
+
+function _validateExpectedParams(
+  expected: Record<string, ParamType>,
+  urlString: string,
+  paramMap: Map<string, string>,
+): void {
+  for (const [expectedKey, expectedType] of Object.entries(expected)) {
+    const value = paramMap.get(expectedKey);
+    if (value === undefined) {
+      _logParamWarn("Expected parameter is missing", expectedKey, urlString);
+    } else if (expectedType === "number" && isNaN(Number(value))) {
+      _logParamWarn(
+        "Parameter expected number",
+        expectedKey,
+        urlString,
+        `got '${value}'`,
+      );
+    }
+  }
+}
+
+export function parseURLParams(urlString: string): Record<string, string>;
+export function parseURLParams<K extends string>(
+  urlString: string,
+  expectedParams: Record<K, ParamType>,
+): Partial<Record<K, string>> & Record<string, string>;
 export function parseURLParams(
   urlString: string,
-  expectedParams?: Record<string, "string" | "number" | "boolean">,
+  expectedParams?: Record<string, ParamType>,
 ): Record<string, string> {
   if (typeof urlString !== "string")
     throw new InvalidParameterError("URL must be a string.");
-  let url: URL;
-  try {
-    url = new URL(urlString);
-  } catch (error) {
-    throw new InvalidParameterError(
-      `Invalid URL: ${error instanceof Error ? error.message : String(error)}`,
-    );
-  }
 
+  const parseUrlOrThrow = (s: string): URL => {
+    try {
+      return new URL(s);
+    } catch (error) {
+      throw new InvalidParameterError(
+        `Invalid URL: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  };
+
+  const url = parseUrlOrThrow(urlString);
   const params: Record<string, string> = Object.create(null);
-  const SAFE_KEY_REGEX = /^[\w.-]{1,128}$/;
   const paramMap = new Map<string, string>();
 
+  const addParam = (key: string, value: string) => {
+    paramMap.set(key, value);
+    Object.defineProperty(params, key, {
+      value,
+      configurable: true,
+      enumerable: true,
+      writable: false,
+    });
+  };
+
   for (const [key, value] of url.searchParams.entries()) {
-    if (
-      SAFE_KEY_REGEX.test(key) &&
-      key !== "__proto__" &&
-      key !== "constructor" &&
-      key !== "prototype"
-    ) {
-      paramMap.set(key, value);
-      Object.defineProperty(params, key, {
-        value,
-        configurable: true,
-        enumerable: true,
-        writable: false,
-      });
-    }
+    if (isSafeKey(key)) addParam(key, value);
   }
 
-  if (expectedParams) {
-    for (const [expectedKey, expectedType] of Object.entries(expectedParams)) {
-      const value = paramMap.get(expectedKey);
-      if (value === undefined) {
-        secureDevLog(
-          "warn",
-          "parseURLParams",
-          `Expected parameter '${expectedKey}' is missing`,
-          { url: urlString },
-        );
-        continue;
-      }
-      if (expectedType === "number" && isNaN(Number(value))) {
-        secureDevLog(
-          "warn",
-          "parseURLParams",
-          `Parameter '${expectedKey}' expected number, got '${value}'`,
-          { url: urlString },
-        );
-      }
-    }
-  }
+  if (expectedParams)
+    _validateExpectedParams(expectedParams, urlString, paramMap);
   return Object.freeze(params);
 }
 
