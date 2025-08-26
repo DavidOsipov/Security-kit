@@ -1,0 +1,16 @@
+title = "Gitleaks default config for Security-Kit"
+
+[[rules]]
+description = "High entropy strings (API keys)"
+regex = '''(?i)(?:apikey|api_key|secret|token|access_token|private_key|secret_key)\W*[:=]\W*['\"]?[A-Za-z0-9\-_.]{20,}['\"]?'''
+tags = ["key","high-entropy"]
+allowlist = []
+
+[[rules]]
+description = "Private RSA/DSA/EC key blocks"
+regex = '''-----BEGIN (RSA|DSA|EC|OPENSSH) PRIVATE KEY-----[\s\S]+?-----END (RSA|DSA|EC|OPENSSH) PRIVATE KEY-----'''
+tags = ["key","private-key"]
+
+[[allowlist]]
+description = "Allow project-local build artifacts"
+paths = ["^dist/", "^coverage/", "^node_modules/"]

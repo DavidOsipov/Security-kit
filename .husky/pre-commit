@@ -1,0 +1,5 @@
+#!/usr/bin/env sh
+
+# Run the project's precommit script which performs secret scanning and lint-staged
+echo "Running repository pre-commit checks..."
+exec bash "$(git rev-parse --show-toplevel)/scripts/precommit.sh"

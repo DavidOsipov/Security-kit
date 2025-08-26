@@ -1,0 +1,29 @@
+name: "Gitleaks Secret Scan"
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  gitleaks:
+    name: Run Gitleaks
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Install dependencies
+        env:
+          HUSKY: 0
+        run: npm ci
+
+      - name: Run Gitleaks (fail on detection)
+        uses: zricethezav/gitleaks-action@v2
+        with:
+          args: detect --source . --verbose --exit-code 1
