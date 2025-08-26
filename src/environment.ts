@@ -8,7 +8,13 @@
 
 export const environment = (() => {
   const cache = new Map<string, boolean>();
-  let explicitEnv: "development" | "production" | null = null;
+  /*
+   * explicitEnvironment must be mutable at runtime because callers may
+   * explicitly override environment detection during initialization or tests.
+   * This mutation is intentional and guarded by configuration seals elsewhere.
+   */
+  // eslint-disable-next-line functional/no-let -- runtime mutability required for setExplicitEnv
+  let explicitEnvironment: "development" | "production" | undefined;
 
   function isPrivate172(hostname: string) {
     if (typeof hostname !== "string") return false;
@@ -21,51 +27,62 @@ export const environment = (() => {
   }
 
   return {
-    setExplicitEnv(env: "development" | "production") {
-      explicitEnv = env;
+    setExplicitEnv(environment_: "development" | "production") {
+      explicitEnvironment = environment_;
+      // Intentional runtime cache mutation to reflect explicit environment override.
+      // eslint-disable-next-line functional/immutable-data -- deliberate, limited cache mutation
       cache.clear();
     },
     get isDevelopment() {
-      if (explicitEnv) return explicitEnv === "development";
+      if (explicitEnvironment !== undefined)
+        return explicitEnvironment === "development";
       if (cache.has("isDevelopment"))
         return cache.get("isDevelopment") ?? false;
 
       if (typeof process !== "undefined" && process.env?.["NODE_ENV"]) {
-        const isNodeDev =
+        const isNodeDevelopment =
           process.env["NODE_ENV"] === "development" ||
           process.env["NODE_ENV"] === "test";
-        cache.set("isDevelopment", isNodeDev);
-        return isNodeDev;
+        // Cache node-derived environment for subsequent calls.
+        // eslint-disable-next-line functional/immutable-data -- deliberate, limited cache mutation
+        cache.set("isDevelopment", isNodeDevelopment);
+        return isNodeDevelopment;
       }
 
-      let result = false;
-      try {
-        const location = (globalThis as { location?: Location }).location;
-        if (location) {
+      const result = (() => {
+        try {
+          const location = (globalThis as { readonly location?: Location })
+            .location;
+          if (!location) return false;
           const hostname = (location.hostname || "").trim().toLowerCase();
-          const devHostnames = ["localhost", "127.0.0.1", "[::1]", ""];
-          const devSuffixes = [".local", ".test"];
-          const devPrefixes = ["192.168.", "10."];
-          result =
-            devHostnames.includes(hostname) ||
-            devSuffixes.some((suffix) => hostname.endsWith(suffix)) ||
-            devPrefixes.some((prefix) => hostname.startsWith(prefix)) ||
-            isPrivate172(hostname);
+          const developmentHostnames = ["localhost", "127.0.0.1", "[::1]", ""];
+          const developmentSuffixes = [".local", ".test"];
+          const developmentPrefixes = ["192.168.", "10."];
+          return (
+            developmentHostnames.includes(hostname) ||
+            developmentSuffixes.some((suffix) => hostname.endsWith(suffix)) ||
+            developmentPrefixes.some((prefix) => hostname.startsWith(prefix)) ||
+            isPrivate172(hostname)
+          );
+        } catch {
+          return false;
         }
-      } catch {
-        /* Default to false */
-      }
+      })();
+      // Cache the computed value for subsequent calls. This is a deliberate
+      // optimization; mutating the Map is intentional and limited in scope.
+      // eslint-disable-next-line functional/immutable-data -- intentional, limited cache mutation
       cache.set("isDevelopment", result);
       return result;
     },
     get isProduction() {
-      if (explicitEnv) return explicitEnv === "production";
+      if (explicitEnvironment) return explicitEnvironment === "production";
       // Avoid relying on `this` binding in getters; reference the exported
       // `environment` object explicitly to ensure correctness if the getter
       // is extracted or called with a different `this`.
       return !environment.isDevelopment;
     },
     clearCache() {
+      // eslint-disable-next-line functional/immutable-data -- intentional, limited cache mutation
       cache.clear();
     },
   };

@@ -1,5 +1,12 @@
 #!/usr/bin/env sh
 
-# Run the project's precommit script which performs secret scanning and lint-staged
+# Run the no-blob-fallback guard before committing. This provides fast local
+# feedback so developers don't push commits that reintroduce blob fallback code.
+echo "Running ci-guard-no-blob-fallback..."
+NODE_NO_WARNINGS=1 npm run guard:no-blob-fallback || {
+	echo "\nForbidden patterns detected or guard failed. Aborting commit."
+	exit 1
+}
+
 echo "Running repository pre-commit checks..."
 exec bash "$(git rev-parse --show-toplevel)/scripts/precommit.sh"

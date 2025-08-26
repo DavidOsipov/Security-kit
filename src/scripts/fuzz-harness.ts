@@ -1,145 +1,193 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
 import { Sanitizer, STRICT_HTML_POLICY_CONFIG } from "../sanitizer";
-import * as postMessageMod from "../postMessage";
-import * as crypto from "crypto";
+import * as postMessageModule from "../postMessage";
+import * as crypto from "node:crypto";
 
-function randomString(len = 6, rnd?: () => number) {
+function randomString(length = 6, rnd?: () => number) {
   const chars = "abcdefghijklmnopqrstuvwxyz0123456789";
-  let s = "";
   if (typeof rnd === "function") {
-    for (let i = 0; i < len; i++) s += chars[Math.floor(rnd() * chars.length)];
-    return s;
+    return Array.from(
+      { length },
+      () => chars[Math.floor(rnd() * chars.length)],
+    ).join("");
   }
-  const buf = Buffer.alloc(len);
+  const buf = Buffer.alloc(length);
   crypto.randomFillSync(buf);
-  for (let i = 0; i < len; i++) s += chars[(buf[i] as number) % chars.length];
-  return s;
+  return Array.from(buf)
+    .map((b) => chars[(b as number) % chars.length])
+    .join("");
 }
 
 // Secure RNG returning a float in [0,1)
 function secureRandom(): number {
   const buf = Buffer.alloc(6);
   crypto.randomFillSync(buf);
-  let v = 0;
-  for (let i = 0; i < 6; i++) v = (v << 8) + buf.readUInt8(i);
+  const v = Array.from({ length: 6 }).reduce(
+    (accumulator, _, index) => (accumulator << 8) + buf.readUInt8(index),
+    0,
+  );
   return v / 2 ** 48;
 }
 
 function makeHostilePayload(
-  i: number,
+  index: number,
   rnd = secureRandom,
   randString = randomString,
   randInt?: (n: number) => number,
-) {
+): unknown {
   if (!randInt) randInt = (n: number) => Math.floor(rnd() * n);
   const r = rnd();
   if (r < 0.2) {
-    return { __proto__: { hacked: i } };
+    // prototype pollution vector (intentional for fuzzing)
+
+    return { __proto__: { hacked: index } };
   }
   if (r < 0.4) {
-    const o: any = { a: 1 };
+    const o: Record<PropertyKey, unknown> = { a: 1 };
     const s = Symbol(randString(6, rnd));
-    o[s] = { evil: i };
+    // unsafe member access on purpose for fuzzing
+    // Narrow, intentional mutation for the fuzz harness: we need to create a symbol-keyed
+    // property to exercise sanitizer behavior across exotic keys. This is auditable and
+    // intentionally unsafe in this test-only file.
+    // eslint-disable-next-line functional/immutable-data -- intentional test harness behavior
+    o[s] = { evil: index };
+
     return o;
   }
   if (r < 0.6) {
-    const o: any = { a: 1 };
-    Object.defineProperty(o, "b", {
-      get() {
+    // Use an object literal with an accessor to avoid mutating an existing object.
+    const o: Record<PropertyKey, unknown> = {
+      a: 1,
+      get b() {
         throw new Error("hostile getter");
       },
-      enumerable: true,
-    });
+    };
+
     return o;
   }
   if (r < 0.8) {
-    const o: any = { nested: {} };
-    o.nested.deep = { __proto__: { p: i } };
+    const o: Record<PropertyKey, unknown> = { nested: {} };
+    // deliberate nested mutation to exercise prototype setters in sanitizer
+    // Narrow, intentional mutation for fuzzing: mutate a nested object to simulate
+    // hostile payload shapes (prototype mutation inside nested structure).
+    // eslint-disable-next-line functional/immutable-data -- intentional fuzz harness access
+    o.nested.deep = { __proto__: { p: index } };
+
     return o;
   }
 
   // Extra vectors when rnd is present
   if (r < 0.9) {
     // toString/valueOf override or Symbol.toPrimitive
-    const o: any = { v: 1 };
+    const o: Record<PropertyKey, unknown> = { v: 1 };
     if (randInt) {
       const choice = randInt(3);
       if (choice === 0) {
+        // deliberate mutation to override toString for fuzzing
+        // Narrow, intentional mutation: override built-in conversion helpers to assert
+        // sanitizer and consumers handle poisoned primitives safely.
+        // eslint-disable-next-line functional/immutable-data -- intentional fuzz harness mutation
         o.toString = () => {
           throw new Error("poisoned toString");
         };
       } else if (choice === 1) {
+        // deliberate mutation to override valueOf for fuzzing
+        // eslint-disable-next-line functional/immutable-data -- intentional fuzz harness mutation
         o.valueOf = () => {
           throw new Error("poisoned valueOf");
         };
       } else {
+        // deliberate mutation to override Symbol.toPrimitive
+        // eslint-disable-next-line functional/immutable-data -- intentional fuzz payload
         o[Symbol.toPrimitive] = () => {
           throw new Error("poisoned toPrimitive");
         };
       }
     } else {
+      // Narrow intentional mutation for the fallback path when randInt is not provided.
+      // eslint-disable-next-line functional/immutable-data -- intentional fuzz harness mutation
       o.toString = () => {
         throw new Error("poisoned toString");
       };
     }
+
     return o;
   }
 
   if (r < 0.95) {
     // setPrototypeOf attack on nested object keys
-    const o: any = { a: { b: 1 } };
+    const o: Record<PropertyKey, unknown> = { a: { b: 1 } };
     try {
+      // intentionally mutate prototype to test sanitizer hardening
+      // Narrowly-scoped, auditable mutation: attempt to change the prototype of a nested
+      // object to ensure sanitizers and validators protect against these vectors.
+      // eslint-disable-next-line functional/immutable-data -- intentional fuzz harness access
       Object.setPrototypeOf(o.a, { poisoned: true });
-    } catch (err) {
+    } catch (error) {
       console.warn(
         "setPrototypeOf failed during fuzz harness",
-        (err as Error).message,
+        (error as Error).message,
       );
     }
+
     return o;
   }
 
   // long key names
-  const key = new Array(512)
-    .fill(0)
+  const key = Array.from({ length: 512 })
     .map(() => randomString(4, rnd))
     .join(":");
-  const obj: any = {};
-  obj[key] = { huge: i };
-  return obj;
+  const object: Record<string, unknown> = {};
+  // deliberate long-key insertion for fuzzing
+  // Narrow, intentional mutation to insert a very long property name to test
+  // sanitizer/validator behavior on extreme keys.
+  // eslint-disable-next-line functional/immutable-data -- intentional fuzz harness access
+  object[key] = { huge: index };
+
+  return object;
 }
 
 export async function runStandaloneFuzzHarness(iterations = 100) {
-  const dp: any = { sanitize: (s: string) => s };
+  const dp: { readonly sanitize: (s: string, cfg?: unknown) => string } = {
+    sanitize: (s: string) => s,
+  };
   const sanitizer = new Sanitizer(dp, { strict: STRICT_HTML_POLICY_CONFIG });
-
-  for (let i = 0; i < iterations; i++) {
+  for (const index of Array.from(
+    { length: iterations },
+    (_, index_) => index_,
+  )) {
     const before = Object.prototype.hasOwnProperty("hacked");
-    const p = makeHostilePayload(i);
+    const p: unknown = makeHostilePayload(index);
     try {
       try {
         sanitizer.getSanitizedString(JSON.stringify(p), "strict");
-      } catch (err) {
+      } catch (error) {
         console.warn(
           "sanitizer error during fuzz iteration:",
-          (err as Error).message,
+          (error as Error).message,
         );
       }
       try {
-        postMessageMod._validatePayload?.(p, (_d: any) => true as any);
-      } catch (err) {
+        postMessageModule._validatePayload?.(
+          p,
+          (_d: unknown) => true as unknown as boolean,
+        );
+      } catch (error) {
         console.warn(
           "postMessage validator error during fuzz iteration:",
-          (err as Error).message,
+          (error as Error).message,
         );
       }
-    } catch (e) {
-      console.error("Unexpected crash", e);
+    } catch (caught) {
+      // give a more descriptive name to caught exception
+      console.error("Unexpected crash", caught);
       return 1;
     }
     const after = Object.prototype.hasOwnProperty("hacked");
     if (after !== before) {
-      console.error("Prototype polluted! iteration", i, p, { before, after });
+      console.error("Prototype polluted! iteration", index, p, {
+        before,
+        after,
+      });
       return 2;
     }
   }

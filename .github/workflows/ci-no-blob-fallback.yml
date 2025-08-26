@@ -1,0 +1,28 @@
+name: CI — no blob fallback
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  check-no-blob-fallback:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 18
+
+      - name: Install deps
+        run: npm ci
+
+      - name: Run no-blob-fallback guard
+        run: |
+          # Run the TypeScript guard to prevent reintroduction of embedded blob fallback
+          npx ts-node-esm ./scripts/ci-guard-no-blob-fallback.ts

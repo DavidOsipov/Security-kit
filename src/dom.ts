@@ -11,21 +11,23 @@
  * @module
  */
 
+/* eslint-disable functional/immutable-data, unicorn/no-null */
+
 import {
   InvalidParameterError,
   InvalidConfigurationError,
   sanitizeErrorForLogs,
 } from "./errors";
-import { secureDevLog } from "./utils";
+import { secureDevLog as secureDevelopmentLog } from "./utils";
 
 /**
  * Configuration for the DOMValidator.
  */
 export interface DOMValidatorConfig {
   /** A Set of CSS selectors defining the root elements within which all queries must be contained. */
-  allowedRootSelectors: Set<string>;
+  readonly allowedRootSelectors: ReadonlySet<string>;
   /** A Set of selectors that are explicitly forbidden from being in the allowlist (e.g., 'body', 'html'). */
-  forbiddenRoots: Set<string>;
+  readonly forbiddenRoots: ReadonlySet<string>;
 }
 
 const DEFAULT_CONFIG: DOMValidatorConfig = {
@@ -49,7 +51,11 @@ const DEFAULT_CONFIG: DOMValidatorConfig = {
 export class DOMValidator {
   readonly #config: DOMValidatorConfig;
   readonly #validatedElements = new WeakSet<Element>();
-  #resolvedRootsCache: Map<string, Element | null> | null = null;
+  // Use `undefined` instead of `null` for uninitialized caches to satisfy
+  // linting rules; semantics remain identical.
+  readonly #resolvedRootsCache:
+    | ReadonlyMap<string, Element | undefined>
+    | undefined = undefined;
 
   constructor(config: DOMValidatorConfig = DEFAULT_CONFIG) {
     // Clone and normalize the configuration to avoid retaining references to
@@ -81,14 +87,14 @@ export class DOMValidator {
   /**
    * Resolves and caches the DOM Elements corresponding to the allowed root selectors.
    */
-  #resolveAndCacheAllowedRoots(): Map<string, Element | null> {
+  #resolveAndCacheAllowedRoots(): ReadonlyMap<string, Element | undefined> {
     if (this.#resolvedRootsCache) {
       return this.#resolvedRootsCache;
     }
-    const cache = new Map<string, Element | null>();
+    const cache = new Map<string, Element | undefined>();
     for (const selector of this.#config.allowedRootSelectors) {
       // Assuming 'document' is available in the context where this runs.
-      cache.set(selector, document.querySelector(selector));
+      cache.set(selector, document.querySelector(selector) ?? undefined);
     }
     this.#resolvedRootsCache = cache;
     return cache;
@@ -125,9 +131,9 @@ export class DOMValidator {
     if (typeof document !== "undefined") {
       try {
         document.createDocumentFragment().querySelector(selector);
-      } catch (err) {
+      } catch (error) {
         throw new InvalidParameterError(
-          `Invalid selector syntax: ${selector}. Reason: ${err instanceof Error ? err.message : String(err)}`,
+          `Invalid selector syntax: ${selector}. Reason: ${error instanceof Error ? error.message : String(error)}`,
         );
       }
     }
@@ -140,13 +146,13 @@ export class DOMValidator {
    * @returns The validated DOM Element.
    * @throws {InvalidParameterError} If validation fails.
    */
-  public validateElement(el: unknown): Element {
-    if (!el || (el as Node).nodeType !== Node.ELEMENT_NODE) {
+  public validateElement(element_: unknown): Element {
+    if (!element_ || (element_ as Node).nodeType !== Node.ELEMENT_NODE) {
       throw new InvalidParameterError(
         "Invalid element: must be a DOM Element.",
       );
     }
-    const element = el as Element;
+    const element = element_ as Element;
     if (!this.#validatedElements.has(element)) {
       const tag = element.tagName.toLowerCase();
       if (["script", "iframe", "object", "embed", "style"].includes(tag)) {
@@ -170,15 +176,16 @@ export class DOMValidator {
   ): Element | null {
     try {
       this.validateSelectorSyntax(selector);
-      const el = context.querySelector(selector);
-      if (!el) return null;
+      const element = context.querySelector(selector);
+      if (!element) return null;
 
       const rootEls = Array.from(
         this.#resolveAndCacheAllowedRoots().values(),
-      ).filter(Boolean) as Element[];
+      ).filter(Boolean) as readonly Element[];
 
       const isContained = rootEls.some(
-        (rootEl) => rootEl === el || rootEl.contains(el),
+        (rootElement) =>
+          rootElement === element || rootElement.contains(element),
       );
 
       if (!isContained) {
@@ -187,12 +194,17 @@ export class DOMValidator {
         );
       }
 
-      return this.validateElement(el);
-    } catch (err) {
-      secureDevLog("warn", "DOMValidator", "Element query failed validation", {
-        selector,
-        err: sanitizeErrorForLogs(err),
-      });
+      return this.validateElement(element);
+    } catch (error) {
+      secureDevelopmentLog(
+        "warn",
+        "DOMValidator",
+        "Element query failed validation",
+        {
+          selector,
+          err: sanitizeErrorForLogs(error),
+        },
+      );
       return null;
     }
   }

@@ -30,22 +30,24 @@ function isValidScheme(s: string): boolean {
   return typeof s === "string" && /^[a-z][a-z0-9+.-]*:$/.test(s);
 }
 
-export function getSafeSchemes(): string[] {
+export function getSafeSchemes(): readonly string[] {
   return [..._safeSchemes];
 }
 
-export function configureUrlPolicy(opts: { safeSchemes?: string[] } = {}) {
+export function configureUrlPolicy(
+  options: { readonly safeSchemes?: readonly string[] } = {},
+) {
   if (getCryptoState() === CryptoState.Sealed) {
     throw new InvalidConfigurationError(
       "Configuration is sealed and cannot be changed.",
     );
   }
-  const { safeSchemes } = opts;
+  const { safeSchemes } = options;
   if (!safeSchemes) return;
   if (!Array.isArray(safeSchemes) || safeSchemes.length === 0) {
     throw new InvalidParameterError("safeSchemes must be a non-empty array.");
   }
-  const normalized: string[] = [];
+  const normalized: readonly string[] = [];
   for (const s of safeSchemes) {
     if (typeof s !== "string")
       throw new InvalidParameterError("Each scheme must be a string.");

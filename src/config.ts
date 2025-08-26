@@ -14,7 +14,10 @@ import {
   _setCrypto,
 } from "./state";
 import { environment } from "./environment";
-import { configureProdErrorReporter, setProdErrorHook } from "./reporting";
+import {
+  configureProdErrorReporter as configureProductionErrorReporter,
+  setProdErrorHook as setProductionErrorHook,
+} from "./reporting";
 
 /**
  * Explicitly sets the crypto implementation to use.
@@ -24,7 +27,7 @@ import { configureProdErrorReporter, setProdErrorHook } from "./reporting";
  */
 export function setCrypto(
   cryptoLike: Crypto | null | undefined,
-  options: { allowInProduction?: boolean } = {},
+  options: { readonly allowInProduction?: boolean } = {},
 ): void {
   if (getCryptoState() === CryptoState.Sealed) {
     throw new InvalidConfigurationError(
@@ -47,18 +50,18 @@ export function sealSecurityKit(): void {
  * Explicitly sets the application's environment.
  * @param env The environment to set ('development' or 'production').
  */
-export function setAppEnvironment(env: "development" | "production") {
+export function setAppEnvironment(environment_: "development" | "production") {
   if (getCryptoState() === CryptoState.Sealed) {
     throw new InvalidConfigurationError(
       "Configuration is sealed and cannot be changed.",
     );
   }
-  if (env !== "development" && env !== "production") {
+  if (environment_ !== "development" && environment_ !== "production") {
     throw new InvalidParameterError(
       'Environment must be either "development" or "production".',
     );
   }
-  environment.setExplicitEnv(env);
+  environment.setExplicitEnv(environment_);
 }
 
 /**
@@ -73,7 +76,7 @@ export function setProductionErrorHandler(
       "Configuration is sealed and cannot be changed.",
     );
   }
-  setProdErrorHook(hook);
+  setProductionErrorHook(hook);
 }
 
 /**
@@ -81,13 +84,13 @@ export function setProductionErrorHandler(
  * @param config Rate-limiting parameters.
  */
 export function configureErrorReporter(config: {
-  burst: number;
-  refillRatePerSec: number;
+  readonly burst: number;
+  readonly refillRatePerSec: number;
 }): void {
   if (getCryptoState() === CryptoState.Sealed) {
     throw new InvalidConfigurationError(
       "Configuration is sealed and cannot be changed.",
     );
   }
-  configureProdErrorReporter(config);
+  configureProductionErrorReporter(config);
 }

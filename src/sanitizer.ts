@@ -48,12 +48,18 @@ export type SanitizerPolicies = Record<string, DOMPurifyConfig>;
 export class Sanitizer {
   // Use a minimal, compatible type for the DOMPurify instance to avoid complex ReturnType constraints
   readonly #dompurify: {
-    sanitize: (s: string, cfg?: DOMPurifyConfig) => string | TrustedHTML;
+    readonly sanitize: (
+      s: string,
+      cfg?: DOMPurifyConfig,
+    ) => string | TrustedHTML;
   };
   readonly #policies: SanitizerPolicies;
-  // TrustedTypePolicy shapes vary by environment; store as `TrustedTypePolicy | object` to avoid `any`.
   // TrustedTypePolicy shapes vary by environment; store typed policies.
-  // Mark readonly because the Map reference itself is not reassigned.
+  // The cache is intentionally mutable but strictly private. TrustedTypePolicy
+  // objects are immutable by contract (the TT API returns opaque objects) and
+  // caching avoids repeated, expensive policy creation. We keep the mutation
+  // minimal and contained to this single line to balance security, clarity,
+  // and performance.
   readonly #trustedTypePolicies = new Map<string, TrustedTypePolicy>();
 
   /**
@@ -62,7 +68,10 @@ export class Sanitizer {
    */
   constructor(
     dompurifyInstance: {
-      sanitize: (s: string, cfg?: DOMPurifyConfig) => string | TrustedHTML;
+      readonly sanitize: (
+        s: string,
+        cfg?: DOMPurifyConfig,
+      ) => string | TrustedHTML;
     },
     policies: SanitizerPolicies,
   ) {
@@ -108,16 +117,16 @@ export class Sanitizer {
     type TTCreatePolicy = (
       name: string,
       rules: {
-        createHTML: (input: string) => TrustedHTML;
-        createScript?: () => never;
-        createScriptURL?: () => never;
+        readonly createHTML: (input: string) => TrustedHTML;
+        readonly createScript?: () => never;
+        readonly createScriptURL?: () => never;
       },
     ) => TrustedTypePolicy;
 
-    const createPolicyFn = window.trustedTypes
+    const createPolicyFunction = window.trustedTypes
       .createPolicy as unknown as TTCreatePolicy;
 
-    const raw = createPolicyFn(policyName, {
+    const raw = createPolicyFunction(policyName, {
       createHTML: (input: string) => {
         // Ensure RETURN_TRUSTED_TYPE is true for the policy to work correctly.
         return this.#dompurify.sanitize(input, {
@@ -133,6 +142,12 @@ export class Sanitizer {
       },
     });
 
+    // Controlled cache population: intentionally mutate the private Map to
+    // cache the created policy. This is a narrowly-scoped, auditable exception
+    // because TrustedTypePolicy instances are opaque and safe to reuse once
+    // created. Keep the eslint-disable scoped to this single call only.
+    /* eslint-disable-next-line functional/immutable-data --
+       private, controlled cache mutation for TrustedTypePolicy instances */
     this.#trustedTypePolicies.set(policyName, raw);
     return raw;
   }
@@ -162,25 +177,29 @@ export class Sanitizer {
 
   /**
    * Attempts to create a Named TrustedTypePolicy if the API is available.
-   * Returns the policy or `null` if the environment doesn't support Trusted Types.
+   * Returns the policy or `undefined` if the environment doesn't support Trusted Types.
    * This does not throw when Trusted Types are unavailable.
    */
-  public createPolicyIfAvailable(policyName: string): TrustedTypePolicy | null {
+  public createPolicyIfAvailable(
+    policyName: string,
+  ): TrustedTypePolicy | undefined {
     if (!this.#policies[policyName]) {
       throw new InvalidConfigurationError(
         `Sanitizer policy "${policyName}" is not defined.`,
       );
     }
-    if (typeof window === "undefined") return null;
+    if (typeof window === "undefined") return undefined;
     // Optional chaining to detect availability
     const win = window as unknown as Record<string, unknown>;
-    const tt = win["trustedTypes"] as undefined | { createPolicy?: unknown };
-    if (typeof tt?.createPolicy !== "function") return null;
+    const tt = win["trustedTypes"] as
+      | undefined
+      | { readonly createPolicy?: unknown };
+        if (typeof tt?.createPolicy !== "function") return undefined;
     try {
       return this.createPolicy(policyName);
     } catch {
-      // If policy creation fails for any reason, fall back to null
-      return null;
+          // If policy creation fails for any reason, fall back to undefined
+          return undefined;
     }
   }
 
@@ -199,6 +218,12 @@ export class Sanitizer {
     return this.sanitizeForNonTTBrowsers(dirtyHtml, policyName);
   }
 }
+
+// NOTE: The sanitizer needs to manage a small cache of Trusted Type policies
+// which is a controlled mutation (Map.set) for performance and to avoid
+// repeatedly creating policies. This file intentionally performs a tiny
+// amount of mutation for that purpose; keep the scope of mutations small and
+// justified.
 
 /**
  * ESLint/Policy recommendations for consumers of this library.

@@ -12,8 +12,8 @@ import {
   InvalidParameterError,
 } from "./errors";
 import { environment, isDevelopment } from "./environment";
-import { reportProdError } from "./reporting";
-import { secureDevLog } from "./utils";
+import { reportProdError as reportProductionError } from "./reporting";
+import { secureDevLog as secureDevelopmentLog } from "./utils";
 
 // --- State Machine ---
 export const CryptoState = Object.freeze({
@@ -28,12 +28,13 @@ function isCryptoLike(v: unknown): v is Crypto {
   return (
     !!v &&
     typeof v === "object" &&
-    typeof (v as { getRandomValues?: unknown }).getRandomValues === "function"
+    typeof (v as { readonly getRandomValues?: unknown }).getRandomValues ===
+      "function"
   );
 }
 
-let _cachedCrypto: Crypto | null = null;
-let _cryptoPromise: Promise<Crypto> | null = null;
+let _cachedCrypto: Crypto | undefined = undefined;
+let _cryptoPromise: Promise<Crypto> | undefined = undefined;
 let _cryptoState: CryptoState = CryptoState.Unconfigured;
 let _cryptoInitGeneration = 0;
 
@@ -45,8 +46,8 @@ export function getCryptoState(): CryptoState {
 // --- Internal Configuration API ---
 /** @internal - Do not export from package entry; used by config.ts only */
 export function _setCrypto(
-  cryptoLike: Crypto | null | undefined,
-  { allowInProduction = false }: { allowInProduction?: boolean } = {},
+  cryptoLike: Crypto | undefined,
+  { allowInProduction = false }: { readonly allowInProduction?: boolean } = {},
 ): void {
   if (_cryptoState === CryptoState.Sealed) {
     throw new InvalidConfigurationError(
@@ -65,13 +66,13 @@ export function _setCrypto(
   // explicit opt-in via an environment variable or a global override to avoid
   // accidental weakening of entropy in production deployments.
   if (environment.isProduction && cryptoLike && allowInProduction) {
-    const envAllow =
+    const environmentAllow =
       typeof process !== "undefined" &&
       process?.env?.["SECURITY_KIT_ALLOW_SET_CRYPTO_IN_PROD"] === "true";
     const globalAllow = !!(globalThis as unknown as Record<string, unknown>)[
       "__SECURITY_KIT_ALLOW_SET_CRYPTO_IN_PROD"
     ];
-    if (!envAllow && !globalAllow) {
+    if (!environmentAllow && !globalAllow) {
       throw new InvalidConfigurationError(
         "setCrypto(..., { allowInProduction: true }) in production requires explicit opt-in.\n" +
           "Set environment variable SECURITY_KIT_ALLOW_SET_CRYPTO_IN_PROD=true or set globalThis.__SECURITY_KIT_ALLOW_SET_CRYPTO_IN_PROD = true to acknowledge the risk.",
@@ -81,7 +82,7 @@ export function _setCrypto(
     // Report a high-severity warning so operators are aware that crypto was
     // overridden in production. This helps with post-deployment audits.
     try {
-      reportProdError(
+      reportProductionError(
         new Error("Custom crypto provider set in production (operator opt-in)"),
         {
           component: "security-kit",
@@ -95,10 +96,10 @@ export function _setCrypto(
   }
 
   _cryptoInitGeneration++;
-  _cryptoPromise = null;
+  _cryptoPromise = undefined;
 
-  if (cryptoLike == null) {
-    _cachedCrypto = null;
+  if (cryptoLike == undefined) {
+    _cachedCrypto = undefined;
     _cryptoState = CryptoState.Unconfigured;
     return;
   }
@@ -163,7 +164,7 @@ export async function ensureCrypto(): Promise<Crypto> {
         _cryptoState = CryptoState.Configured;
         return _cachedCrypto!;
       }
-      const globalCrypto = (globalThis as { crypto?: Crypto }).crypto;
+      const globalCrypto = (globalThis as { readonly crypto?: Crypto }).crypto;
       if (isCryptoLike(globalCrypto)) {
         if (myGeneration === _cryptoInitGeneration) {
           _cachedCrypto = globalCrypto;
@@ -176,7 +177,7 @@ export async function ensureCrypto(): Promise<Crypto> {
       );
     } catch (error) {
       if (myGeneration === _cryptoInitGeneration) {
-        _cryptoPromise = null;
+        _cryptoPromise = undefined;
         _cryptoState = CryptoState.Unconfigured;
       }
       throw error;
@@ -191,12 +192,12 @@ export async function ensureCrypto(): Promise<Crypto> {
     };
     try {
       if (environment.isProduction) {
-        reportProdError(
+        reportProductionError(
           error instanceof Error ? error : new Error(String(error)),
           safeContext,
         );
       } else if (isDevelopment()) {
-        secureDevLog(
+        secureDevelopmentLog(
           "error",
           "security-kit",
           "ensureCrypto initialization failed",
@@ -228,7 +229,7 @@ export function ensureCryptoSync(): Crypto {
       "Crypto initialization is in progress. Use the async ensureCrypto() instead.",
     );
   }
-  const globalCrypto = (globalThis as { crypto?: Crypto }).crypto;
+  const globalCrypto = (globalThis as { readonly crypto?: Crypto }).crypto;
   if (isCryptoLike(globalCrypto)) {
     _cachedCrypto = globalCrypto;
     _cryptoState = CryptoState.Configured;
@@ -245,11 +246,11 @@ export const __test_resetCryptoStateForUnitTests: undefined | (() => void) =
     ? (() => {
         // runtime guard to prevent accidental execution in production
         // import lazily to avoid cycles at module load time
-        const { assertTestApiAllowed } = require("./dev-guards");
+        const { assertTestApiAllowed } = require("./development-guards");
         assertTestApiAllowed();
         return () => {
-          _cachedCrypto = null;
-          _cryptoPromise = null;
+          _cachedCrypto = undefined;
+          _cryptoPromise = undefined;
           _cryptoState = CryptoState.Unconfigured;
           _cryptoInitGeneration = 0;
           try {
@@ -261,8 +262,8 @@ export const __test_resetCryptoStateForUnitTests: undefined | (() => void) =
 
 export function getInternalTestUtils():
   | {
-      _getCryptoGenerationForTest: () => number;
-      _getCryptoStateForTest: () => string;
+      readonly _getCryptoGenerationForTest: () => number;
+      readonly _getCryptoStateForTest: () => string;
     }
   | undefined {
   // This entire block will be removed in production if __TEST__ is false.

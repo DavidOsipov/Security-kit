@@ -4,7 +4,7 @@
 /**
  * Secure, performant, and modern cryptographic utilities.
  * @module @david-osipov/security-kit
- * @version 7.3.1
+ * @version 0.7.1
  */
 
 // --- Re-export all public APIs ---
@@ -62,3 +62,6 @@ export * from "./dom";
 
 // Optional: production error reporter for manual emission (rate-limited)
 export { reportProdError } from "./reporting";
+
+// Canonicalization utilities for secure API signing (shared client/server)
+export { safeStableStringify, toCanonicalValue } from "./canonical";

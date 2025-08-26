@@ -21,36 +21,22 @@ afterEach(() => {
 });
 
 // Simulate production: set environment.isProduction true via stub
-test("when in production and ensureCrypto rejects diagnostics are disabled", async () => {
+test("when in production and ensureCrypto rejects, fingerprinting is disabled and we fail loudly", async () => {
   // Force production
   vi.spyOn(environment, "isProduction", "get").mockReturnValue(true as any);
   // ensureCrypto rejects
   vi.spyOn(state, "ensureCrypto").mockRejectedValue(new Error("no crypto"));
 
-  // Spy on secureDevLog to capture logs; in production secureDevLog is a no-op
+  // Spy on secureDevLog to capture the warning log emitted before throwing
   const logSpy = vi.spyOn(utils, "secureDevLog");
 
-  // call fingerprint (this will cause falling back and set diagnostics disabled flag)
-  const fp = await __test_getPayloadFingerprint({ a: 1 });
-  expect(typeof fp).toBe("string");
+  // call fingerprint: in production this must throw CryptoUnavailableError
+  await expect(__test_getPayloadFingerprint({ a: 1 })).rejects.toThrow();
 
-  // Subsequent attempt to schedule diagnostics should not attempt fingerprinting.
-  // We simulate this by calling getPayloadFingerprint via the public test API again
-  // after resetting ensureCrypto to a resolving stub and confirm secureDevLog was
-  // not called with a fingerprint in later logs.
-  vi.spyOn(state, "ensureCrypto").mockResolvedValue({
-    getRandomValues: (arr: Uint8Array) => arr,
-  } as unknown as Crypto);
-
-  // trigger another fingerprint attempt
-  const fp2 = await __test_getPayloadFingerprint({ b: 2 });
-  expect(typeof fp2).toBe("string");
-
-  // secureDevLog may be invoked for the fallback, but none of the calls should include a fingerprint
+  // Ensure we logged a warning about disabling diagnostics in production
   expect(logSpy).toHaveBeenCalled();
-
-  const anyWithFingerprint = (logSpy as any).mock.calls.some((c: any[]) => {
-    return c.some((arg: any) => arg && arg.fingerprint);
+  const anyWarn = (logSpy as any).mock.calls.some((c: any[]) => {
+    return c[2] && String(c[2]).toLowerCase().includes("disabling diagnostics");
   });
-  expect(anyWithFingerprint).toBe(false);
+  expect(anyWarn).toBe(true);
 });

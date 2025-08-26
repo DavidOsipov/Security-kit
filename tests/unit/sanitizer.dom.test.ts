@@ -65,6 +65,6 @@ describe("Sanitizer (DOM & Trusted Types)", () => {
     const dompurify = { sanitize: vi.fn(() => "x") } as any;
     const s = new Sanitizer(dompurify, { strict: STRICT_HTML_POLICY_CONFIG });
     const res = s.createPolicyIfAvailable("strict");
-    expect(res).toBeNull();
+    expect(res).toBeUndefined();
   });
 });

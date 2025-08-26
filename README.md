@@ -7,13 +7,39 @@
 
 **Security-Kit is not just a collection of utilities; it's a security philosophy you can install.**
 
-This is a comprehensive, opinionated, and modern security toolkit for browser-based applications. It provides both cryptographic primitives and safe development helpers, designed to be the reference implementation for a project's Security Constitution. It is built on a **Zero Trust** philosophy, assuming no part of the system is infallible.
+This is a comprehensive, opinionated, and modern security toolkit for browser-based applications. It provides both cryptographic primitives and safe development helpers, all designed to be the reference implementation for a project's Security Constitution. It is built on a **Zero Trust** philosophy, assuming no part of the system is infallible.
 
-The entire library is written in TypeScript, has zero dependencies, and leverages the native **Web Crypto API** for maximum performance and security in modern environments.
+The entire library is written in TypeScript, has zero production dependencies, and leverages the native **Web Crypto API** for maximum performance and security in modern environments.
+
+---
+
+## Table of Contents
+
+- [Core Philosophy](#core-philosophy)
+- [Installation](#installation)
+- [Quick Start](#quick-start)
+- [Key Features](#key-features)
+- [Detailed API Examples](#detailed-api-examples)
+  - [Secure ID & UUID Generation](#secure-id--uuid-generation)
+  - [Timing-Safe Comparison](#timing-safe-comparison)
+  - [Secure URL Construction](#secure-url-construction)
+  - [Secure `postMessage` Handling](#secure-postmessage-handling)
+  - [Redacted Development Logging](#redacted-development-logging)
+- [The Constitutions & Methodology](#the-constitutions--methodology)
+- [Advanced Topics](#advanced-topics)
+  - [Sealing the Kit for Maximum Security](#sealing-the-kit-for-maximum-security)
+  - [Bundler Configuration (Vite)](#bundler-configuration-vite)
+  - [Production Error Reporting](#production-error-reporting)
+  - [Sanitization & DOM Utilities](#sanitization--dom-utilities)
+- [Testing](#testing)
+- [Contributing](#contributing)
+- [Author and License](#author-and-license)
+
+---
 
 ## Core Philosophy
 
-This library is built on a set of non-negotiable principles, codified in the [Security Constitution](./Security%20Consitution.md).
+This library is built on a set of non-negotiable principles, codified in the included **[Security Constitution](./docs/Security%20Consitution.md)**.
 
 - 🛡️ **Secure by Default:** The default state of every function is the most secure state. Insecure actions are forbidden.
 - 🏰 **Defense in Depth:** Multiple, independent security controls are layered to protect against failure in any single component.
@@ -29,49 +55,21 @@ npm install @david-osipov/security-kit
 
 ## Quick Start
 
-The recommended way to initialize the library is to call an async function first, then seal the kit at your application's startup.
+Get a cryptographically secure, URL-friendly ID in seconds.
 
 ```typescript
-import {
-  SIMPLE_API,
-  sealSecurityKit,
-  isDevelopment,
-} from "@david-osipov/security-kit";
+import { SIMPLE_API } from "@david-osipov/security-kit";
 
-async function initializeApp() {
-  // 1. Call an async function first. This ensures the crypto API is ready.
-  const secureId = await SIMPLE_API.generateSecureId(32);
-  console.log("Generated an initial secure ID:", secureId);
+async function main() {
+  // SIMPLE_API provides easy access to the most common functions.
+  // This call ensures the Web Crypto API is available and ready.
+  const secureId = await SIMPLE_API.generateSecureId(21);
 
-  // 2. NOW, it is safe to seal the kit.
-  // This prevents any further configuration changes, hardening your app against runtime tampering.
-  sealSecurityKit();
-  console.log("Security Kit is sealed.");
-
-  // 3. Continue using the library.
-  const uuid = await SIMPLE_API.generateSecureUUID();
-  console.log("Secure UUID:", uuid);
-
-  // Perform a timing-attack-resistant string comparison.
-  // For security-critical comparisons (tokens, signatures), prefer the async
-  // variant and require platform crypto to avoid falling back to a weaker path.
-  const userInput = "user-provided-token";
-  const secretToken = "a-very-secret-token-from-server";
-  const areTokensEqual = await SIMPLE_API.secureCompareAsync(
-    userInput,
-    secretToken,
-    { requireCrypto: true }, // fail loudly if SubtleCrypto is unavailable
-  );
-
-  console.log("Tokens are equal (timing-safe):", areTokensEqual);
-
-  // Log a message that will only appear in development environments
-  if (isDevelopment()) {
-    console.log("This is a development build.");
-  }
+  console.log("Generated a secure ID:", secureId);
+  // => "useandom-26T198340PX75pxJACKV" (example)
 }
 
-initializeApp();
+main();
 ```
 
 ## Key Features
@@ -81,69 +79,79 @@ initializeApp();
   - High-performance, unbiased secure string generation (inspired by `nanoid`).
   - RFC 4122 v4 UUID generation.
   - Secure, non-extractable `CryptoKey` generation for AES-GCM.
-  - Timing-attack resistant `secureCompare` and `secureCompareAsync` functions (prefer `secureCompareAsync(..., { requireCrypto: true })` for security-critical comparisons).
+  - Timing-attack resistant string comparison functions.
 - **Secure Development Helpers:**
   - `secureDevLog`: A development-only logger with automatic redaction of sensitive data.
   - `secureWipe`: Best-effort memory wiping for sensitive buffers.
   - Hardened environment detection (`isDevelopment`, `isProduction`).
   - Rate-limited production error reporter.
 - **URL & URI Hardening:**
-  - `createSecureURL` and `updateURLParams`: Safely build and modify URLs without string interpolation vulnerabilities.
-  - `validateURL` and `parseURLParams`: Robust validation and parsing of URL strings and their parameters.
+  - Safely build and modify URLs without string interpolation vulnerabilities.
+  - Robust validation and parsing of URL strings and their parameters.
   - RFC 3986 compliant component encoders (`encodeQueryValue`, `encodePathSegment`).
 - **Cross-Context Communication:**
-  - `sendSecurePostMessage` and `createSecurePostMessageListener` enforce strict origin validation, forbidding wildcards.
-  - Hardened payload validation to prevent oversized payloads and prototype pollution.
-- **Subresource Integrity (SRI):**
-  - `generateSRI` to create integrity hashes for your assets.
+  - Hardened `postMessage` utilities that enforce strict origin validation and prevent prototype pollution.
+- **DOM & Sanitization:**
+  - A `Sanitizer` class to manage `DOMPurify` policies and create Trusted Types.
+  - A `DOMValidator` for allowlist-based, secure DOM querying.
 
-## The Security Constitution
+## Detailed API Examples
 
-This library is more than just code; it's an architecture. The included [`Security Consitution.md`](./Security%20Consitution.md) is a mandatory read for any team using this library. It serves as a single source of truth for developers and security engineers, outlining the non-negotiable rules and principles that this library enforces.
+### Secure ID & UUID Generation
 
-## API Documentation
+Use the `SIMPLE_API` object for the most common cryptographic tasks.
 
-For a detailed understanding of every function, please refer to the JSDoc comments within the `index.ts` source file. Here are a few highlights of the advanced API:
+```typescript
+import { SIMPLE_API } from "@david-osipov/security-kit";
 
-#### `createSecureURL(base, pathSegments?, queryParams?, fragment?)`
+// Generate a 64-character hexadecimal ID
+const hexId = await SIMPLE_API.generateSecureId();
 
-Safely constructs a URL, preventing common encoding and path traversal vulnerabilities.
+// Generate a standard v4 UUID
+const uuid = await SIMPLE_API.generateSecureUUID();
+
+console.log({ hexId, uuid });
+```
+
+### Timing-Safe Comparison
+
+Always use `secureCompareAsync` with `{ requireCrypto: true }` for security-critical comparisons like tokens or signatures. This prevents timing attacks and ensures the operation fails loudly if the platform's `SubtleCrypto` API is unavailable.
+
+```typescript
+import { SIMPLE_API } from "@david-osipov/security-kit";
+
+const userInput = "user-provided-token";
+const secretToken = "a-very-secret-token-from-server";
+
+const areTokensEqual = await SIMPLE_API.secureCompareAsync(
+  userInput,
+  secretToken,
+  { requireCrypto: true } // Fails loudly if SubtleCrypto is unavailable
+);
+
+console.log("Tokens are equal (timing-safe):", areTokensEqual);
+```
+
+### Secure URL Construction
+
+Safely construct a URL, preventing common encoding and path traversal vulnerabilities.
 
 ```typescript
 import { createSecureURL } from "@david-osipov/security-kit";
 
 const url = createSecureURL(
   "https://api.example.com",
-  ["users", "search"],
-  { q: "John Doe", filter: "active+premium" },
-  "results",
+  ["users", "search"], // Path segments are safely encoded
+  { q: "John Doe", filter: "active+premium" }, // Query params are safely encoded
+  "results" // Fragment
 );
+
 // Returns: "https://api.example.com/users/search?q=John%20Doe&filter=active%2Bpremium#results"
 ```
 
-## Publishing to npm
+### Secure `postMessage` Handling
 
-This repository includes a GitHub Actions workflow that publishes the package when a GitHub Release is published. To enable publishing:
-
-- Add an `NPM_TOKEN` secret to the repository (Settings → Secrets → Actions) containing a token generated from your npm account.
-- Create a Release (tag) in GitHub. The workflow `publish.yml` will run on release and publish the package.
-
-Local pre-publish steps (the project runs these automatically via `npm run prepare`):
-
-```bash
-# Ensure version is bumped in package.json
-npm run typecheck
-npm run lint
-npm test
-npm run build
-npm run generate:sbom
-```
-
-The `sbom.json` is included in the published package files.
-
-#### `createSecurePostMessageListener(options)`
-
-Listens for `postMessage` events while enforcing a strict origin allowlist and validating the payload.
+Listen for `postMessage` events while enforcing a strict origin allowlist and validating the payload schema.
 
 ```typescript
 import { createSecurePostMessageListener } from "@david-osipov/security-kit";
@@ -154,84 +162,19 @@ const listener = createSecurePostMessageListener({
     console.log("Received trusted message:", data);
   },
   validate: {
+    // Enforces the shape of the incoming data object
     type: "string",
     payload: "object",
   },
 });
 
-// Don't forget to clean up!
+// To clean up the listener when your component unmounts:
 // listener.destroy();
 ```
 
-### Async secure string generation
+### Redacted Development Logging
 
-For UI contexts where long synchronous CPU work could block the main thread, prefer the async, yielding generator:
-
-```typescript
-import { generateSecureStringAsync } from "@david-osipov/security-kit";
-
-// Generate a 32-character ID using a small alphabet without blocking the UI
-const controller = new AbortController();
-const id = await generateSecureStringAsync(
-  "abcdef0123456789",
-  32,
-  { signal: controller.signal }, // optional abort
-);
-```
-
-Notes:
-
-- `generateSecureStringAsync` mirrors the synchronous algorithm but yields between random-byte batches to keep the event loop responsive.
-- It follows the same validation rules as the sync variant (alphabet size, uniqueness, and length bounds).
-- It accepts an optional `AbortSignal` and will also abort automatically when `document.hidden` is `true` to preserve data integrity in background tabs (see Security Constitution §2.11).
-- Use the async variant in performance-sensitive contexts (main thread, UI) and the synchronous one in short-lived background tasks or scripts where blocking is acceptable.
-
-You can also pass an `AbortSignal` to `getSecureRandomInt(min, max, { signal })` — it will abort similarly and yield periodically during generation.
-
-### URL validation: normalized origin allowlist
-
-`validateURL(urlString, { allowedOrigins })` now normalizes origins with the URL standard (e.g., `https://example.com:443` equals `https://example.com`). Provide exact origins; wildcards are not allowed.
-
-### postMessage: canonical origin format and payload freezing
-
-- Origins used in `allowedOrigins` are canonicalized to `protocol//hostname[:port]` with default ports removed. Use the canonical form to avoid mismatches (trailing slashes and case differences are normalized).
-- `createSecurePostMessageListener` deep-freezes sanitized payloads by default to ensure immutability. If your application requires high-throughput handling and you can prove immutability in consumers, set `freezePayload: false` to opt out.
-
-### HTTPS-only policy for URL helpers
-
-As a project-wide security policy, the URL helpers (`createSecureURL`, `updateURLParams`, `validateURL`) enforce HTTPS-only schemes by default. Consumers may pass an `allowedSchemes` option, but the library will only honor schemes that intersect with the internal SAFE_SCHEMES set (currently only `https:`). This prevents callers from accidentally enabling unsafe schemes like `javascript:` or `data:`.
-
-```ts
-import { validateURL } from "@david-osipov/security-kit";
-
-const result = validateURL("https://example.com:443/path", {
-  allowedOrigins: ["https://example.com"],
-  requireHTTPS: true,
-});
-
-if (result.ok) {
-  console.log(result.url.origin); // "https://example.com"
-}
-```
-
-### Typed URL param parsing overload
-
-`parseURLParams(url)` returns a frozen `Record<string, string>` with safe keys. When you know the expected params, use the typed overload for better DX:
-
-```ts
-import { parseURLParams } from "@david-osipov/security-kit";
-
-const params = parseURLParams("https://example.com/?page=2&mode=compact", {
-  page: "number",
-  mode: "string",
-} as const);
-// params has type: Partial<Record<"page"|"mode", string>> & Record<string, string>
-// Missing or type-mismatched keys are logged via secureDevLog warnings (dev only)
-```
-
-#### `secureDevLog(level, component, message, context?)`
-
-A development-only logger that automatically redacts sensitive keys from context objects to prevent accidental secret leakage in console output.
+Use `secureDevLog` to log contextual data during development. It automatically redacts sensitive keys to prevent accidental secret leakage in console output. In production builds, this function does nothing.
 
 ```typescript
 import { secureDevLog } from "@david-osipov/security-kit";
@@ -242,63 +185,39 @@ const sensitiveData = {
   password: "user-password",
 };
 
-// In development, this will log the object with '[REDACTED]' values for token and password.
-// In production, this function does nothing.
-secureDevLog("info", "AuthComponent", "User logged in", sensitiveData);
+// In development, this logs the object with '[REDACTED]' values for token and password.
+// In production, this is a no-op.
+secureDevlog("info", "AuthComponent", "User logged in", sensitiveData);
 ```
 
-## For Library Consumers & Test Environments
+## The Constitutions & Methodology
 
-### Sanitization and DOM utilities
+This library is more than just code; it's an architecture.
+- The **[Security Constitution](./Security%20Consitution.md)** is a mandatory read for any team using this library. It serves as a single source of truth for the non-negotiable rules and principles that this library enforces.
+- The **[Development Methodology](./docs/METHODOLOGY.md)** document outlines the rigorous, AI-assisted workflow used to create, validate, and harden this toolkit with full transparency.
 
-This library exposes a small, hardened sanitization API and a DOM validator utility:
+## Advanced Topics
 
-- `Sanitizer` - a class that manages named DOMPurify configurations and (optionally) creates Trusted Types policies via `window.trustedTypes`. It accepts a DOMPurify instance in the constructor, which keeps the library environment-agnostic and testable.
+### Sealing the Kit for Maximum Security
 
-- `STRICT_HTML_POLICY_CONFIG` - a conservative DOMPurify configuration that enables only basic HTML formatting and disables SVG/MathML. Use this as your default policy for general text content.
+At your application's startup, after performing any initial configuration, you should **seal the kit**. This makes the library's configuration immutable, hardening your app against runtime tampering or malicious dependency behavior.
 
-- `HARDENED_SVG_POLICY_CONFIG` - a hardened configuration for allowing sanitized SVG content while forbidding dangerous tags and attributes. Use only when you intentionally accept SVG input from trusted sources.
+```typescript
+import { sealSecurityKit, setAppEnvironment } from "@david-osipov/security-kit";
 
-- `DOMValidator` and `defaultDOMValidator` - utilities that perform allowlist-based DOM querying and element validation. `DOMValidator` can be configured with a set of allowed root selectors; `defaultDOMValidator` is a convenience instance pre-configured for typical app layouts.
+// 1. Perform any configuration at startup.
+setAppEnvironment("production");
 
-Example (browser):
+// 2. Seal the kit.
+sealSecurityKit();
 
-```ts
-import {
-  Sanitizer,
-  STRICT_HTML_POLICY_CONFIG,
-} from "@david-osipov/security-kit";
-import DOMPurify from "dompurify";
-
-const dp = DOMPurify(window as any);
-const sanitizer = new Sanitizer(dp, { strict: STRICT_HTML_POLICY_CONFIG });
-
-// In browsers that support Trusted Types, createPolicy will register a TrustedHTML policy.
-if (typeof window.trustedTypes !== "undefined") {
-  sanitizer.createPolicy("my-app-strict");
-}
-
-// Fallback sanitization for non-TT environments
-const safe = sanitizer.sanitizeForNonTTBrowsers(
-  "<img src=x onerror=alert(1)>",
-  "strict",
-);
+// 3. Any further attempts to configure the library will now throw an error.
+// setAppEnvironment("development"); // Throws InvalidConfigurationError
 ```
 
-Example (tests / Node):
+### Bundler Configuration (Vite)
 
-```ts
-import createDOMPurify from "isomorphic-dompurify";
-import {
-  Sanitizer,
-  STRICT_HTML_POLICY_CONFIG,
-} from "@david-osipov/security-kit";
-
-const DOMPurify = createDOMPurify(new (require("jsdom").JSDOM)().window);
-const s = new Sanitizer(DOMPurify, { strict: STRICT_HTML_POLICY_CONFIG });
-```
-
-This library includes test-only code that is automatically removed from production builds using a global `__TEST__` flag. To leverage this Dead Code Elimination (DCE), you must configure your bundler.
+This library includes test-only code that is automatically removed from production builds using a global `__TEST__` flag. To enable this Dead Code Elimination (DCE), you must configure your bundler.
 
 **Example for Vite (`vite.config.ts`):**
 
@@ -313,156 +232,68 @@ export default defineConfig({
 });
 ```
 
-This ensures that functions like `__test_resetCryptoStateForUnitTests` do not exist in your final production bundle.
+### Production Error Reporting
 
-## Production error reporting (optional)
+The kit includes a rate-limited, centralized production error reporter. Configure it once at startup.
 
-This package exposes a rate-limited, centralized production error reporter which applications can configure or call directly. The reporter enforces token-bucket rate limiting, sanitizes errors for logging, and redacts sensitive context before forwarding to your handler.
-
-Public API:
-
-- `setProductionErrorHandler(fn | null)` — set a global handler that receives (error: Error, context: Record<string, unknown>). Pass `null` to disable.
-- `configureErrorReporter({ burst, refillRatePerSec })` — tune the token-bucket parameters.
-- `reportProdError(error, context?)` — manually emit an error to the configured handler (rate-limited). This is exported from the package root.
-
-Example usage:
-
-```ts
+```typescript
 import {
   setProductionErrorHandler,
   configureErrorReporter,
   reportProdError,
 } from "@david-osipov/security-kit";
 
-// Configure the reporter on app startup
+// Configure on app startup
 configureErrorReporter({ burst: 10, refillRatePerSec: 2 });
 setProductionErrorHandler((err, ctx) => {
   // Forward to your telemetry pipeline (Sentry, Datadog, etc.)
-  sendToTelemetry(err, ctx);
+  console.error("PRODUCTION ERROR:", err, ctx);
 });
 
-// When you need to report a critical issue:
-try {
-  riskyOperation();
-} catch (err) {
-  reportProdError(err instanceof Error ? err : new Error(String(err)), {
-    module: "payment",
-    operation: "chargeCustomer",
-  });
-}
+// Manually report a critical error (this call is rate-limited)
+reportProdError(new Error("Payment failed"), { module: "billing" });
 ```
 
-Note: `reportProdError` will be a no-op if no production handler is configured or if the app is not running in a production environment (use `setAppEnvironment` to explicitly control environment detection during startup).
+### Sanitization & DOM Utilities
+
+The library exposes a `Sanitizer` class that manages named `DOMPurify` configurations and can create Trusted Types policies. `DOMPurify` is a peer dependency, allowing you to provide the instance that matches your environment (browser, JSDOM, etc.).
+
+```typescript
+import { Sanitizer, STRICT_HTML_POLICY_CONFIG } from "@david-osipov/security-kit";
+import DOMPurify from "dompurify";
+
+// In a browser environment
+const sanitizer = new Sanitizer(DOMPurify, {
+  strict: STRICT_HTML_POLICY_CONFIG,
+});
+
+const safeHtml = sanitizer.getSanitizedString(
+  "<img src=x onerror=alert(1)>",
+  "strict"
+);
+// => "<img src="x">"
+```
 
 ## Testing
 
-This repository includes both fast unit tests and a small set of integration tests that exercise DOMPurify in a Node environment via `jsdom` + `isomorphic-dompurify`.
-
-- Unit tests (fast): run with Vitest. These use lightweight mocks where appropriate and are intended to run in every CI job.
-- Integration tests (jsdom + DOMPurify): run in the same Vitest job — we provide a global setup that initializes a shared JSDOM + DOMPurify instance for tests that need a realistic DOM.
-
-Commands
+This repository uses Vitest for a comprehensive test suite that validates correctness, security properties, and resilience against edge cases.
 
 ```bash
-# Run typecheck
-npm run typecheck
-
-# Run all tests (unit + integration)
+# Run the full test suite
 npm test
 
-# Run only unit tests (if you want to skip integrations you can use --testNamePattern)
-npm test -- --testNamePattern "unit"
+# Run tests with coverage reporting
+npm run coverage
 ```
 
-## Keyless signing (GitHub OIDC + sigstore)
+## Contributing
 
-This repository uses sigstore/cosign keyless signing in CI for SBOMs. That means the publish workflow signs SBOM artifacts (CycloneDX JSON, SPDX JSON) using GitHub OIDC assertions rather than a long-lived private key stored in secrets. Advantages:
-
-- No long-lived private key in repository secrets.
-- Signatures are tied to the release workflow invocation and issuer (GitHub Actions), improving provenance.
-
-What you need to enable in the repository:
-
-- Ensure the `publish` workflow has `id-token: write` and appropriate permissions (this repository already sets that in `.github/workflows/publish.yml`).
-- Add an `NPM_TOKEN` secret so the workflow can publish to npm.
-
-How the workflow signs and verifies SBOMs:
-
-- The workflow uses `sigstore/cosign-installer` and `sigstore/cosign-action` to sign blobs using OIDC from GitHub Actions.
-- The action produces detached signature files (`sbom.json.sig`, `sbom.spdx.json.sig`) and also fetches a signing certificate which can be uploaded as an artifact for auditing.
-
-Verifying signatures locally (best-effort):
-
-1. Install `cosign` locally (release binary or via Homebrew):
-
-```bash
-# macOS (Homebrew)
-brew install sigstore/tap/cosign
-
-# or download binary from https://github.com/sigstore/cosign/releases
-```
-
-2. Verify the SBOM signature and view the signing certificate:
-
-```bash
-cosign verify-blob --signature sbom.json.sig sbom.json
-```
-
-If the signature is valid, `cosign` will print verification results and the signing certificate information.
-
-Notes and fallbacks:
-
-- If you prefer to manage your own signing keys, the previous private-key flow using a base64 `COSIGN_KEY` secret is still possible; see the commit history for the earlier implementation. Keyless signing is recommended to minimize secret management overhead.
-- For consumers who need to programmatically check signatures, consider publishing the signing certificate alongside SBOM artifacts or leveraging the Rekor transparency log which `cosign` uses by default.
-
-### Example: Minimal keyless signing job
-
-Below is a minimal example you can adopt for your own workflows that signs a single artifact using GitHub OIDC + `sigstore/cosign-action`:
-
-```yaml
-name: Sign SBOM
-on:
-  release:
-    types: [published]
-
-permissions:
-  contents: read
-  id-token: write
-
-jobs:
-  sign:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Generate SBOM
-        run: npm run generate:sbom
-      - name: Install cosign helper
-        uses: sigstore/cosign-installer@v2
-      - name: Sign SBOM (keyless)
-        uses: sigstore/cosign-action@v2
-        with:
-          args: sign-blob --signature sbom.json.sig sbom.json
-      - name: Upload signature
-        uses: softprops/action-gh-release@v1
-        with:
-          files: sbom.json.sig
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-```
-
-This example demonstrates a release-triggered signing job that uses GitHub OIDC (via `id-token: write`) to perform keyless signing.
-
-Notes
-
-- The test setup file `tests/setup/global-dompurify.ts` initializes a DOMPurify instance and exposes it to tests; the helper `tests/setup/domPurify.ts` is reusable for additional integration tests.
-- `dompurify` is a peer dependency for this library (consumers should provide it). We use `isomorphic-dompurify` as a dev-time helper so integration tests can run in Node.
+Contributions are welcome! Please read the **[Security Constitution](./Security%20Consitution.md)** and ensure any pull requests adhere to its principles and include corresponding tests.
 
 ## Author and License
 
 - **Author:** This project was architected and directed by **David Osipov**, an AI-Driven B2B Lead Product Manager. You can learn more about my work and philosophy at [david-osipov.vision](https://david-osipov.vision).
 - **ISNI:** [0000 0005 1802 960X](https://isni.org/isni/000000051802960X)
 - **ORCID:** [0009-0005-2713-9242](https://orcid.org/0009-0005-2713-9242)
-- **VIAF:** [139173726847611590332](https://viaf.org/viaf/139173726847611590332/)
-- **Wikidata:** [Q130604188](https://www.wikidata.org/wiki/Q130604188)
 - **Contact:** <personal@david-osipov.vision>
-- **License:** MIT License. The license is specified using the [SPDX-License-Identifier](https://spdx.org/licenses/) standard, which is a machine-readable way to declare licenses.
+- **License:** MIT License (SPDX-License-Identifier: MIT)

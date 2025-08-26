@@ -15,13 +15,13 @@ export function assertTestApiAllowed(): void {
   if (!environment.isProduction) return;
 
   // Allow explicit opt-in via env var or a global token.
-  const envAllow =
+  const environmentAllow =
     typeof process !== "undefined" &&
     process?.env?.["SECURITY_KIT_ALLOW_TEST_APIS"] === "true";
   const globalAllow = !!(globalThis as unknown as Record<string, unknown>)[
     "__SECURITY_KIT_ALLOW_TEST_APIS"
   ];
-  if (envAllow || globalAllow) return;
+  if (environmentAllow || globalAllow) return;
 
   throw new InvalidConfigurationError(
     "Test-only APIs are disabled in production. Set SECURITY_KIT_ALLOW_TEST_APIS=true or set globalThis.__SECURITY_KIT_ALLOW_TEST_APIS = true to explicitly allow.",

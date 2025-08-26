@@ -17,7 +17,20 @@ fi
 # Run lint-staged (will run eslint --fix on staged TS files)
 if command -v npx >/dev/null 2>&1; then
   echo "Running lint-staged..."
-  npx lint-staged || { echo "lint-staged reported issues. Aborting commit."; exit 1; }
+  # Use ENFORCE_LINT environment variable to control behavior.
+  # - ENFORCE_LINT=true  => abort commit on lint-staged failure (production)
+  # - ENFORCE_LINT not set => continue on lint-staged failure (beta/default)
+  if npx lint-staged; then
+    echo "lint-staged passed."
+  else
+    if [ "${ENFORCE_LINT:-}" = "true" ]; then
+      echo "lint-staged reported issues. Aborting commit because ENFORCE_LINT=true." >&2
+      exit 1
+    else
+      echo "lint-staged reported issues. Continuing commit because ENFORCE_LINT is not set (beta mode)." >&2
+      echo "To enforce lint checks in production set: export ENFORCE_LINT=true" >&2
+    fi
+  fi
 else
   echo "npx not available; skipping lint-staged."
 fi

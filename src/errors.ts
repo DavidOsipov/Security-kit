@@ -46,6 +46,60 @@ export class InvalidConfigurationError extends Error {
   }
 }
 
+export class SignatureVerificationError extends Error {
+  public readonly code = "ERR_SIGNATURE_VERIFICATION";
+
+  constructor(message = "Signature verification failed.") {
+    super(`[security-kit] ${message}`);
+    this.name = "SignatureVerificationError";
+  }
+}
+
+export class ReplayAttackError extends Error {
+  public readonly code = "ERR_REPLAY_ATTACK";
+
+  constructor(message = "Potential replay attack detected.") {
+    super(`[security-kit] ${message}`);
+    this.name = "ReplayAttackError";
+  }
+}
+
+export class TimestampError extends Error {
+  public readonly code = "ERR_TIMESTAMP";
+
+  constructor(message = "Timestamp outside acceptable window.") {
+    super(`[security-kit] ${message}`);
+    this.name = "TimestampError";
+  }
+}
+
+export class WorkerError extends Error {
+  public readonly code = "ERR_WORKER";
+
+  constructor(message = "Worker operation failed.") {
+    super(`[security-kit] ${message}`);
+    this.name = "WorkerError";
+  }
+}
+
+export class RateLimitError extends Error {
+  public readonly code = "ERR_RATE_LIMIT";
+
+  constructor(message = "Rate limit exceeded.") {
+    super(`[security-kit] ${message}`);
+    this.name = "RateLimitError";
+  }
+}
+
+export class CircuitBreakerError extends Error {
+  public readonly code = "ERR_CIRCUIT_BREAKER";
+
+  constructor(message = "Circuit breaker is open due to excessive errors.") {
+    super(`[security-kit] ${message}`);
+    this.name = "CircuitBreakerError";
+  }
+}
+
 /**
  * Sanitizes error objects for safe logging by truncating messages
  * and extracting only safe properties. Prevents leaking sensitive
@@ -54,39 +108,42 @@ export class InvalidConfigurationError extends Error {
  * @param err - The error to sanitize
  * @returns Sanitized error properties suitable for logging
  */
-export function sanitizeErrorForLogs(err: unknown): {
-  name?: string;
-  code?: string;
-  message?: string;
+export function sanitizeErrorForLogs(error: unknown): {
+  readonly name?: string;
+  readonly code?: string;
+  readonly message?: string;
 } {
-  if (err instanceof Error) {
-    const code = (err as { code?: string }).code;
+  if (error instanceof Error) {
+    const code = (error as { readonly code?: string }).code;
     return {
-      name: err.name,
-      message: String(err.message || "").slice(0, 256),
+      name: error.name,
+      message: String(error.message || "").slice(0, 256),
       ...(code ? { code } : {}),
-      ...(getStackFingerprint(err.stack)
-        ? { stackHash: getStackFingerprint(err.stack) }
+      ...(getStackFingerprint(error.stack)
+        ? { stackHash: getStackFingerprint(error.stack) }
         : {}),
     };
   }
-  return { message: String(err).slice(0, 256) };
+  return { message: String(error).slice(0, 256) };
 }
 
 // Lightweight FNV-1a 32-bit hash for stable stack fingerprinting. We avoid
 // heavy crypto dependencies here to keep reporting cheap and synchronous.
 function fnv1a32(input: string): number {
-  let h = 0x811c9dc5;
-  for (let i = 0; i < input.length; i++) {
-    h ^= input.charCodeAt(i);
-    h = (h >>> 0) * 0x01000193;
-    h = h >>> 0;
-  }
-  return h >>> 0;
+  const initial = 0x811c9dc5 >>> 0;
+  const hash = Array.from(input).reduce((accumulator, ch) => {
+    // FNV-1a: xor the octet then multiply by FNV prime (0x01000193)
+    const xored = (accumulator ^ ch.charCodeAt(0)) >>> 0;
+    // Use Math.imul for 32-bit integer multiplication and ensure unsigned result
+    return (Math.imul(xored, 0x01000193) >>> 0) as number;
+  }, initial);
+  return hash >>> 0;
 }
 
-export function getStackFingerprint(stack?: string | null): string | null {
-  if (!stack) return null;
+export function getStackFingerprint(
+  stack?: string | undefined,
+): string | undefined {
+  if (!stack) return undefined;
   try {
     // Normalize stack by stripping memory addresses, absolute paths and line numbers
     const normalized = stack
@@ -97,6 +154,6 @@ export function getStackFingerprint(stack?: string | null): string | null {
       .join("\n");
     return fnv1a32(normalized).toString(16).padStart(8, "0");
   } catch {
-    return null;
+    return undefined;
   }
 }

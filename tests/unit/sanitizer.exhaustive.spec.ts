@@ -36,14 +36,14 @@ describe("Sanitizer exhaustive tests", () => {
     expect(() => s.sanitizeForNonTTBrowsers("x", "missing")).toThrow(InvalidConfigurationError);
   });
 
-  it("createPolicyIfAvailable returns null when window undefined or trustedTypes absent", () => {
+  it("createPolicyIfAvailable returns undefined when window undefined or trustedTypes absent", () => {
     delete (global as any).window;
     const dp = makeDP(true);
     const s = new Sanitizer(dp as any, { strict: STRICT_HTML_POLICY_CONFIG });
-    expect(s.createPolicyIfAvailable("strict")).toBeNull();
+  expect(s.createPolicyIfAvailable("strict")).toBeUndefined();
 
     (global as any).window = {};
-    expect(s.createPolicyIfAvailable("strict")).toBeNull();
+    expect(s.createPolicyIfAvailable("strict")).toBeUndefined();
   });
 
   it("createPolicy succeeds when trustedTypes.createPolicy exists and policy create returns TrustedHTML", () => {
@@ -86,7 +86,7 @@ describe("Sanitizer exhaustive tests", () => {
     expect(() => s.createPolicy("missing")).toThrow(InvalidConfigurationError);
   });
 
-  it("createPolicyIfAvailable falls back to null when createPolicy throws", () => {
+  it("createPolicyIfAvailable falls back to undefined when createPolicy throws", () => {
     const dp = makeDP(true);
     const s = new Sanitizer(dp as any, { strict: STRICT_HTML_POLICY_CONFIG });
     (global as any).window = {
@@ -97,7 +97,7 @@ describe("Sanitizer exhaustive tests", () => {
       },
     };
     const p = s.createPolicyIfAvailable("strict");
-    expect(p).toBeNull();
+    expect(p).toBeUndefined();
   });
 
   it("getSanitizedString delegates to sanitizeForNonTTBrowsers and handles different policies", () => {

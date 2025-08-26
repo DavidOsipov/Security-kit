@@ -13,6 +13,8 @@ import vitestPlugin from "@vitest/eslint-plugin";
 import { configs as sonarConfigs } from "eslint-plugin-sonarjs";
 import * as regexpPlugin from "eslint-plugin-regexp";
 import localPlugin from "./tools/eslint-plugin-local/index.js";
+import unicornPlugin from "eslint-plugin-unicorn";
+import functionalPlugin from "eslint-plugin-functional";
 
 export default [
   // Global ignores
@@ -58,6 +60,10 @@ export default [
   sonarConfigs.recommended,
   // Security plugin recommended ruleset (node & generic security heuristics)
   securityConfigs.recommended,
+  // Intentionally do NOT include the full unicorn recommended config here because
+  // it is extremely opinionated and would globally enforce many stylistic rules
+  // that are noisy for an existing codebase. We instead opt-in to a small set of
+  // high-value unicorn rules below with measured severities.
   // NOTE: Node-specific rules must not apply to browser-targeted `src/**`.
   // We'll enable a focused set of `n/*` rules only for tooling/config files.
   {
@@ -107,6 +113,8 @@ export default [
     },
     plugins: {
       "@typescript-eslint": tseslintPlugin,
+      unicorn: unicornPlugin,
+      functional: functionalPlugin,
       security: securityPlugin,
       "no-unsanitized": noUnsanitized,
       "security-node": securityNode,
@@ -135,6 +143,11 @@ export default [
         "error",
         { ignoreVoid: true },
       ],
+
+      // Auto-fix: prefer const where possible to help remove `let` usage
+      // This works well with the functional/no-let rule because ESLint's fixer
+      // can convert non-reassigned lets into const automatically.
+      "prefer-const": "error",
 
       // General security hardening
       "no-eval": "error",
@@ -183,6 +196,22 @@ export default [
       "@typescript-eslint/no-unsafe-member-access": "error",
       "@typescript-eslint/no-unsafe-return": "error",
 
+  // UNICORN CUSTOMIZATIONS: Enforce high-value patterns.
+  // Promote these to errors to enforce elite-level patterns across the
+  // library; fixes are often automatic or small mechanical edits.
+  "unicorn/prevent-abbreviations": "error",
+  "unicorn/no-null": "error",
+  "unicorn/prefer-node-protocol": "error",
+  "unicorn/prefer-string-starts-ends-with": "error",
+    "unicorn/no-array-callback-reference": "error",
+
+  // IMMUTABILITY RULES (functional plugin)
+  // Enforce immutability strictly for a security-critical library.
+  "functional/no-let": "error",
+  "functional/immutable-data": "error",
+  // Prefer readonly types where possible
+  "functional/prefer-readonly-type": "error",
+
       // Project-specific: forbid insecure/forbidden APIs
       "no-restricted-properties": [
         "error",
@@ -221,6 +250,7 @@ export default [
       "no-restricted-globals": "off",
     },
   },
+  
   // Tests: downgrade noisy legacy checks to warnings so lint remains actionable
   {
     files: ["tests/**", "tests/old_tests/**"],
@@ -246,7 +276,8 @@ export default [
   },
   // Local rule: warn on secret-like identifier equality comparisons
   {
-    files: ["src/**"],
+    files: ["src/**","server/**","scripts/**"],
+    plugins: { local: localPlugin },
     rules: {
       // Use a relative require to load the local rule implementation.
       "local/no-secret-eq": "warn",

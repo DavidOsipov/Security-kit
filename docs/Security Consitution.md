@@ -1,4 +1,4 @@
-# The Official Security & Engineering Constitution (v6.6.0 - Living Document)
+# The Official Security & Engineering Constitution (v6.6.5 - Living Document)
 
 **Document Status:** Final, Mandatory
 **SPDX-License-Identifier:** MIT
@@ -1993,6 +1993,37 @@ This subsection codifies rules that enforce general code quality and prevent com
   ```
 - **CI Check:** The entire codebase **MUST** run in strict mode (`'use strict';`). An ESLint rule (`no-undef`) **MUST** be enabled to catch the use of undeclared variables.
 
+#### RULE: Absolute Type Safety (MUST NOT use `any`)
+
+- **Statement:** The `any` type is strictly forbidden in the application's source code. All types must be explicit or correctly inferred. Type assertions (`as Type`) should be used sparingly and only when the developer can guarantee the type's correctness beyond what the compiler can infer.
+- **Rationale:** The `any` type is a "trap door" out of TypeScript's type system. Its use negates the primary benefits of TypeScript—catching bugs at compile time and ensuring data correctness. A single `any` can propagate through the system, corrupting type information and hiding potential security vulnerabilities (e.g., passing an unexpected object to a function that expects a string). This rule enforces our **"Code Correctness & Hygiene"** and **"Secure by Default"** principles at the type level.
+- **Implementation:**
+  - The following ESLint rules **MUST** be set to `"error"` in the project's configuration:
+    - `@typescript-eslint/no-explicit-any`
+    - `@typescript-eslint/no-unsafe-assignment`
+    - `@typescript-eslint/no-unsafe-call`
+    - `@typescript-eslint/no-unsafe-member-access`
+    - `@typescript-eslint/no-unsafe-return`
+  - Any suppression of these rules (e.g., via `// eslint-disable-next-line`) **MUST** be accompanied by a detailed comment explaining why the type cannot be known and is considered safe.
+
+#### RULE: Immutability by Default (SHOULD)
+
+- **Statement:** Data structures **SHOULD** be treated as immutable. Direct mutation of object properties or array elements is discouraged in favor of creating new data structures with updated values.
+- **Rationale:** Mutable state is a primary source of complexity and bugs in software. When data can be changed by any part of the system at any time, it becomes incredibly difficult to reason about the application's state, leading to race conditions and unpredictable behavior. By favoring immutability and pure functions (functions that don't have side effects), we create a more predictable, testable, and secure codebase.
+- **Implementation:**
+  - The use of `let` **SHOULD** be replaced with `const` wherever possible.
+  - Instead of mutating arrays with methods like `.push()`, `.splice()`, or direct index assignment, prefer non-mutating alternatives like `.map()`, `.filter()`, and the spread syntax (`[...oldArray, newItem]`).
+  - Instead of mutating objects, prefer creating new objects with the spread syntax (`{ ...oldObject, property: newValue }`).
+  - The `eslint-plugin-functional` **SHOULD** be used to encourage these patterns.
+
+#### RULE: Dead Code Prohibition (MUST)
+
+- **Statement:** The production branch (`main`) **MUST NOT** contain dead or unreachable code. This includes unused dependencies, unused exported functions/variables, and unreferenced files.
+- **Rationale:** Dead code is a liability. It adds no value to the user but increases the bundle size, slows down build tools, and adds cognitive load for developers. Most importantly, it increases the attack surface, as vulnerabilities can exist in code paths that are no longer in use. Adhering to this rule keeps the library lean, performant, and secure.
+- **Implementation:**
+  - A tool for detecting unused code and dependencies, such as **Knip**, **MUST** be integrated into the CI/CD pipeline.
+  - The CI check **MUST** fail if any dead code or unused dependencies are detected in a pull request targeting the main branch.
+
 #### RULE: Robust Control Flow (SHOULD)
 
 - **Statement:** Functions **SHOULD** use default parameters to handle missing arguments. `switch` statements **SHOULD** include a `default` case to handle unexpected values.
@@ -2135,6 +2166,24 @@ jobs:
 
 - **Rationale:** Automated negative tests ensure rules are not only present but effective.
 
+### 4.6. Verifiable Test Efficacy via Mutation Testing (MUST)
+
+- **Statement:** Nominal code coverage (e.g., 99%) is considered insufficient as a measure of test quality. The efficacy of the test suite **MUST** be programmatically verified using **Mutation Testing**.
+- **Rationale:** A test suite can execute 100% of the codebase without making a single meaningful assertion, providing a false sense of security. Mutation testing directly measures a test suite's ability to detect bugs. It works by automatically introducing small defects ("mutants") into the code and verifying that the tests fail ("kill" the mutant). A high mutation score provides strong, verifiable confidence that our tests are not just running code, but are actively proving its correctness. This is the ultimate implementation of our **"Verifiable Security"** principle.
+- **Implementation:**
+  - A mutation testing framework, with **StrykerJS** as the reference implementation, **MUST** be integrated into the project.
+  - The mutation testing suite **MUST** be run as part of the release process.
+  - The project **MUST** maintain a mutation score of **95% or higher** for all critical source files. Any surviving mutants must be reviewed; either the test suite is improved to kill them, or they are explicitly ignored with a documented justification.
+
+### 4.7. Deep Static Analysis for Data Flow (MUST)
+
+- **Statement:** In addition to linting, the codebase **MUST** be analyzed with a deep static analysis (SAST) tool capable of performing cross-file, data-flow analysis.
+- **Rationale:** Linters are excellent for finding style issues and bugs within a single file. However, many critical vulnerabilities, such as Cross-Site Scripting (XSS) and SQL Injection, involve "tainted" data flowing from a user-controlled source (e.g., a URL parameter) through multiple functions before reaching a dangerous sink (e.g., `innerHTML`). Only a tool that understands the entire data flow of the application can reliably detect these complex vulnerabilities.
+- **Implementation:**
+  - A data-flow-aware SAST tool, with **GitHub CodeQL** as the reference implementation, **MUST** be integrated into the CI/CD pipeline.
+  - The analysis **MUST** be configured to run on every pull request and push to the main branch.
+  - Any `High` or `Critical` severity findings reported by the tool **MUST** be addressed or formally triaged before a pull request can be merged.
+
 ---
 
 ## Part V: Governance & Process
@@ -2150,11 +2199,15 @@ We practice **Trust is Not Transitive**. Every new dependency must be vetted for
 - All third-party components and their transitive dependencies **MUST** be sourced exclusively from pre-defined, trusted, and continually maintained repositories (e.g., internal registries, official npm registry). The build process **MUST** implement checks to prevent dependency confusion attacks by verifying the origin of fetched packages.
 - **ASVS Reference:** V15.2.4 (Third-party components and all of their transitive dependencies are included from the expected repository, and that there is no risk of a dependency confusion attack).
 
-#### 5.2.1. Build Provenance & Lockfile Signing (MUST)
+#### 5.2.1. Proactive Supply Chain Hardening (MUST)
 
-- **Statement:** The build artifact **MUST** include verifiable provenance metadata (build tool version, commit hash, `csp-hashes` manifest) and the repository **SHOULD** sign the `package-lock` or publish signatures for important lockfile checkpoints.
-- **Rationale:** Committing `package-lock.json` is good; adding provenance and signatures closes a gap vs. modern supply-chain attacks (reproducibility and chain-of-trust).&#x20;
-- **Implementation:** Use a reproducible build container, attach a `build-provenance.json`, and store artifacts in a nonce-signed artifact repository or enable SLSA/in-toto pipelines where practical.
+- **Statement:** The project's dependency management strategy must be proactive, not just reactive. In addition to scanning for known vulnerabilities (CVEs), all dependencies **MUST** be analyzed for risky characteristics and all code commits **MUST** be scanned for inadvertently committed secrets.
+- **Rationale:** The modern threat landscape has shifted from exploiting *vulnerable* dependencies to creating actively *malicious* dependencies (e.g., protestware, credential stealers). A reactive CVE scan is no longer sufficient. We must adopt a **Zero Trust** model for our supply chain, analyzing dependencies for suspicious behaviors and preventing secrets from ever entering the repository's history.
+- **Implementation:**
+  1.  **Behavioral Dependency Analysis:** A tool that analyzes package characteristics, such as **Socket.dev**, **MUST** be used. It should be configured to flag new dependencies that use install scripts, have broad permissions (network/filesystem access), or exhibit other risky signals. These findings must be reviewed on every pull request.
+  2.  **Automated Secret Scanning:** A secret-scanning tool, with **Gitleaks** as the reference implementation, **MUST** be integrated.
+      - It **MUST** run as a pre-commit hook to prevent secrets from being committed locally.
+      - It **MUST** also run in the CI pipeline as a defense-in-depth measure to scan all code pushed to the repository.
 
 ### 5.3. Training & Onboarding
 

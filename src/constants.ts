@@ -22,6 +22,6 @@ export function isForbiddenKey(key: string): boolean {
  * Returns a copy of forbidden keys as an array for diagnostic or display purposes.
  * Returns a shallow copy to avoid exposing internal Set for mutation.
  */
-export function getForbiddenKeys(): string[] {
+export function getForbiddenKeys(): readonly string[] {
   return Array.from(_FORBIDDEN_KEYS);
 }

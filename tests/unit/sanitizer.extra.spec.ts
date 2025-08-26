@@ -34,9 +34,9 @@ describe("Sanitizer core behaviors", () => {
       (globalThis as any).window = origWindow;
     });
 
-    it("createPolicyIfAvailable returns null when Trusted Types not present", () => {
+    it("createPolicyIfAvailable returns undefined when Trusted Types not present", () => {
       const s = new Sanitizer(goodDomPurify as any, { strict: STRICT_HTML_POLICY_CONFIG });
-      expect(s.createPolicyIfAvailable('strict')).toBeNull();
+      expect(s.createPolicyIfAvailable('strict')).toBeUndefined();
     });
 
     it("createPolicyIfAvailable creates and returns policy when available", () => {

@@ -1,33 +1,31 @@
 {
-  // === STRICT TYPESCRIPT CONFIGURATION FOR A DISTRIBUTABLE LIBRARY ===
-  // Adapted from a high-quality Astro project configuration.
+  // === STRICTER TYPESCRIPT CONFIGURATION FOR A DISTRIBUTABLE LIBRARY ===
   // This config is designed to produce clean, correct, and type-safe
   // declaration files (.d.ts) for consumers of the npm package.
   "compilerOptions": {
     // === EMIT (OUTPUT) CONFIGURATION ===
-    // We MUST emit files for the library to be usable.
-    "declaration": true, // Generate .d.ts files for consumers
-    "declarationMap": true, // Generate source maps for .d.ts files (great for IDEs)
-    "sourceMap": true, // Generate .js.map files for easier debugging by consumers
-    "outDir": "./dist", // Output directory for all generated files
-    "removeComments": false, // Keep JSDoc comments for tools like TypeDoc and IDE hints
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true,
+    "outDir": "./dist",
+    "removeComments": false,
 
     // === PROJECT STRUCTURE & MODULES ===
-    // These settings ensure modern, compatible module output.
-    // The actual CJS/ESM formats will be handled by your build tool (e.g., tsup).
-    "target": "ES2022",
+    "target": "ES2023",
     "module": "ESNext",
     "moduleResolution": "bundler",
-    "lib": ["ES2022", "DOM"],
+    "lib": ["ES2023", "DOM"],
     "esModuleInterop": true,
     "forceConsistentCasingInFileNames": true,
     "isolatedModules": true,
     "resolveJsonModule": true,
     "moduleDetection": "force",
+    // STRICTER: Use verbatimModuleSyntax. This is the modern, stricter replacement for several older flags
+    // like `importsNotUsedAsValues` and `preserveValueImports`. It makes module emit predictable:
+    // what you write is what you get. It forces you to be explicit with `import type`.
+    "verbatimModuleSyntax": true,
 
-    // === TYPE CHECKING - THE STRICTEST POSSIBLE (PRESERVED) ===
-    // All strictness flags from your original config are kept.
-    // This is a critical feature for a security-focused library.
+    // === TYPE CHECKING - THE STRICTEST POSSIBLE (PRESERVED & ENHANCED) ===
     "strict": true,
     "noImplicitAny": true,
     "noImplicitThis": true,
@@ -43,24 +41,48 @@
     "noFallthroughCasesInSwitch": true,
     "noUncheckedIndexedAccess": true,
     "noPropertyAccessFromIndexSignature": true,
-    "allowUnreachableCode": false,
-    "allowUnusedLabels": false,
+    "allowUnreachableCode": false, // Your original setting was good, keeping it explicit.
+    "allowUnusedLabels": false,    // Your original setting was good, keeping it explicit.
     "noUnusedLocals": true,
     "noUnusedParameters": true,
+    // STRICTER: This is a new strictness flag in TS 5.6. It ensures that built-in iterators
+    // like those for Map or Set have a more correct return type (`undefined` instead of `any`).
+    "strictBuiltinIteratorReturn": true,
 
     // === LIBRARY-SPECIFIC CONFIGURATION ===
-    "skipLibCheck": false, // Do not skip type checking of declaration files
-    "incremental": false, // Disable for DTS build compatibility with tsup
+    "skipLibCheck": false,
+    "incremental": false,
 
     // === ERROR REPORTING ===
     "noErrorTruncation": true,
-    "pretty": true
+    "pretty": true,
+
+    // === STRICTER EMIT & INTEROP RULES ===
+    // STRICTER: Disallow `import d from "cjs-module"` when there is no default export.
+    // `esModuleInterop` shims this, but setting this to false forces more correct import patterns.
+    // NOTE: This can be disruptive if you rely on CJS modules. Given you have zero dependencies,
+    // this is a safe and strict setting to adopt. If you add a CJS dependency later, you might
+    // need to revisit this or use `import * as d from "..."`.
+    "allowSyntheticDefaultImports": false,
+
+    // === STRICTER LANGUAGE & ENVIRONMENT RULES ===
+    // STRICTER: This ensures class fields follow the modern ECMAScript standard for initialization,
+    // which is more predictable than the legacy TypeScript behavior.
+    "useDefineForClassFields": true,
+
+    // === STRICTER PROJECT SETUP ===
+    // STRICTER: By setting `noEmitOnError` to true, the build will fail completely if there are any
+    // TypeScript errors. This prevents you from accidentally publishing a broken or partially-compiled
+    // version of your library. It's a critical safety net.
+    "noEmitOnError": true
   },
-  "include": ["src/**/*", "src/globals.d.ts"],
+  "include": ["src/**/*", "scripts/*", "server/*","src/globals.d.ts"],
   "exclude": [
     "node_modules",
     "dist",
-    "tests", // Exclude test files from the main library build
-    "vitest.config.ts" // Exclude config files
+    "tests",
+    "vitest.config.ts",
+    // STRICTER: Explicitly exclude any fuzzing harnesses or temporary scripts from the main build.
+    "src/fuzz-harness.ts"
   ]
 }
