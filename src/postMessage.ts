@@ -24,6 +24,7 @@ import {
   InvalidParameterError,
   InvalidConfigurationError,
   CryptoUnavailableError,
+  TransferableNotAllowedError,
   sanitizeErrorForLogs,
 } from "./errors";
 import { ensureCrypto } from "./state";
@@ -42,6 +43,10 @@ export interface SecurePostMessageOptions {
   readonly targetWindow: Window;
   readonly payload: unknown;
   readonly targetOrigin: string;
+  readonly wireFormat?: "json" | "structured" | "auto";
+  readonly sanitize?: boolean; // default true
+  readonly allowTransferables?: boolean; // default false
+  readonly allowTypedArrays?: boolean; // default false
 }
 
 export interface SecurePostMessageListener {
@@ -63,7 +68,17 @@ export type CreateSecurePostMessageListenerOptions = {
   // before being passed to the consumer. When false, callers accept responsibility
   // for not mutating the payload.
   readonly freezePayload?: boolean;
+  readonly wireFormat?: "json" | "structured" | "auto"; // default json
+  readonly deepFreezeNodeBudget?: number;
+  readonly allowTransferables?: boolean; // default false: disallow transferables like MessagePort/ArrayBuffer
+  readonly allowTypedArrays?: boolean; // default false: disallow TypedArray/DataView/ArrayBuffer without opt-in
 };
+
+// Re-export TransferableNotAllowedError for consumers
+export { TransferableNotAllowedError } from "./errors";
+
+// Export validateTransferables for testing
+export { validateTransferables };
 
 // --- Constants ---
 
@@ -82,7 +97,8 @@ const DEFAULT_DEEP_FREEZE_NODE_BUDGET = 5000; // tunable
  * Safe "now" helper that works in browser & node-like hosts.
  */
 function now(): number {
-  return typeof performance !== "undefined" && typeof performance.now === "function"
+  return typeof performance !== "undefined" &&
+    typeof performance.now === "function"
     ? performance.now()
     : Date.now();
 }
@@ -99,9 +115,9 @@ function syncCryptoAvailable(): boolean {
     // In Node 20+, globalThis.crypto is present. In browsers, it is present.
     // This is a conservative check; ensureCrypto() may still be used for
     // full async work (e.g., subtle).
-    const g = (globalThis as unknown) as { crypto?: unknown };
+    const g = globalThis as unknown as { readonly crypto?: unknown };
     if (!g || typeof g.crypto === "undefined") return false;
-    const c = g.crypto as unknown as { getRandomValues?: unknown };
+    const c = g.crypto as unknown as { readonly getRandomValues?: unknown };
     return !!(c && typeof c.getRandomValues === "function");
   } catch {
     return false;
@@ -109,6 +125,105 @@ function syncCryptoAvailable(): boolean {
 }
 
 // --- Internal Security Helpers ---
+
+/**
+ * Validates that payload does not contain disallowed transferable objects
+ * like MessagePort, ArrayBuffer, or SharedArrayBuffer unless explicitly allowed.
+ */
+function validateTransferables(
+  payload: unknown,
+  allowTransferables: boolean,
+  allowTypedArrays: boolean,
+  depth = 0,
+  maxDepth = POSTMESSAGE_MAX_PAYLOAD_DEPTH,
+  visited?: WeakSet<object>,
+): void {
+  if (depth > maxDepth) return; // depth check handled elsewhere
+  if (payload === null || typeof payload !== "object") return;
+
+  // Handle circular references
+  visited ??= new WeakSet<object>();
+  if (visited.has(payload as object)) return;
+  visited.add(payload as object);
+
+  // Check for disallowed transferable types
+  const ctorName = (payload as any)?.constructor?.name;
+
+  // MessagePort and other transferable objects
+  if (
+    ctorName === "MessagePort" ||
+    ctorName === "ReadableStream" ||
+    ctorName === "WritableStream" ||
+    ctorName === "TransformStream"
+  ) {
+    if (!allowTransferables) {
+      throw new TransferableNotAllowedError(
+        `Transferable object ${ctorName} is not allowed unless allowTransferables=true`,
+      );
+    }
+  }
+
+  // ArrayBuffer and typed arrays
+  if (ctorName === "ArrayBuffer" || ctorName === "SharedArrayBuffer") {
+    if (!allowTypedArrays) {
+      throw new TransferableNotAllowedError(
+        `${ctorName} is not allowed unless allowTypedArrays=true`,
+      );
+    }
+  }
+
+  // TypedArray and DataView check
+  try {
+    if (ArrayBuffer.isView(payload as any)) {
+      if (!allowTypedArrays) {
+        throw new TransferableNotAllowedError(
+          "TypedArray/DataView is not allowed unless allowTypedArrays=true",
+        );
+      }
+    }
+  } catch {
+    // If ArrayBuffer.isView throws, continue
+  }
+
+  // Recursively check nested objects and arrays
+  if (Array.isArray(payload)) {
+    for (const item of payload) {
+      validateTransferables(
+        item,
+        allowTransferables,
+        allowTypedArrays,
+        depth + 1,
+        maxDepth,
+        visited,
+      );
+    }
+  } else {
+    for (const key of Object.keys(payload as Record<string, unknown>)) {
+      try {
+        const desc = Object.getOwnPropertyDescriptor(
+          payload as Record<string, unknown>,
+          key,
+        );
+        if (desc && Object.prototype.hasOwnProperty.call(desc, "value")) {
+          const value = (
+            desc as PropertyDescriptor & { readonly value?: unknown }
+          ).value;
+          validateTransferables(
+            value,
+            allowTransferables,
+            allowTypedArrays,
+            depth + 1,
+            maxDepth,
+            visited,
+          );
+        }
+      } catch {
+        // Skip properties that throw on access
+        continue;
+      }
+    }
+  }
+}
 
 /**
  * Converts objects to null-prototype objects to prevent prototype pollution attacks.
@@ -134,7 +249,9 @@ function toNullProto(
   try {
     // ArrayBuffer view check covers TypedArray and DataView
     if (ArrayBuffer.isView(object as any)) {
-      throw new InvalidParameterError("Unsupported typed-array or DataView in payload.");
+      throw new InvalidParameterError(
+        "Unsupported typed-array or DataView in payload.",
+      );
     }
   } catch {
     // If ArrayBuffer.isView throws (very exotic hosts), fall through to other checks
@@ -169,7 +286,7 @@ function toNullProto(
 
   if (Array.isArray(object)) {
     // Map children using the same visited set so cycles across array/object are detected.
-    const res = (object as unknown[]).map((item) =>
+    const res = (object as readonly unknown[]).map((item) =>
       toNullProto(item, depth + 1, maxDepth, visited),
     );
     return res;
@@ -194,19 +311,20 @@ function toNullProto(
         continue;
       }
       if (desc && Object.prototype.hasOwnProperty.call(desc, "value")) {
-        value = (desc as PropertyDescriptor & { readonly value?: unknown }).value as unknown;
+        value = (desc as PropertyDescriptor & { readonly value?: unknown })
+          .value as unknown;
       } else {
         // Fallback, but guard in try/catch
         value = (object as Record<string, unknown>)[key] as unknown;
       }
-    } catch (err) {
+    } catch (error) {
       // If property access throws, skip it but log best-effort in dev
       try {
         secureDevelopmentLog(
           "warn",
           "postMessage",
           "Skipped property due to throwing getter",
-          { key, error: sanitizeErrorForLogs(err) },
+          { key, error: sanitizeErrorForLogs(error) },
         );
       } catch {
         /* best-effort */
@@ -241,7 +359,10 @@ function isHostnameLocalhost(hostname: string): boolean {
 }
 
 // Iterative deep-freeze with node budget to avoid deep recursion and DoS via wide structures.
-function deepFreeze<T>(object: T, nodeBudget = DEFAULT_DEEP_FREEZE_NODE_BUDGET): T {
+function deepFreeze<T>(
+  object: T,
+  nodeBudget = DEFAULT_DEEP_FREEZE_NODE_BUDGET,
+): T {
   if (!(object && typeof object === "object")) return object;
 
   // Quick guard: attempt to freeze shallowly first (best-effort)
@@ -293,14 +414,14 @@ function deepFreeze<T>(object: T, nodeBudget = DEFAULT_DEEP_FREEZE_NODE_BUDGET):
           if (v && typeof v === "object") stack.push(v);
         }
       }
-    } catch (err) {
+    } catch (error) {
       // Best effort logging
       try {
         secureDevelopmentLog(
           "warn",
           "postMessage",
           "deepFreeze encountered error while traversing object",
-          { error: sanitizeErrorForLogs(err) },
+          { error: sanitizeErrorForLogs(error) },
         );
       } catch {
         /* ignore */
@@ -315,6 +436,9 @@ function deepFreeze<T>(object: T, nodeBudget = DEFAULT_DEEP_FREEZE_NODE_BUDGET):
 
 export function sendSecurePostMessage(options: SecurePostMessageOptions): void {
   const { targetWindow, payload, targetOrigin } = options;
+  const wireFormat = (options as SecurePostMessageOptions).wireFormat ?? "json";
+  const sanitizeOutgoing =
+    (options as SecurePostMessageOptions).sanitize !== false; // default true
   if (!targetWindow)
     throw new InvalidParameterError("targetWindow must be provided.");
   if (targetOrigin === "*")
@@ -326,7 +450,11 @@ export function sendSecurePostMessage(options: SecurePostMessageOptions): void {
   try {
     const parsed = new URL(targetOrigin);
     // Enforce that an origin string does not include a path/search/hash
-    if ((parsed.pathname && parsed.pathname !== "/") || parsed.search || parsed.hash) {
+    if (
+      (parsed.pathname && parsed.pathname !== "/") ||
+      parsed.search ||
+      parsed.hash
+    ) {
       throw new InvalidParameterError(
         "targetOrigin must be a pure origin (no path, query, or fragment).",
       );
@@ -360,31 +488,86 @@ export function sendSecurePostMessage(options: SecurePostMessageOptions): void {
     );
   }
 
-  // Serialize first to validate JSON-serializability and enforce size limits
-  let serialized: string;
-  try {
-    serialized = JSON.stringify(payload);
-  } catch {
-    // JSON.stringify throws TypeError on circular structures
-    throw new InvalidParameterError("Payload must be JSON-serializable.");
-  }
-
-  // Enforce max payload bytes before sending
-  const bytes = SHARED_ENCODER.encode(serialized);
-  if (bytes.length > POSTMESSAGE_MAX_PAYLOAD_BYTES) {
-    throw new InvalidParameterError(
-      `Payload exceeds maximum size of ${POSTMESSAGE_MAX_PAYLOAD_BYTES} bytes.`,
-    );
-  }
-
-  try {
-    targetWindow.postMessage(serialized, targetOrigin);
-  } catch (error) {
-    if (error instanceof TypeError) {
+  // Handle wire formats
+  if (wireFormat === "json") {
+    // Serialize first to validate JSON-serializability and enforce size limits
+    let serialized: string;
+    try {
+      const toSend = sanitizeOutgoing ? toNullProto(payload) : payload;
+      serialized = JSON.stringify(toSend);
+    } catch {
+      // JSON.stringify throws TypeError on circular structures
       throw new InvalidParameterError("Payload must be JSON-serializable.");
     }
-    throw error;
+
+    // Enforce max payload bytes before sending
+    const bytes = SHARED_ENCODER.encode(serialized);
+    if (bytes.length > POSTMESSAGE_MAX_PAYLOAD_BYTES) {
+      throw new InvalidParameterError(
+        `Payload exceeds maximum size of ${POSTMESSAGE_MAX_PAYLOAD_BYTES} bytes.`,
+      );
+    }
+
+    try {
+      targetWindow.postMessage(serialized, targetOrigin);
+    } catch (error) {
+      if (error instanceof TypeError) {
+        throw new InvalidParameterError("Payload must be JSON-serializable.");
+      }
+      throw error;
+    }
+    return;
   }
+
+  if (wireFormat === "structured" || wireFormat === "auto") {
+    // Structured: allow posting non-string data. 'auto' may be downgraded on receive.
+    // By default we sanitize outgoing payloads to null-proto version to avoid prototype pollution.
+    const allowTransferablesOutgoing = options.allowTransferables ?? false;
+    const allowTypedArraysOutgoing = options.allowTypedArrays ?? false;
+
+    // Validate transferables before any processing
+    try {
+      validateTransferables(
+        payload,
+        allowTransferablesOutgoing,
+        allowTypedArraysOutgoing,
+      );
+    } catch (error) {
+      if (error instanceof TransferableNotAllowedError) {
+        throw error; // Re-throw specific transferable errors
+      }
+      throw new InvalidParameterError(
+        "Payload validation failed: " +
+          String((error as Error)?.message ?? error),
+      );
+    }
+
+    if (sanitizeOutgoing) {
+      try {
+        const sanitized = toNullProto(payload);
+        targetWindow.postMessage(sanitized as any, targetOrigin);
+        return;
+      } catch (error) {
+        if (error instanceof TransferableNotAllowedError) {
+          throw error; // Re-throw transferable errors
+        }
+        throw new InvalidParameterError(
+          "Structured-clone payload contains unsupported host objects or circular references.",
+        );
+      }
+    }
+    // If sanitize disabled, attempt to post as-is but transferables were already validated above
+    try {
+      targetWindow.postMessage(payload as any, targetOrigin);
+      return;
+    } catch (error) {
+      throw new InvalidParameterError(
+        "Failed to post structured payload: ensure payload is structured-cloneable.",
+      );
+    }
+  }
+
+  throw new InvalidParameterError("Unsupported wireFormat");
 }
 
 export function createSecurePostMessageListener(
@@ -400,19 +583,22 @@ export function createSecurePostMessageListener(
       | Record<string, SchemaValue>
       | undefined;
 
-  let optionsObj: CreateSecurePostMessageListenerOptions | undefined;
+  let optionsObject: CreateSecurePostMessageListenerOptions | undefined;
 
   if (Array.isArray(allowedOriginsOrOptions)) {
     allowedOrigins = allowedOriginsOrOptions;
     if (!onMessageOptional) {
-      throw new InvalidParameterError("onMessage callback is required when passing allowed origins array.");
+      throw new InvalidParameterError(
+        "onMessage callback is required when passing allowed origins array.",
+      );
     }
     onMessage = onMessageOptional as (data: unknown) => void;
   } else {
-    optionsObj = allowedOriginsOrOptions as CreateSecurePostMessageListenerOptions;
-    allowedOrigins = optionsObj.allowedOrigins;
-    onMessage = optionsObj.onMessage;
-    validator = optionsObj.validate;
+    optionsObject =
+      allowedOriginsOrOptions as CreateSecurePostMessageListenerOptions;
+    allowedOrigins = optionsObject.allowedOrigins;
+    onMessage = optionsObject.onMessage;
+    validator = optionsObject.validate;
   }
 
   // Production-time synchronous crypto availability check:
@@ -430,13 +616,18 @@ export function createSecurePostMessageListener(
       /* best-effort */
     }
     // Fail-fast: production requires crypto for our security guarantees.
-    throw new CryptoUnavailableError("Secure crypto (crypto.getRandomValues) required in production.");
+    throw new CryptoUnavailableError(
+      "Secure crypto (crypto.getRandomValues) required in production.",
+    );
   }
 
   // In production, require explicit channel binding and a validator to avoid
   // creating a listener that accepts messages from any origin/source.
-  const hasAllowedOrigins = Array.isArray(allowedOrigins) && allowedOrigins.length > 0;
-  const hasExpectedSource = !!(optionsObj && typeof optionsObj.expectedSource !== "undefined");
+  const hasAllowedOrigins =
+    Array.isArray(allowedOrigins) && allowedOrigins.length > 0;
+  const hasExpectedSource = !!(
+    optionsObject && typeof optionsObject.expectedSource !== "undefined"
+  );
   if (environment.isProduction && !(hasAllowedOrigins || hasExpectedSource)) {
     throw new InvalidConfigurationError(
       "createSecurePostMessageListener requires 'allowedOrigins' or 'expectedSource' in production.",
@@ -459,7 +650,8 @@ export function createSecurePostMessageListener(
       const u = new URL(norm);
       if (u.origin === "null") throw new Error("opaque origin");
       const isLocalhost = isHostnameLocalhost(u.hostname);
-      if (u.protocol !== "https:" && !isLocalhost) throw new Error("insecure origin");
+      if (u.protocol !== "https:" && !isLocalhost)
+        throw new Error("insecure origin");
       return norm;
     } catch {
       throw new InvalidParameterError(
@@ -473,7 +665,7 @@ export function createSecurePostMessageListener(
   // throw a single informative error.
   const invalidOrigins: string[] = [];
   const allowedOriginSet = new Set<string>();
-  for (const o of (allowedOrigins || [])) {
+  for (const o of allowedOrigins || []) {
     try {
       const n = normalizeOrigin(o);
       allowedOriginSet.add(n);
@@ -507,7 +699,9 @@ export function createSecurePostMessageListener(
   // Module-scoped cache to avoid re-freezing identical object instances.
   function getDeepFreezeCache(): WeakSet<object> | undefined {
     try {
-      const holder = deepFreeze as unknown as { _cache?: WeakSet<object> };
+      const holder = deepFreeze as unknown as {
+        readonly _cache?: WeakSet<object>;
+      };
       (holder as any)._cache ??= new WeakSet<object>();
       return (holder as any)._cache as WeakSet<object>;
     } catch {
@@ -528,13 +722,13 @@ export function createSecurePostMessageListener(
       if (!cache.has(payload as object)) {
         try {
           deepFreeze(payload, nodeBudget);
-        } catch (err) {
+        } catch (error) {
           try {
             secureDevelopmentLog(
               "warn",
               "postMessage",
               "deepFreeze failed or budget exceeded while freezing payload",
-              { error: sanitizeErrorForLogs(err) },
+              { error: sanitizeErrorForLogs(error) },
             );
           } catch {
             /* best-effort */
@@ -550,13 +744,13 @@ export function createSecurePostMessageListener(
     }
     try {
       deepFreeze(payload, nodeBudget);
-    } catch (err) {
+    } catch (error) {
       try {
         secureDevelopmentLog(
           "warn",
           "postMessage",
           "deepFreeze failed or budget exceeded while freezing payload",
-          { error: sanitizeErrorForLogs(err) },
+          { error: sanitizeErrorForLogs(error) },
         );
       } catch {
         /* ignore */
@@ -573,13 +767,21 @@ export function createSecurePostMessageListener(
 
       if (!validator) {
         // Defensive: in case validator was removed from optionsObj at runtime
-        secureDevelopmentLog("error", "postMessage", "Message validator missing at runtime", {});
+        secureDevelopmentLog(
+          "error",
+          "postMessage",
+          "Message validator missing at runtime",
+          {},
+        );
         return;
       }
 
       const allowExtraProperties =
-        typeof (optionsObj as CreateSecurePostMessageListenerOptions | undefined)?.allowExtraProps === "boolean"
-          ? (optionsObj as CreateSecurePostMessageListenerOptions).allowExtraProps!
+        typeof (
+          optionsObject as CreateSecurePostMessageListenerOptions | undefined
+        )?.allowExtraProps === "boolean"
+          ? (optionsObject as CreateSecurePostMessageListenerOptions)
+              .allowExtraProps!
           : false;
 
       const validationResult = _validatePayloadWithExtras(
@@ -590,7 +792,8 @@ export function createSecurePostMessageListener(
       if (!validationResult.valid) {
         // Gate expensive fingerprinting behind diagnostics and a small budget to avoid DoS
         scheduleDiagnosticForFailedValidation(
-          (optionsObj as CreateSecurePostMessageListenerOptions) || ({} as CreateSecurePostMessageListenerOptions),
+          (optionsObject as CreateSecurePostMessageListenerOptions) ||
+            ({} as CreateSecurePostMessageListenerOptions),
           event.origin,
           validationResult.reason,
           data,
@@ -600,7 +803,7 @@ export function createSecurePostMessageListener(
 
       // Freeze payload by default (immutable) with an identity cache to avoid
       // repeated work. Consumers can opt out with freezePayload: false.
-      if (optionsObj) freezePayloadIfNeeded(optionsObj, data);
+      if (optionsObject) freezePayloadIfNeeded(optionsObject, data);
       // Call the consumer. If the consumer returns a promise that rejects,
       // attach a rejection handler so we can sanitize and log the error and
       // avoid unhandled promise rejections in environments where consumers
@@ -678,7 +881,8 @@ export function createSecurePostMessageListener(
 
   function isEventSourceExpected(event: MessageEvent): boolean {
     const options =
-      (allowedOriginsOrOptions as CreateSecurePostMessageListenerOptions) || optionsObj;
+      (allowedOriginsOrOptions as CreateSecurePostMessageListenerOptions) ||
+      optionsObject;
     const expected = options?.expectedSource;
     if (typeof expected === "undefined") return true;
     // If expectedSource is a comparator function, call it
@@ -696,14 +900,14 @@ export function createSecurePostMessageListener(
           );
         }
         return Boolean(ok);
-      } catch (err) {
+      } catch (error) {
         secureDevelopmentLog(
           "warn",
           "postMessage",
           "Dropped message due to expectedSource comparator throwing",
           {
             origin: event.origin,
-            error: sanitizeErrorForLogs(err),
+            error: sanitizeErrorForLogs(error),
           },
         );
         return false;
@@ -799,6 +1003,65 @@ export function createSecurePostMessageListener(
   }
 
   function parseMessageEventData(event: MessageEvent): unknown {
+    const options =
+      (allowedOriginsOrOptions as CreateSecurePostMessageListenerOptions) ||
+      optionsObject;
+    const wireFormat = options?.wireFormat ?? "json";
+
+    // If structured/auto, allow non-string data when appropriate
+    if (wireFormat === "structured") {
+      // Accept structured clone payloads but sanitize and enforce host-type disallow rules
+      if (event.data === null || typeof event.data !== "object") {
+        // primitive types are acceptable via structured clone
+        return event.data;
+      }
+      const optionsLocal =
+        (allowedOriginsOrOptions as CreateSecurePostMessageListenerOptions) ||
+        optionsObject;
+      const allowTransferablesLocal = !!optionsLocal?.allowTransferables;
+      const allowTypedArraysLocal = !!optionsLocal?.allowTypedArrays;
+
+      // Use strict transferable validation
+      try {
+        validateTransferables(
+          event.data,
+          allowTransferablesLocal,
+          allowTypedArraysLocal,
+        );
+      } catch (error) {
+        if (error instanceof TransferableNotAllowedError) {
+          throw error; // Re-throw specific transferable errors
+        }
+        throw new InvalidParameterError(
+          "Received payload validation failed: " +
+            String((error as Error)?.message ?? error),
+        );
+      }
+
+      // Convert to null-prototype and enforce depth/forbidden keys
+      return toNullProto(event.data, 0, POSTMESSAGE_MAX_PAYLOAD_DEPTH);
+    }
+
+    if (wireFormat === "auto") {
+      // auto: accept structured clone only for same-origin messages; otherwise require JSON string
+      try {
+        const sameOrigin =
+          normalizeUrlOrigin(event.origin) ===
+          normalizeUrlOrigin(location.origin);
+        if (
+          sameOrigin &&
+          event.data !== null &&
+          typeof event.data === "object"
+        ) {
+          return toNullProto(event.data, 0, POSTMESSAGE_MAX_PAYLOAD_DEPTH);
+        }
+      } catch {
+        // fall back to JSON handling below
+      }
+      // else treat as JSON string path
+    }
+
+    // Default JSON path: require string
     if (typeof event.data !== "string") {
       // Reject non-string payloads to avoid structured clone cycles and ambiguous typing
       throw new InvalidParameterError(
@@ -830,6 +1093,45 @@ export function createSecurePostMessageListener(
 
 // --- Internal Helpers ---
 
+// Deterministic, stable JSON serialization used for fingerprinting only.
+function stableStringify(
+  object: unknown,
+  maxDepth = POSTMESSAGE_MAX_PAYLOAD_DEPTH,
+  nodeBudget = DEFAULT_DEEP_FREEZE_NODE_BUDGET,
+):
+  | { readonly ok: true; readonly s: string }
+  | { readonly ok: false; readonly reason: string } {
+  const seen = new WeakSet<object>();
+  let nodes = 0;
+
+  function norm(o: unknown, depth: number): unknown {
+    if (++nodes > nodeBudget) throw new Error("budget");
+    if (o === null || typeof o !== "object") return o;
+    if (depth > maxDepth) throw new Error("depth");
+    if (seen.has(o as object)) throw new Error("circular");
+    seen.add(o as object);
+    if (Array.isArray(o))
+      return (o as readonly unknown[]).map((v) => norm(v, depth + 1));
+    const keys = Object.keys(o as Record<string, unknown>).sort();
+    const res: Record<string, unknown> = Object.create(null);
+    for (const k of keys) {
+      res[k] = norm((o as Record<string, unknown>)[k], depth + 1);
+    }
+    return res;
+  }
+
+  try {
+    const normalized = norm(object, 0);
+    return { ok: true, s: JSON.stringify(normalized) };
+  } catch (error) {
+    return { ok: false, reason: String((error as Error)?.message ?? "error") };
+  }
+}
+
+// Memoized salt initialization promise to avoid races when multiple callers
+// request a salt concurrently.
+let _payloadFingerprintSaltPromise: Promise<Uint8Array> | undefined;
+
 // Salt used to make fingerprints non-linkable across process restarts.
 // Generated lazily using secure RNG when available.
 const FINGERPRINT_SALT_LENGTH = 16;
@@ -842,6 +1144,8 @@ let _diagnosticsDisabledDueToNoCryptoInProduction = false;
 async function ensureFingerprintSalt(): Promise<Uint8Array> {
   if (typeof _payloadFingerprintSalt !== "undefined" && _payloadFingerprintSalt)
     return _payloadFingerprintSalt;
+  if (typeof _payloadFingerprintSaltPromise !== "undefined")
+    return _payloadFingerprintSaltPromise;
   // Fast synchronous availability check: if in production and crypto is missing,
   // we fail fast rather than relying on time-based fallback.
   if (environment.isProduction && !syncCryptoAvailable()) {
@@ -859,76 +1163,110 @@ async function ensureFingerprintSalt(): Promise<Uint8Array> {
     throw new CryptoUnavailableError();
   }
 
-  try {
-    const crypto = await ensureCrypto();
-    const salt = new Uint8Array(FINGERPRINT_SALT_LENGTH);
-    crypto.getRandomValues(salt);
-    _payloadFingerprintSalt = salt;
-    return salt;
-  } catch (error) {
-    // No secure crypto available: enforce security constitution.
-    if (environment.isProduction) {
-      try {
-        _diagnosticsDisabledDueToNoCryptoInProduction = true;
-      } catch {
-        /* ignore */
+  _payloadFingerprintSaltPromise = (async () => {
+    try {
+      const crypto = await ensureCrypto();
+      const salt = new Uint8Array(FINGERPRINT_SALT_LENGTH);
+      crypto.getRandomValues(salt);
+      _payloadFingerprintSalt = salt;
+      return salt;
+    } catch (error) {
+      // No secure crypto available: enforce security constitution.
+      if (environment.isProduction) {
+        try {
+          _diagnosticsDisabledDueToNoCryptoInProduction = true;
+        } catch {
+          /* ignore */
+        }
+        try {
+          secureDevelopmentLog(
+            "warn",
+            "postMessage",
+            "Secure crypto unavailable in production; disabling diagnostics that rely on non-crypto fallbacks",
+            { error: sanitizeErrorForLogs(error) },
+          );
+        } catch {
+          /* ignore */
+        }
+        throw new CryptoUnavailableError();
       }
+
+      // Non-production (development/test) fallback: log and produce a
+      // deterministic, time-based salt to preserve testability.
       try {
         secureDevelopmentLog(
           "warn",
           "postMessage",
-          "Secure crypto unavailable in production; disabling diagnostics that rely on non-crypto fallbacks",
-          { error: sanitizeErrorForLogs(error) },
+          "Falling back to non-crypto fingerprint salt (dev/test only)",
+          {
+            error: sanitizeErrorForLogs(error),
+          },
         );
       } catch {
-        /* ignore */
+        // best-effort logging
       }
-      throw new CryptoUnavailableError();
+      const timeEntropy =
+        String(Date.now()) +
+        String(
+          typeof performance !== "undefined" &&
+            typeof performance.now === "function"
+            ? performance.now()
+            : 0,
+        );
+      const buf = new Uint8Array(FINGERPRINT_SALT_LENGTH);
+      for (let index = 0; index < buf.length; index++) {
+        buf[index] = timeEntropy.charCodeAt(index % timeEntropy.length) & 0xff;
+      }
+      _payloadFingerprintSalt = buf;
+      return buf;
     }
+  })();
 
-    // Non-production (development/test) fallback: log and produce a
-    // deterministic, time-based salt to preserve testability.
-    try {
-      secureDevelopmentLog(
-        "warn",
-        "postMessage",
-        "Falling back to non-crypto fingerprint salt (dev/test only)",
-        {
-          error: sanitizeErrorForLogs(error),
-        },
-      );
-    } catch {
-      // best-effort logging
-    }
-    const timeEntropy =
-      String(Date.now()) +
-      String(
-        typeof performance !== "undefined" && typeof performance.now === "function"
-          ? performance.now()
-          : 0,
-      );
-    const buf = new Uint8Array(FINGERPRINT_SALT_LENGTH);
-    for (let index = 0; index < buf.length; index++) {
-      buf[index] = timeEntropy.charCodeAt(index % timeEntropy.length) & 0xff;
-    }
-    _payloadFingerprintSalt = buf;
-    return buf;
+  try {
+    const res = await _payloadFingerprintSaltPromise;
+    return res;
+  } finally {
+    // clear promise so subsequent calls go fast (salt is cached)
+    _payloadFingerprintSaltPromise = undefined;
   }
 }
 
 async function getPayloadFingerprint(data: unknown): Promise<string> {
-  const s = JSON.stringify(data).slice(0, POSTMESSAGE_MAX_PAYLOAD_BYTES);
+  // Canonicalize sanitized payload for deterministic fingerprints
+  let sanitized: unknown;
+  try {
+    sanitized = toNullProto(data, 0, POSTMESSAGE_MAX_PAYLOAD_DEPTH);
+  } catch {
+    // If sanitization fails, fall back to raw representation for diagnostics only
+    sanitized = data;
+  }
+  const stable = stableStringify(
+    sanitized,
+    POSTMESSAGE_MAX_PAYLOAD_DEPTH,
+    DEFAULT_DEEP_FREEZE_NODE_BUDGET,
+  );
+  if (!stable.ok) {
+    // If canonicalization fails, return an explicit error token in prod or a fallback in dev
+    if (environment.isProduction)
+      throw new Error("Fingerprinting failed due to resource constraints");
+    // dev/test fallback: use best-effort raw string truncated
+
+    const s = JSON.stringify(sanitized).slice(0, POSTMESSAGE_MAX_PAYLOAD_BYTES);
+    return computeFingerprintFromString(s);
+  }
+  const s = stable.s.slice(0, POSTMESSAGE_MAX_PAYLOAD_BYTES);
   let saltBuf: Uint8Array | undefined;
   try {
     saltBuf = await ensureFingerprintSalt();
-  } catch (err) {
-    if (environment.isProduction) throw err;
+  } catch (error) {
+    if (environment.isProduction) throw error;
     // else: continue to attempt a non-crypto fallback
   }
 
   try {
     const crypto = await ensureCrypto();
-    const subtle = (crypto as Crypto & { readonly subtle?: SubtleCrypto }).subtle;
+    const subtle = (crypto as Crypto & { readonly subtle?: SubtleCrypto })
+      .subtle;
     if (subtle && typeof subtle.digest === "function" && saltBuf) {
       const payloadBytes = SHARED_ENCODER.encode(s);
       const saltArray = saltBuf;
@@ -943,6 +1281,43 @@ async function getPayloadFingerprint(data: unknown): Promise<string> {
   }
 
   // Fallback: salted non-crypto rolling hash (development/test only)
+  if (!saltBuf) return "FINGERPRINT_ERR";
+  const sb = saltBuf;
+  let accumulator = 2166136261 >>> 0; // FNV-1a init
+  for (const byte of sb) {
+    accumulator = ((accumulator ^ byte) * 16777619) >>> 0;
+  }
+  for (let index = 0; index < s.length; index++) {
+    accumulator = ((accumulator ^ s.charCodeAt(index)) * 16777619) >>> 0;
+  }
+  return accumulator.toString(16).padStart(8, "0");
+}
+
+// Extracted helper so stable/canonical fallback can use the same compute logic
+async function computeFingerprintFromString(s: string): Promise<string> {
+  let saltBuf: Uint8Array | undefined;
+  try {
+    saltBuf = await ensureFingerprintSalt();
+  } catch {
+    if (environment.isProduction) throw new Error("Fingerprinting unavailable");
+  }
+  try {
+    const crypto = await ensureCrypto();
+    const subtle = (crypto as Crypto & { readonly subtle?: SubtleCrypto })
+      .subtle;
+    if (subtle && typeof subtle.digest === "function" && saltBuf) {
+      const payloadBytes = SHARED_ENCODER.encode(s);
+      const saltArray = saltBuf;
+      const input = new Uint8Array(saltArray.length + payloadBytes.length);
+      input.set(saltArray, 0);
+      input.set(payloadBytes, saltArray.length);
+      const digest = await subtle.digest("SHA-256", input.buffer);
+      return _arrayBufferToBase64(digest).slice(0, 12);
+    }
+  } catch {
+    /* fall through to non-crypto fallback */
+  }
+
   if (!saltBuf) return "FINGERPRINT_ERR";
   const sb = saltBuf;
   let accumulator = 2166136261 >>> 0; // FNV-1a init
@@ -1059,14 +1434,17 @@ export const __test_internals:
           // We purposely avoid dynamic import here because this factory is synchronous.
           // Tests should run in an environment that supports require or set the
           // SECURITY_KIT_ALLOW_TEST_APIS flag.
-          // eslint-disable-next-line @typescript-eslint/no-var-requires
-          const developmentGuards = typeof require === "function"
-            ? require("./development-guards") as {
-                readonly assertTestApiAllowed: () => void;
-              }
-            : ((): never => {
-                throw new Error("Cannot load test internals: require() not available. Ensure your test environment supports CommonJS require or enable SECURITY_KIT_ALLOW_TEST_APIS.");
-              })();
+
+          const developmentGuards =
+            typeof require === "function"
+              ? (require("./development-guards") as {
+                  readonly assertTestApiAllowed: () => void;
+                })
+              : ((): never => {
+                  throw new Error(
+                    "Cannot load test internals: require() not available. Ensure your test environment supports CommonJS require or enable SECURITY_KIT_ALLOW_TEST_APIS.",
+                  );
+                })();
 
           developmentGuards.assertTestApiAllowed();
 
@@ -1079,12 +1457,17 @@ export const __test_internals:
           };
           /* eslint-enable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-assignment */
           return testExports;
-        } catch (err) {
+        } catch (error) {
           // If test internals cannot be exposed, return undefined to avoid exposing internals in prod builds.
           try {
-            secureDevelopmentLog("warn", "postMessage", "Test internals not exposed", {
-              error: sanitizeErrorForLogs(err),
-            });
+            secureDevelopmentLog(
+              "warn",
+              "postMessage",
+              "Test internals not exposed",
+              {
+                error: sanitizeErrorForLogs(error),
+              },
+            );
           } catch {
             /* best-effort */
           }

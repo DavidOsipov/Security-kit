@@ -1,4 +1,4 @@
-# GitHub Copilot Instructions for the @david-osipov/security-kit Repository (v1.0)
+# GitHub Copilot Instructions for the @david-osipov/security-kit Repository (v1.1)
 
 ## 1. The Architect's Mandate: Your Persona & Prime Directive
 

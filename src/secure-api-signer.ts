@@ -30,6 +30,13 @@ import { safeStableStringify } from "./canonical.js";
 import { getSecureRandomBytesSync } from "./crypto";
 import { SHARED_ENCODER } from "./encoding";
 import { secureWipe as importedSecureWipe } from "./utils";
+import {
+  bytesToBase64,
+  base64ToBytes,
+  sha256Base64,
+  isLikelyBase64,
+  secureWipeWrapper,
+} from "./encoding-utils";
 import { environment } from "./environment";
 import type {
   InitMessage,
@@ -132,69 +139,18 @@ function generateRequestId(): number {
   const bytes = new Uint8Array(4);
   crypto.getRandomValues(bytes);
   // Convert to positive 32-bit integer, Uint8Array indices are guaranteed to exist
-  return ((bytes[0] ?? 0) << 24 | (bytes[1] ?? 0) << 16 | (bytes[2] ?? 0) << 8 | (bytes[3] ?? 0)) >>> 0;
+  return (
+    (((bytes[0] ?? 0) << 24) |
+      ((bytes[1] ?? 0) << 16) |
+      ((bytes[2] ?? 0) << 8) |
+      (bytes[3] ?? 0)) >>>
+    0
+  );
 }
 
 /* ========================= Utilities ========================= */
 
-function assertSubtleCrypto(): SubtleCrypto {
-  const subtle = globalThis.crypto?.subtle;
-  if (!subtle)
-    throw new CryptoUnavailableError("Web Crypto API is not available.");
-  return subtle;
-}
-
-function bytesToBase64(bytes: Uint8Array): string {
-  const CHUNK = 0x8000;
-  const count = Math.ceil(bytes.length / CHUNK) || 0;
-  const parts = Array.from({ length: count }, (_, index) => {
-    const start = index * CHUNK;
-    const chunk = bytes.subarray(start, start + CHUNK);
-    return String.fromCharCode(...Array.from(chunk));
-  });
-  return btoa(parts.join(""));
-}
-
-function base64ToBytes(b64: string): Uint8Array {
-  const bin = atob(b64);
-  const array = Array.from(bin, (ch) => ch.charCodeAt(0));
-  return new Uint8Array(array);
-}
-
-async function sha256Base64(input: BufferSource): Promise<string> {
-  const subtle = assertSubtleCrypto();
-  const digest = await subtle.digest("SHA-256", input);
-  return bytesToBase64(new Uint8Array(digest));
-}
-
-function isLikelyBase64(s: string): boolean {
-  // Standard Base64 (RFC 4648) only — not base64url. Padding ("=") allowed only at the end.
-  return /^[A-Z0-9+/]+={0,2}$/i.test(s);
-}
-
-/** fallback best-effort wipe */
-function bestEffortWipe(view: Uint8Array): void {
-  // Intentionally no-op to satisfy immutability rules; the caller is responsible for
-  // providing a transfer buffer copy separate from the original secret and dropping references.
-  try {
-    // Hint to GC by allocating and letting it go out of scope (optional, best-effort)
-    new Uint8Array(Math.max(0, view.length));
-  } catch {
-    /* ignore */
-  }
-}
-
-function secureWipeWrapper(view: Uint8Array): void {
-  if (typeof importedSecureWipe === "function") {
-    try {
-      importedSecureWipe(view);
-      return;
-    } catch {
-      // continue to fallback
-    }
-  }
-  bestEffortWipe(view);
-}
+// Use shared encoding-utils for base64/hash/wipe helpers
 
 /* ========================= Runtime Guards for messages ========================= */
 
@@ -297,7 +253,7 @@ export class SecureApiSigner {
   readonly #maxPendingRequests: number;
   readonly #kid: string | undefined;
 
-  #state: SignerState = {
+  readonly #state: SignerState = {
     destroyed: false,
     activePorts: new Map(),
     circuitBreaker: {
@@ -307,9 +263,13 @@ export class SecureApiSigner {
       successCount: 0,
     },
   };
+  // Reservation tokens to synchronously reserve pending slots before async work
+  readonly #pendingReservations = 0;
+  readonly #reservationTokens = new Set<number>();
+  readonly #nextReservationId = 1;
   // no double-bookkeeping counter; concurrency is enforced via #activePorts size
-  #resolveReady!: () => void;
-  #rejectReady!: (reason: unknown) => void;
+  readonly #resolveReady!: () => void;
+  readonly #rejectReady!: (reason: unknown) => void;
   readonly #destroyAckTimeoutMs: number;
 
   // store computedRuntimeWorkerHash when integrity === 'compute' for telemetry/debug
@@ -332,6 +292,7 @@ export class SecureApiSigner {
 
     this.#ready = new Promise<void>((resolve, reject) => {
       this.#resolveReady = resolve;
+
       this.#rejectReady = reject;
     });
 
@@ -395,14 +356,19 @@ export class SecureApiSigner {
     payload: unknown,
     context?: SignContext,
   ): Promise<SignedPayload> {
-    if (this.#state.destroyed) throw new InvalidParameterError("Signer destroyed");
+    if (this.#state.destroyed)
+      throw new InvalidParameterError("Signer destroyed");
     this.#checkCircuitBreaker();
-    await this.#ready;
-    // Enforce concurrency strictly based on active ports to avoid double bookkeeping.
-    if (this.#state.activePorts.size >= this.#maxPendingRequests) {
-      throw new RateLimitError(
-        "too-many-pending-sign-requests: Maximum pending sign requests reached",
-      );
+    // Reserve a pending slot synchronously to avoid races when many callers invoke
+    // sign() concurrently. The reservation will be converted to an active port
+    // when #postSignRequest calls #addActivePort, which drains one token.
+    const reservationId = this.#reservePendingSlot();
+    try {
+      await this.#ready;
+    } catch (error) {
+      // release reservation if readiness failed
+      this.#releaseReservationIfPresent(reservationId);
+      throw error;
     }
 
     // Generate a base64 nonce (server expects standard base64 encoding)
@@ -438,16 +404,22 @@ export class SecureApiSigner {
       } catch {
         /* ignore wipe failures */
       }
+      // If our reservation was never converted to an active port, release it now.
+      this.#releaseReservationIfPresent(reservationId);
     }
   }
 
   /** Destroy: graceful with ack, always cleans up listeners (fixed race) */
   public async destroy(): Promise<void> {
     if (this.#state.destroyed) return;
+    // eslint-disable-next-line functional/immutable-data -- controlled state transition
     this.#state = this.#withDestroyed(true);
 
+    // eslint-disable-next-line functional/no-let -- temporary variables for cleanup
     let destroyTimer: ReturnType<typeof setTimeout> | undefined;
+    // eslint-disable-next-line functional/no-let -- temporary variables for cleanup
     let onDestroyed: ((event: MessageEvent) => void) | undefined;
+    // eslint-disable-next-line functional/no-let -- temporary variables for cleanup
     let onError: ((event: Event) => void) | undefined;
 
     const cleanupListeners = () => {
@@ -467,7 +439,7 @@ export class SecureApiSigner {
     const destroyPromise = new Promise<void>((resolve) => {
       onDestroyed = (event: MessageEvent) => {
         try {
-          const data = event.data;
+          const data: unknown = event.data;
           if (isDestroyedResponse(data)) {
             cleanupListeners();
             resolve();
@@ -477,6 +449,7 @@ export class SecureApiSigner {
           resolve();
         }
       };
+
       onError = () => {
         cleanupListeners();
         resolve();
@@ -513,7 +486,9 @@ export class SecureApiSigner {
   /* ========================= Pure state transitions ========================= */
 
   /** Create new state with updated active ports (immutable) */
-  #withActivePorts(activePorts: ReadonlyMap<MessagePort, ActivePortMeta>): SignerState {
+  #withActivePorts(
+    activePorts: ReadonlyMap<MessagePort, ActivePortMeta>,
+  ): SignerState {
     return { ...this.#state, activePorts };
   }
 
@@ -642,68 +617,79 @@ export class SecureApiSigner {
     const { port1: localPort, port2: workerPort } = channel;
 
     const timerMs = HANDSHAKE_TIMEOUT_MS;
-    let handshakeTimer: ReturnType<typeof setTimeout> | undefined;
-
     const nonceBuf = new Uint8Array(HANDSHAKE_NONCE_BYTES);
     crypto.getRandomValues(nonceBuf);
     const nonceB64 = bytesToBase64(nonceBuf);
 
     const handshakeRequest = { type: "handshake", nonce: nonceB64 };
 
-    try {
-      const p = new Promise<void>((resolve, reject) => {
-        handshakeTimer = setTimeout(() => {
-          try {
-            localPort.close();
-          } catch {
-            /* empty */
-          }
-          reject(new WorkerError("Handshake timed out"));
-        }, timerMs);
+    // Local timer id so we can clear timeout in finally
+    let timerId: ReturnType<typeof setTimeout> | undefined;
 
-        localPort.onmessage = (event: MessageEvent) => {
-          if (handshakeTimer) clearTimeout(handshakeTimer);
-          const data = event.data;
-          try {
-            if (isHandshakeResponse(data)) {
-              if (!isLikelyBase64(data.signature)) {
-                reject(
-                  new WorkerError("Handshake response signature malformed"),
-                );
-              } else {
-                resolve();
-              }
-            } else if (isErrorResponse(data)) {
-              reject(new WorkerError(`Worker handshake error: ${data.reason}`));
+    const handshakePromise = new Promise<void>((resolve, reject) => {
+      // idempotent cleanup helper for handler
+      const cleanupHandler = () => {
+        try {
+          localPort.onmessage = null;
+        } catch {
+          /* ignore */
+        }
+        try {
+          localPort.close();
+        } catch {
+          /* ignore */
+        }
+      };
+
+      // assign handler
+      // eslint-disable-next-line functional/immutable-data -- Controlled assignment for lifecycle
+      localPort.onmessage = (event: MessageEvent) => {
+        const data: unknown = event.data;
+        try {
+          if (isHandshakeResponse(data)) {
+            if (!isLikelyBase64(data.signature)) {
+              reject(new WorkerError("Handshake response signature malformed"));
             } else {
-              reject(
-                new WorkerError("Worker handshake returned unexpected message"),
-              );
+              resolve();
             }
-          } catch (error) {
-            reject(
-              error instanceof Error ? error : new WorkerError(String(error)),
-            );
-          } finally {
-            try {
-              localPort.close();
-            } catch {
-              /* empty */
-            }
+          } else if (isErrorResponse(data)) {
+            reject(new WorkerError(`Worker handshake error: ${data.reason}`));
+          } else {
+            reject(new WorkerError("Worker handshake returned unexpected message"));
           }
-        };
-      });
+        } catch (error) {
+          reject(error instanceof Error ? error : new WorkerError(String(error)));
+        } finally {
+          cleanupHandler();
+        }
+      };
+    });
 
+    const timeoutPromise = new Promise<void>((_resolve, reject) => {
+      timerId = setTimeout(() => {
+        try {
+          localPort.onmessage = null;
+        } catch {
+          /* ignore */
+        }
+        try {
+          localPort.close();
+        } catch {
+          /* ignore */
+        }
+        reject(new WorkerError("Handshake timed out"));
+      }, timerMs);
+    });
+
+    try {
       this.#worker.postMessage(handshakeRequest, [workerPort]);
-      await p;
+      await Promise.race([handshakePromise, timeoutPromise]);
       this.#resolveReady();
     } catch (error) {
-      this.#rejectReady(
-        error instanceof Error ? error : new WorkerError(String(error)),
-      );
+      this.#rejectReady(error instanceof Error ? error : new WorkerError(String(error)));
       throw error;
     } finally {
-      if (handshakeTimer) clearTimeout(handshakeTimer);
+      if (timerId) clearTimeout(timerId);
     }
   };
 
@@ -712,7 +698,7 @@ export class SecureApiSigner {
       const channel = new MessageChannel();
       const { port1: localPort, port2: workerPort } = channel;
 
-        const timer = setTimeout(() => {
+      const timer = setTimeout(() => {
         this.#removeActivePort(localPort);
         try {
           localPort.close();
@@ -722,6 +708,7 @@ export class SecureApiSigner {
         reject(new WorkerError("Sign request timed out"));
       }, this.#requestTimeoutMs);
 
+      // eslint-disable-next-line functional/immutable-data -- Controlled assignment of event handler for request lifecycle. Performance-critical path.
       localPort.onmessage = (event: MessageEvent) => {
         clearTimeout(timer);
         const data: unknown = event.data;
@@ -729,8 +716,8 @@ export class SecureApiSigner {
           if (isSignedMessage(data)) {
             resolve(data.signature);
           } else if (isErrorResponse(data)) {
-            const raw = data as { readonly [key: string]: unknown };
-            const reason = typeof raw["reason"] === "string" ? raw["reason"] : "Worker error";
+            const reason =
+              typeof data.reason === "string" ? data.reason : "Worker error";
             reject(new WorkerError(reason));
           } else {
             reject(new WorkerError("Worker returned malformed response"));
@@ -745,6 +732,29 @@ export class SecureApiSigner {
         }
       };
 
+      // When converting the reservation to an active port, consume one reserved slot
+      // if available. This keeps the synchronous reservation count and activePorts
+      // in balance under concurrent load.
+      // If no reservation exists, allow adding the active port as fallback.
+      const consumed = this.#consumeReservationIfAvailable();
+      if (
+        !consumed &&
+        this.#state.activePorts.size >= this.#maxPendingRequests
+      ) {
+        // No reservation and we've hit the max; reject immediately.
+        clearTimeout(timer);
+        try {
+          localPort.close();
+        } catch {
+          /* ignore */
+        }
+        reject(
+          new RateLimitError(
+            "too-many-pending-sign-requests: Maximum pending sign requests reached",
+          ),
+        );
+        return;
+      }
       this.#addActivePort(localPort, { port: localPort, reject, timer });
 
       const requestId = generateRequestId();
@@ -854,6 +864,7 @@ export class SecureApiSigner {
         /* ignore */
       }
     });
+    // eslint-disable-next-line functional/immutable-data -- controlled state transition
     this.#state = this.#withActivePorts(new Map());
   };
 
@@ -875,26 +886,91 @@ export class SecureApiSigner {
 
   readonly #addActivePort = (port: MessagePort, meta: ActivePortMeta): void => {
     // create a new Map to keep an immutable transition
-    const newActivePorts = new Map(this.#state.activePorts);
-    newActivePorts.set(port, meta);
+
+    const newActivePorts = new Map([
+      ...this.#state.activePorts.entries(),
+      [port, meta],
+    ]);
+    // eslint-disable-next-line functional/immutable-data -- Controlled state transition for O(1) port addition. Encapsulated within private method.
     this.#state = this.#withActivePorts(newActivePorts);
   };
 
+  // Reserve a pending slot synchronously. Returns reservation id.
+  #reservePendingSlot(): number {
+    if (
+      this.#state.activePorts.size + this.#pendingReservations >=
+      this.#maxPendingRequests
+    ) {
+      throw new RateLimitError(
+        "too-many-pending-sign-requests: Maximum pending sign requests reached",
+      );
+    }
+    // eslint-disable-next-line functional/immutable-data -- controlled reservation counter
+    const id = this.#nextReservationId++;
+    const newReservationTokens = new Set([...this.#reservationTokens, id]);
+    const newPendingReservations = this.#pendingReservations + 1;
+    // eslint-disable-next-line functional/immutable-data -- controlled reservation state update
+    this.#reservationTokens = newReservationTokens;
+    // eslint-disable-next-line functional/immutable-data -- controlled reservation state update
+    this.#pendingReservations = newPendingReservations;
+    return id;
+  }
+
+  // Consume one reservation if available. Returns true if consumed.
+  #consumeReservationIfAvailable(): boolean {
+    if (this.#pendingReservations <= 0) return false;
+    // consume an arbitrary token
+    const it = this.#reservationTokens.values();
+    const first = it.next();
+    if (first.done) return false;
+    const id = first.value;
+    const newReservationTokens = new Set(this.#reservationTokens);
+    // eslint-disable-next-line functional/immutable-data -- controlled token removal
+    newReservationTokens.delete(id);
+    const newPendingReservations = Math.max(0, this.#pendingReservations - 1);
+    // eslint-disable-next-line functional/immutable-data -- controlled reservation state update
+    this.#reservationTokens = newReservationTokens;
+    // eslint-disable-next-line functional/immutable-data -- controlled reservation state update
+    this.#pendingReservations = newPendingReservations;
+    return true;
+  }
+
+  // Release a reservation if it exists (called when sign() fails before conversion)
+  #releaseReservationIfPresent(id: number | undefined): void {
+    if (id === undefined) return;
+    if (this.#reservationTokens.has(id)) {
+      const newReservationTokens = new Set(this.#reservationTokens);
+      // eslint-disable-next-line functional/immutable-data -- controlled token removal
+      newReservationTokens.delete(id);
+      const newPendingReservations = Math.max(0, this.#pendingReservations - 1);
+      // eslint-disable-next-line functional/immutable-data -- controlled reservation state update
+      this.#reservationTokens = newReservationTokens;
+      // eslint-disable-next-line functional/immutable-data -- controlled reservation state update
+      this.#pendingReservations = newPendingReservations;
+    }
+  }
+
   readonly #removeActivePort = (port: MessagePort): void => {
-    // immutable transition: construct a new map without the port
-    const newActivePorts = new Map<MessagePort, ActivePortMeta>();
-    this.#state.activePorts.forEach((meta, currentPort) => {
-      if (currentPort === port) {
+    if (this.#state.activePorts.has(port)) {
+      const currentMeta = this.#state.activePorts.get(port);
+      if (currentMeta) {
         try {
-          clearTimeout(meta.timer);
+          clearTimeout(currentMeta.timer);
         } catch {
           /* ignore */
         }
-        return;
       }
-      newActivePorts.set(currentPort, meta);
-    });
-    this.#state = this.#withActivePorts(newActivePorts);
+      // immutable transition: construct a new map without the port
+      const newActivePorts = new Map<MessagePort, ActivePortMeta>();
+      this.#state.activePorts.forEach((meta, currentPort) => {
+        if (currentPort !== port) {
+          // eslint-disable-next-line functional/immutable-data -- Controlled Map.set for O(1) performance vs O(N) spread reconstruction. Encapsulated within private method.
+          newActivePorts.set(currentPort, meta);
+        }
+      });
+      // eslint-disable-next-line functional/immutable-data -- controlled state transition
+      this.#state = this.#withActivePorts(newActivePorts);
+    }
   };
 
   /* ========================= Circuit breaker logic ========================= */
@@ -911,6 +987,7 @@ export class SecureApiSigner {
           lastFailureTime: this.#state.circuitBreaker.lastFailureTime,
           successCount: 0,
         };
+        // eslint-disable-next-line functional/immutable-data -- controlled state transition
         this.#state = this.#withCircuitBreaker(newCircuitBreaker);
       } else {
         throw new CircuitBreakerError();
@@ -928,6 +1005,7 @@ export class SecureApiSigner {
           lastFailureTime: 0,
           successCount: 0,
         };
+        // eslint-disable-next-line functional/immutable-data -- controlled state transition
         this.#state = this.#withCircuitBreaker(newCircuitBreaker);
       } else {
         const newCircuitBreaker = {
@@ -936,6 +1014,7 @@ export class SecureApiSigner {
           lastFailureTime: this.#state.circuitBreaker.lastFailureTime,
           successCount: newSuccessCount,
         };
+        // eslint-disable-next-line functional/immutable-data -- controlled state transition
         this.#state = this.#withCircuitBreaker(newCircuitBreaker);
       }
     } else {
@@ -949,6 +1028,7 @@ export class SecureApiSigner {
         lastFailureTime: this.#state.circuitBreaker.lastFailureTime,
         successCount: this.#state.circuitBreaker.successCount,
       };
+      // eslint-disable-next-line functional/immutable-data -- controlled state transition
       this.#state = this.#withCircuitBreaker(newCircuitBreaker);
     }
   };
@@ -965,6 +1045,7 @@ export class SecureApiSigner {
         lastFailureTime: Date.now(),
         successCount: this.#state.circuitBreaker.successCount,
       };
+      // eslint-disable-next-line functional/immutable-data -- controlled state transition
       this.#state = this.#withCircuitBreaker(newCircuitBreaker);
     } else {
       const newCircuitBreaker = {
@@ -973,6 +1054,7 @@ export class SecureApiSigner {
         lastFailureTime: this.#state.circuitBreaker.lastFailureTime,
         successCount: this.#state.circuitBreaker.successCount,
       };
+      // eslint-disable-next-line functional/immutable-data -- controlled state transition
       this.#state = this.#withCircuitBreaker(newCircuitBreaker);
     }
   };
@@ -983,7 +1065,11 @@ export class SecureApiSigner {
     return { ...this.#state.circuitBreaker };
   }
   public getPendingRequestCount(): number {
-    return this.#state.activePorts.size;
+    // Include synchronous reservations to reflect the total number of pending
+    // requests (active ports + reserved slots). This makes rate-limit state
+    // observable and avoids a TOCTOU where many callers reserve slots
+    // concurrently but the public count only reports active ports.
+    return this.#state.activePorts.size + this.#pendingReservations;
   }
   public isDestroyed(): boolean {
     return this.#state.destroyed;
@@ -998,6 +1084,7 @@ export class SecureApiSigner {
 
 /** Fetches the worker script at `url`, asserts no redirects, and returns ArrayBuffer. */
 async function fetchAndValidateScript(url: URL): Promise<ArrayBuffer> {
+  // eslint-disable-next-line functional/no-let -- response reassignment needed for error handling
   let response: Response;
   try {
     // redirect: "error" causes fetch to throw on redirect in modern browsers.

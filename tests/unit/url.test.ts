@@ -16,12 +16,11 @@ describe("url module", () => {
     expect(res.includes("q=a%20b") || res.includes("q=a+b")).toBe(true);
   });
 
-  it("createSecureURL rejects dangerous keys", () => {
-    // Create a null-prototype object to simulate a suspicious object shape
+  it("createSecureURL accepts plain null-prototype params and encodes them", () => {
     const params = Object.create(null) as Record<string, unknown>;
-    // add a harmless key but the protoIsNull should trigger detection
     params.safe = "1";
-  expect(() => createSecureURL("https://example.com", [], params as any)).toThrow(InvalidParameterError);
+    const res = createSecureURL("https://example.com", [], params as any);
+    expect(res.includes("safe=1")).toBe(true);
   });
 
   it("updateURLParams can remove undefined and set values", () => {

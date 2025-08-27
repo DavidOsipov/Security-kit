@@ -47,7 +47,7 @@ export function configureUrlPolicy(
   if (!Array.isArray(safeSchemes) || safeSchemes.length === 0) {
     throw new InvalidParameterError("safeSchemes must be a non-empty array.");
   }
-  const normalized: readonly string[] = [];
+  const normalized: string[] = [];
   for (const s of safeSchemes) {
     if (typeof s !== "string")
       throw new InvalidParameterError("Each scheme must be a string.");

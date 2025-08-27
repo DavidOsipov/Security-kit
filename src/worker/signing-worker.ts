@@ -4,6 +4,7 @@
 
 import { SHARED_ENCODER } from "../encoding";
 import type { InitMessage, SignRequest } from "../protocol";
+import { bytesToBase64, secureWipeWrapper } from "../encoding-utils";
 
 // Use shared encoder exported from encoding.ts to avoid extra allocations
 
@@ -13,21 +14,7 @@ let MAX_PENDING = 5; // Maximum number of concurrent signing operations (configu
  * Safe base64 conversion that avoids spreading TypedArray into function args.
  * Processes the buffer in small chunks and concatenates binary strings.
  */
-function arrayBufferToBase64(buffer: ArrayBuffer): string {
-  const bytes = new Uint8Array(buffer);
-  const CHUNK = 8192; // conservative chunk size
-  let out = "";
-  for (let i = 0; i < bytes.length; i += CHUNK) {
-    const slice = bytes.subarray(i, i + CHUNK);
-    let chunkStr = "";
-    for (let j = 0; j < slice.length; j++) {
-      const code = slice[j] as number; // Uint8Array index is number
-      chunkStr += String.fromCharCode(code);
-    }
-    out += chunkStr;
-  }
-  return btoa(out);
-}
+// Use shared bytesToBase64 for consistent cross-environment encoding
 
 // Secure state management using immutable patterns
 interface WorkerState {
@@ -99,7 +86,7 @@ async function handleHandshakeRequest(
     );
     replyPort.postMessage({
       type: "handshake",
-      signature: arrayBufferToBase64(sig),
+      signature: bytesToBase64(new Uint8Array(sig)),
     });
   } catch {
     replyPort.postMessage({ type: "error", reason: "handshake-failed" });
@@ -274,7 +261,9 @@ async function handleInitMessage(message: InitMessage): Promise<void> {
       options.maxCanonicalLength > 0 &&
       options.maxCanonicalLength <= 10_000_000
     ) {
-      updateState({ maxCanonicalLength: Math.floor(options.maxCanonicalLength) });
+      updateState({
+        maxCanonicalLength: Math.floor(options.maxCanonicalLength),
+      });
     }
   }
 
@@ -322,25 +311,23 @@ function totalWindow(counts: readonly number[]): number {
 }
 
 async function importKey(raw: ArrayBuffer): Promise<void> {
-  try {
-    const key = await crypto.subtle.importKey(
-      "raw",
-      raw,
-      { name: "HMAC", hash: { name: "SHA-256" } },
-      false,
-      ["sign"],
-    );
-    updateState({ hmacKey: key });
-  } finally {
-    // Best-effort wipe of the transferred buffer
     try {
-      const view = new Uint8Array(raw);
-      crypto.getRandomValues(view);
-      view.fill(0);
-    } catch {
-      // best-effort only
+      const key = await crypto.subtle.importKey(
+        "raw",
+        raw,
+        { name: "HMAC", hash: { name: "SHA-256" } },
+        false,
+        ["sign"],
+      );
+      updateState({ hmacKey: key });
+    } finally {
+      // Best-effort wipe of the transferred buffer
+      try {
+        secureWipeWrapper(new Uint8Array(raw));
+      } catch {
+        // best-effort only
+      }
     }
-  }
 }
 
 async function doSign(
@@ -359,18 +346,18 @@ async function doSign(
     return;
   }
 
-  try {
-    const data = SHARED_ENCODER.encode(canonical);
-    const sig = await crypto.subtle.sign(
-      "HMAC",
-      stateContainer.getCurrent().hmacKey!,
-      data,
-    );
-    const b64 = arrayBufferToBase64(sig);
-    const message = { type: "signed", requestId, signature: b64 } as const;
-    if (replyPort) replyPort.postMessage(message);
-    else postMessage(message);
-  } catch {
+    try {
+      const data = SHARED_ENCODER.encode(canonical);
+      const sig = await crypto.subtle.sign(
+        "HMAC",
+        stateContainer.getCurrent().hmacKey!,
+        data,
+      );
+      const b64 = bytesToBase64(new Uint8Array(sig));
+      const message = { type: "signed", requestId, signature: b64 } as const;
+      if (replyPort) replyPort.postMessage(message);
+      else postMessage(message);
+    } catch {
     const message = {
       type: "error",
       requestId,
@@ -383,7 +370,7 @@ async function doSign(
 
 // eslint-disable-next-line sonarjs/post-message -- Worker context: we trust parent that created us
 self.addEventListener("message", async (event: MessageEvent) => {
-  if (event.data == null || typeof event.data !== "object") {
+  if (event.data == undefined || typeof event.data !== "object") {
     postMessage({
       type: "error",
       requestId: undefined,

@@ -194,12 +194,12 @@ export class Sanitizer {
     const tt = win["trustedTypes"] as
       | undefined
       | { readonly createPolicy?: unknown };
-        if (typeof tt?.createPolicy !== "function") return undefined;
+    if (typeof tt?.createPolicy !== "function") return undefined;
     try {
       return this.createPolicy(policyName);
     } catch {
-          // If policy creation fails for any reason, fall back to undefined
-          return undefined;
+      // If policy creation fails for any reason, fall back to undefined
+      return undefined;
     }
   }
 

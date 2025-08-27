@@ -40,7 +40,10 @@ export function getProdErrorHook() {
 
 // eslint-disable-next-line unicorn/prevent-abbreviations
 export function setProdErrorHook(
-  hook: ((error: Error, context: Record<string, unknown>) => void) | undefined | null,
+  hook:
+    | ((error: Error, context: Record<string, unknown>) => void)
+    | undefined
+    | null,
 ) {
   // Treat `null` as explicit uninstall (backwards-compatible with older tests).
   if (hook === null) {

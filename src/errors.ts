@@ -100,6 +100,17 @@ export class CircuitBreakerError extends Error {
   }
 }
 
+export class TransferableNotAllowedError extends Error {
+  public readonly code = "ERR_TRANSFERABLE_NOT_ALLOWED";
+
+  constructor(
+    message = "Transferable objects are not allowed unless explicitly enabled.",
+  ) {
+    super(`[security-kit] ${message}`);
+    this.name = "TransferableNotAllowedError";
+  }
+}
+
 /**
  * Sanitizes error objects for safe logging by truncating messages
  * and extracting only safe properties. Prevents leaking sensitive

@@ -53,7 +53,7 @@ export class DOMValidator {
   readonly #validatedElements = new WeakSet<Element>();
   // Use `undefined` instead of `null` for uninitialized caches to satisfy
   // linting rules; semantics remain identical.
-  readonly #resolvedRootsCache:
+  #resolvedRootsCache:
     | ReadonlyMap<string, Element | undefined>
     | undefined = undefined;
 

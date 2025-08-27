@@ -33,10 +33,24 @@ export type SignedResponse = {
   readonly signature: string;
 };
 
+export type ErrorReason =
+  | "invalid-handshake"
+  | "not-initialized"
+  | "handshake-failed"
+  | "invalid-params"
+  | "canonical-too-large"
+  | "rate-limit-exceeded"
+  | "worker-overloaded"
+  | "missing-secret"
+  | "sign-failed"
+  | "invalid-message-format"
+  | "unknown-message-type"
+  | "worker-exception";
+
 export type ErrorResponse = {
   readonly type: "error";
   readonly requestId?: number | null;
-  readonly reason?: string;
+  readonly reason?: ErrorReason;
 };
 
 export type WorkerMessage =

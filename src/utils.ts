@@ -23,6 +23,27 @@ import { ensureCrypto } from "./state";
 import { environment, isDevelopment } from "./environment";
 import { SHARED_ENCODER } from "./encoding";
 
+// Telemetry hook: optional runtime registration for metrics. Default is undefined.
+export type TelemetryHook = (
+  name: string,
+  value?: number,
+  tags?: Record<string, string>,
+) => void;
+export let emitMetric: TelemetryHook | undefined = undefined;
+export function registerTelemetry(hook: TelemetryHook): void {
+  emitMetric = hook;
+}
+
+function isSecurityStrict(): boolean {
+  try {
+    if (typeof process === "undefined") return false;
+    const env = process.env as Record<string, string> | undefined;
+    return env?.["SECURITY_STRICT"] === "1";
+  } catch {
+    return false;
+  }
+}
+
 // --- Parameter Validation ---
 export function validateNumericParam(
   value: number,
@@ -71,33 +92,35 @@ export function validateProbability(probability: number): void {
  * created with `createOneTimeCryptoKey` which cannot be extracted to memory.
  *
  * @param typedArray - The typed array view to zero out
+ * @returns true if wipe attempts completed without thrown errors (best-effort),
+ *          false if an error occurred during wipe attempts.
  */
 export function secureWipe(
   typedArray: ArrayBufferView | undefined,
   options?: { readonly forbidShared?: boolean },
-): void {
-  /**
-   * Options:
-   * - forbidShared: when true, throw if the provided view is backed by a SharedArrayBuffer.
-   *   SharedArrayBuffer-backed memory cannot be reliably zeroed by a single thread and
-   *   therefore should not be relied upon for secret material.
-   */
-  if (!typedArray) return;
+): boolean {
+  if (!typedArray) return true;
   const forbidShared = options?.forbidShared !== false; // default true
-  if (forbidShared) {
-    try {
-      if (
-        typeof SharedArrayBuffer !== "undefined" &&
-        typedArray.buffer instanceof SharedArrayBuffer
-      ) {
+
+  // Safer cross-realm detection of SharedArrayBuffer backing:
+  try {
+    if (forbidShared && typeof SharedArrayBuffer !== "undefined") {
+      const buf = (typedArray as ArrayBufferView).buffer;
+      // Cross-realm-safe constructor name check
+      const ctorName =
+        Object.prototype.hasOwnProperty.call(buf, "constructor") &&
+        (buf as any).constructor &&
+        (buf as any).constructor.name;
+      if (ctorName === "SharedArrayBuffer") {
         throw new InvalidParameterError(
           "secureWipe: SharedArrayBuffer-backed views cannot be securely wiped.",
         );
       }
-    } catch {
-      // If SharedArrayBuffer is not available in this environment, ignore.
     }
+  } catch {
+    // ignore feature detection failures
   }
+
   if (isDevelopment() && typedArray.byteLength > 1024) {
     secureDevLog(
       "warn",
@@ -108,20 +131,19 @@ export function secureWipe(
   try {
     // Delegate specific wiping strategies to helpers to keep this function
     // small and auditable for static analysis.
-    const tryNodeBufferWipe = () => {
-      const isNodeBuffer =
-        typeof Buffer !== "undefined" &&
-        (
-          Buffer as unknown as {
-            readonly isBuffer?: (x: unknown) => boolean;
-          }
-        ).isBuffer?.(typedArray);
+    const tryNodeBufferWipe = (): boolean => {
+      // Narrow cast and check for Node Buffer semantics (safe global access)
+      type BufferNS = { readonly isBuffer?: (x: unknown) => boolean };
+      const bufNS: BufferNS | undefined = (
+        globalThis as unknown as { readonly Buffer?: BufferNS }
+      ).Buffer;
+      const isNodeBuffer = !!bufNS?.isBuffer && bufNS.isBuffer(typedArray);
       if (!isNodeBuffer) return false;
       (typedArray as unknown as Buffer).fill(0);
       return true;
     };
 
-    const tryDataViewWipe = () => {
+    const tryDataViewWipe = (): boolean => {
       if (typeof DataView === "undefined" || !(typedArray instanceof DataView))
         return false;
       new Uint8Array(
@@ -132,7 +154,7 @@ export function secureWipe(
       return true;
     };
 
-    const tryBigIntWipe = () => {
+    const tryBigIntWipe = (): boolean => {
       if (
         typeof BigUint64Array !== "undefined" &&
         typedArray instanceof BigUint64Array
@@ -152,7 +174,7 @@ export function secureWipe(
       return false;
     };
 
-    const tryGenericWipe = () => {
+    const tryGenericWipe = (): boolean => {
       // Only perform a generic wipe when the underlying buffer looks usable.
       if (!typedArray?.buffer) return false;
       if (typeof (typedArray as Uint8Array).fill === "function") {
@@ -169,12 +191,47 @@ export function secureWipe(
       return true;
     };
 
-    if (tryNodeBufferWipe()) return;
-    if (tryDataViewWipe()) return;
-    if (tryBigIntWipe()) return;
-    tryGenericWipe();
-  } catch {
-    /* best-effort */
+    // Compute the first successful strategy once and reuse it for logging.
+    let strategy: string | undefined;
+    const ok = (() => {
+      if (tryNodeBufferWipe()) {
+        strategy = "node-buffer";
+        return true;
+      }
+      if (tryDataViewWipe()) {
+        strategy = "dataview";
+        return true;
+      }
+      if (tryBigIntWipe()) {
+        strategy = "bigint";
+        return true;
+      }
+      if (tryGenericWipe()) {
+        strategy = "generic";
+        return true;
+      }
+      strategy = "none";
+      return false;
+    })();
+
+    // Dev-only: record which strategy succeeded to help audits/debugging
+    if (isDevelopment()) {
+      secureDevLog("debug", "secureWipe", `wiping strategy=${strategy}`, {
+        byteLength: typedArray.byteLength,
+        forbidShared,
+        strategy,
+      });
+    }
+
+    return ok;
+  } catch (err) {
+    // best-effort: surface errors in development to make issues visible
+    if (isDevelopment()) {
+      secureDevLog("error", "secureWipe", "failed to wipe buffer", {
+        error: err,
+      });
+    }
+    return false;
   }
 }
 
@@ -194,13 +251,25 @@ export function createSecureZeroingArray(length: number): Uint8Array {
 
 // --- Timing-Safe Comparison ---
 const MAX_COMPARISON_LENGTH = 4096;
+const MAX_RAW_INPUT_LENGTH = MAX_COMPARISON_LENGTH; // pre-normalization guard
 
 export function secureCompare(
   a: string | null | undefined,
   b: string | null | undefined,
 ): boolean {
-  const sa = String(a ?? "").normalize("NFC");
-  const sb = String(b ?? "").normalize("NFC");
+  const aStr = String(a ?? "");
+  const bStr = String(b ?? "");
+  // Pre-check raw lengths to avoid expensive normalization on attacker-supplied huge inputs
+  if (
+    aStr.length > MAX_RAW_INPUT_LENGTH ||
+    bStr.length > MAX_RAW_INPUT_LENGTH
+  ) {
+    throw new InvalidParameterError(
+      `Input length cannot exceed ${MAX_RAW_INPUT_LENGTH} characters.`,
+    );
+  }
+  const sa = aStr.normalize("NFC");
+  const sb = bStr.normalize("NFC");
   if (sa.length > MAX_COMPARISON_LENGTH || sb.length > MAX_COMPARISON_LENGTH) {
     throw new InvalidParameterError(
       `Input length cannot exceed ${MAX_COMPARISON_LENGTH} characters.`,
@@ -214,8 +283,8 @@ export function secureCompare(
   /* eslint-disable-next-line functional/no-let -- loop index is intentionally mutable for performance and constant-time semantics */
   for (let index = 0; index < MAX_COMPARISON_LENGTH; index++) {
     const ca = sa.charCodeAt(index) || 0;
-    const callback = sb.charCodeAt(index) || 0;
-    diff |= ca ^ callback;
+    const cb = sb.charCodeAt(index) || 0;
+    diff |= ca ^ cb;
   }
   // Also require exact length match; the timing above is constant regardless
   // of lengths, so returning length equality does not leak timing.
@@ -230,22 +299,37 @@ export async function secureCompareAsync(
   /**
    * Timing-safe comparison that uses the platform SubtleCrypto.digest when available.
    * Options:
-   * - requireCrypto: when true, throw CryptoUnavailableError if SubtleCrypto is not
-   *   available. This enforces the "Fail Loudly" rule for security-critical comparisons.
+   * - requireCrypto: when true, throw CryptoUnavailableError or any underlying error
+   *   preventing the use of SubtleCrypto to enforce strict crypto usage.
    */
-  const sa = String(a ?? "").normalize("NFC");
-  const sb = String(b ?? "").normalize("NFC");
+  const aStr = String(a ?? "");
+  const bStr = String(b ?? "");
+  // Pre-check raw lengths before normalization
+  if (
+    aStr.length > MAX_RAW_INPUT_LENGTH ||
+    bStr.length > MAX_RAW_INPUT_LENGTH
+  ) {
+    throw new InvalidParameterError(
+      `Input length cannot exceed ${MAX_RAW_INPUT_LENGTH} characters.`,
+    );
+  }
+  const sa = aStr.normalize("NFC");
+  const sb = bStr.normalize("NFC");
   if (sa.length > MAX_COMPARISON_LENGTH || sb.length > MAX_COMPARISON_LENGTH) {
     throw new InvalidParameterError(
       `Input length cannot exceed ${MAX_COMPARISON_LENGTH} characters.`,
     );
   }
+
   try {
     const crypto = await ensureCrypto();
     const subtle = (crypto as { readonly subtle?: SubtleCrypto }).subtle;
     if (!subtle?.digest) {
-      // If caller requires crypto, fail loudly per constitution; otherwise fall back.
-      if (options?.requireCrypto) {
+      // Emit metric when falling back so operators can detect it.
+      emitMetric?.("securitykit.secureCompareAsync.fallback", 1, {
+        requireCrypto: String(!!options?.requireCrypto),
+      });
+      if (options?.requireCrypto || isSecurityStrict()) {
         throw new CryptoUnavailableError(
           "SubtleCrypto.digest is unavailable in this environment.",
         );
@@ -262,9 +346,9 @@ export async function secureCompareAsync(
     /* eslint-disable-next-line functional/no-let -- buffers are assigned in try/finally and wiped */
     let va: Uint8Array | undefined, vb: Uint8Array | undefined;
     try {
-      const [da, database] = await Promise.all([digestFor(sa), digestFor(sb)]);
+      const [da, db] = await Promise.all([digestFor(sa), digestFor(sb)]);
       va = new Uint8Array(da);
-      vb = new Uint8Array(database);
+      vb = new Uint8Array(db);
       if (va.length !== vb.length) return false;
       /* eslint-disable-next-line functional/no-let -- accumulator for bytewise comparison */
       let diff = 0;
@@ -278,9 +362,8 @@ export async function secureCompareAsync(
       if (vb) secureWipe(vb);
     }
   } catch (error) {
-    // If caller requested a strict crypto requirement, surface a Cryptounavailable error
-    if (options?.requireCrypto && error instanceof CryptoUnavailableError)
-      throw error;
+    // If caller requested strict crypto, surface any failure to use crypto.
+    if (options?.requireCrypto) throw error;
     secureDevLog(
       "error",
       "security-kit",
@@ -309,7 +392,14 @@ function _truncateIfLong(s: string): string {
 
 function _redactPrimitive(value: unknown): unknown {
   if (typeof value !== "string") return value;
+  // value-based redaction for JWT-like tokens and common inline secrets
   if (JWT_LIKE_REGEX.test(value)) return REDACTED_VALUE;
+  if (
+    /password=|token=|secret=|bearer\s+|jwt=|authorization:\s*bearer/i.test(
+      value,
+    )
+  )
+    return REDACTED_VALUE;
   if (value.length > MAX_LOG_STRING) return _truncateIfLong(value);
   return value;
 }
@@ -327,14 +417,18 @@ function _redactObject(
       continue;
     }
     if (!SAFE_KEY_REGEX.test(key)) continue;
-    if (typeof rawValue === "string") out[key] = _truncateIfLong(rawValue);
-    else out[key] = _redact(rawValue, depth + 1);
+    if (typeof rawValue === "string") {
+      out[key] = _redactPrimitive(rawValue);
+    } else {
+      out[key] = _redact(rawValue, depth + 1);
+    }
   }
   return out;
 }
 
 export function _redact(data: unknown, depth = 0): unknown {
-  if (depth >= MAX_REDACT_DEPTH) return "[REDACTED_MAX_DEPTH]";
+  if (depth >= MAX_REDACT_DEPTH)
+    return { __redacted: true, reason: "max-depth" };
   if (data === null || typeof data !== "object") return _redactPrimitive(data);
   if (Array.isArray(data)) return data.map((item) => _redact(item, depth + 1));
   return _redactObject(data as Record<string, unknown>, depth);
@@ -390,7 +484,7 @@ export function secureDevLog(
   if (typeof document !== "undefined" && typeof CustomEvent !== "undefined") {
     try {
       document.dispatchEvent(
-        new CustomEvent("secure-dev-log", { detail: logEntry }),
+        new CustomEvent("security-kit:log", { detail: logEntry }),
       );
     } catch {
       /* ignore */
@@ -420,54 +514,71 @@ export function secureDevNotify(
 
 // --- Internal Utilities ---
 export function _arrayBufferToBase64(buf: ArrayBuffer): string {
+  // Prefer Node Buffer when available
   if (typeof Buffer !== "undefined" && typeof Buffer.from === "function") {
-    return Buffer.from(buf).toString("base64");
+    // Ensure consistent behavior across Node versions by wrapping in Uint8Array
+    return Buffer.from(new Uint8Array(buf)).toString("base64");
   }
+
+  // Browser fallback: chunked binary-to-string + btoa
   const bytes = new Uint8Array(buf);
-  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-  const base64abc =
-    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-  const at = (s: string, index: number): string => s.charAt(index);
-  const out: readonly string[] = [];
-  let index = 0;
-  const l = bytes.length;
-  for (; index + 2 < l; index += 3) {
-    const b0 = view.getUint8(index),
-      b1 = view.getUint8(index + 1),
-      b2 = view.getUint8(index + 2);
-    out.push(
-      at(base64abc, b0 >> 2),
-      at(base64abc, ((b0 & 0x03) << 4) | (b1 >> 4)),
-      at(base64abc, ((b1 & 0x0f) << 2) | (b2 >> 6)),
-      at(base64abc, b2 & 0x3f),
-    );
+  const CHUNK = 0x8000;
+  let binary = "";
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    // create a small subarray to avoid apply limits
+    const slice = bytes.subarray(i, i + CHUNK);
+    // convert to string in a robust way
+    binary += String.fromCharCode.apply(undefined, Array.from(slice));
   }
-  if (index < l) {
-    const b0 = view.getUint8(index);
-    out.push(at(base64abc, b0 >> 2));
-    if (index === l - 1) {
-      out.push(at(base64abc, (b0 & 0x03) << 4), "==");
-    } else {
-      const b1 = view.getUint8(index + 1);
-      out.push(
-        at(base64abc, ((b0 & 0x03) << 4) | (b1 >> 4)),
-        at(base64abc, (b1 & 0x0f) << 2),
-        "=",
-      );
-    }
-  }
-  return out.join("");
+
+  if (typeof btoa === "function") return btoa(binary);
+
+  // As a last resort, if no btoa is available, fail loudly to avoid producing
+  // incorrect encodings silently.
+  throw new Error("No base64 encoder available in this environment.");
 }
 
-export const __test_arrayBufferToBase64:
+// Test API global is managed via registerTestApi / unregisterTestApi.
+
+/**
+ * Test-only API registration: tests should call this in their setup to
+ * enable the test-only helper. This avoids `require()` inside `src` and
+ * preserves pure ESM compatibility for consumers.
+ */
+export function registerTestApi(assertTestApiAllowed: () => void): void {
+  // runtime guard for test-only API usage
+  assertTestApiAllowed();
+  // Assign the internal function for test use (typed global)
+  // Use any-cast to allow assignment to test-only global without changing global typing
+  (globalThis as any).__test_arrayBufferToBase64 = _arrayBufferToBase64;
+}
+
+export function unregisterTestApi(): void {
+  try {
+    (globalThis as any).__test_arrayBufferToBase64 = undefined;
+  } catch {
+    // ignore
+  }
+}
+
+export function getTestArrayBufferToBase64():
   | ((buf: ArrayBuffer) => string)
-  | undefined =
-  typeof __TEST__ !== "undefined" && __TEST__
-    ? (() => {
-        // runtime guard for test-only API usage
-        // use require to avoid static circular imports in some bundlers
-        const { assertTestApiAllowed } = require("./development-guards");
-        assertTestApiAllowed();
-        return _arrayBufferToBase64;
-      })()
-    : undefined;
+  | undefined {
+  return (
+    globalThis as unknown as {
+      readonly __test_arrayBufferToBase64?:
+        | ((buf: ArrayBuffer) => string)
+        | undefined;
+    }
+  ).__test_arrayBufferToBase64;
+}
+
+// Test-only named export used by the public index for test harnesses. Keep
+// this as a stable named export so consumers of the test API can import it
+// directly when running in test environments that opt-in.
+export const __test_arrayBufferToBase64 = _arrayBufferToBase64;
+
+/**
+ * Expose a getter for test harnesses to avoid relying on global mutation.
+ * Tests can read (globalThis as any).__test_arrayBufferToBase64 or call registerTestApi.
+ */

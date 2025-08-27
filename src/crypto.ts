@@ -10,7 +10,6 @@
  *   for performance and for explicit, timely zeroing of sensitive memory via
  *   `secureWipe`. Those mutation sites are narrowly scoped and documented.
  *
- * eslint-disable functional/no-let, functional/immutable-data, prefer-const, unicorn/no-null, functional/prefer-readonly-type
  */
 
 import {
@@ -32,6 +31,20 @@ import {
 import { SHARED_ENCODER } from "./encoding";
 
 /* -------------------------------------------------------------------------- */
+/* Public option types                                                         */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Reusable options for APIs that support AbortSignal and optional visibility
+ * enforcement. Exported so d.ts consumers get a clear type in generated
+ * declaration files.
+ */
+export interface RandomOptions {
+  readonly signal?: AbortSignal;
+  readonly enforceVisibility?: boolean;
+}
+
+/* -------------------------------------------------------------------------- */
 /* Helpers & environment detection                                             */
 /* -------------------------------------------------------------------------- */
 
@@ -45,7 +58,7 @@ function makeAbortError(message = "Operation aborted"): Error {
       const ex = new DOMException(message, "AbortError");
       // Some runtimes may differ — ensure name is correct.
       (ex as any).name = "AbortError";
-      return ex;
+      return ex as unknown as Error;
     }
   } catch {
     // Fall through to generic Error below.
@@ -65,7 +78,10 @@ function makeAbortError(message = "Operation aborted"): Error {
  * Constitution (§2.11). For non-browser/headless contexts callers can set
  * `enforceVisibility` to `false`.
  */
-function checkAbortOrHidden(signal?: AbortSignal, enforceVisibility = true): void {
+function checkAbortOrHidden(
+  signal?: AbortSignal,
+  enforceVisibility = true,
+): void {
   if (signal?.aborted) throw makeAbortError();
   if (enforceVisibility && typeof document !== "undefined" && document.hidden) {
     throw new RandomGenerationError(
@@ -80,13 +96,18 @@ function checkAbortOrHidden(signal?: AbortSignal, enforceVisibility = true): voi
 
 export function hasSyncCrypto(): boolean {
   const maybeCrypto = (globalThis as { readonly crypto?: Crypto }).crypto;
-  return Boolean(maybeCrypto && typeof maybeCrypto.getRandomValues === "function");
+  return Boolean(
+    maybeCrypto && typeof maybeCrypto.getRandomValues === "function",
+  );
 }
 
 export async function hasRandomUUID(): Promise<boolean> {
   try {
     const crypto = await ensureCrypto();
-    return typeof (crypto as Crypto & { readonly randomUUID?: () => string }).randomUUID === "function";
+    return (
+      typeof (crypto as Crypto & { readonly randomUUID?: () => string })
+        .randomUUID === "function"
+    );
   } catch {
     return false;
   }
@@ -106,14 +127,21 @@ function computeAlphabetParameters(
 } {
   validateNumericParameter(size, "size", 1, 1024);
 
-  const isValidAlphabetInput = typeof alphabet === "string" && alphabet.length > 0 && alphabet.length <= 256;
+  const isValidAlphabetInput =
+    typeof alphabet === "string" &&
+    alphabet.length > 0 &&
+    alphabet.length <= 256;
   if (!isValidAlphabetInput) {
-    throw new InvalidParameterError("Alphabet must be a string with 1 to 256 characters.");
+    throw new InvalidParameterError(
+      "Alphabet must be a string with 1 to 256 characters.",
+    );
   }
 
   const uniqueChars = new Set(alphabet);
   if (uniqueChars.size !== alphabet.length) {
-    throw new InvalidParameterError("Alphabet must contain only unique characters.");
+    throw new InvalidParameterError(
+      "Alphabet must contain only unique characters.",
+    );
   }
 
   const length = alphabet.length;
@@ -126,13 +154,17 @@ function computeAlphabetParameters(
   // Keep the heuristic explicit: if acceptance ratio < 1/30 we consider it inefficient
   const MIN_ACCEPTANCE_RATIO = 1 / 30;
   if (acceptanceRatio > 0 && acceptanceRatio < MIN_ACCEPTANCE_RATIO) {
-    throw new InvalidParameterError(`Alphabet size ${length} is inefficient for sampling.`);
+    throw new InvalidParameterError(
+      `Alphabet size ${length} is inefficient for sampling.`,
+    );
   }
 
   const rawStep = Math.ceil((1.6 * mask * size) / length);
   const step = Math.min(rawStep, 4096);
   if (rawStep > 4096) {
-    throw new InvalidParameterError("Combination of alphabet/size requires too many random bytes.");
+    throw new InvalidParameterError(
+      "Combination of alphabet/size requires too many random bytes.",
+    );
   }
 
   return { len: length, mask, step };
@@ -145,6 +177,22 @@ function computeAlphabetParameters(
 export const URL_ALPHABET =
   "useandom-26T198340PX75pxJACKVERYMINDBUSHWOLF_GQZbfghjklqvwyzrict";
 const HEX_ALPHABET = "0123456789abcdef";
+
+// Precompute a fast hex lookup table for byte -> two-char hex conversion.
+const _HEX_LOOKUP: readonly string[] = (() => {
+  const array: string[] = new Array(256);
+  for (let index = 0; index < 256; index++) {
+    array[index] = index.toString(16).padStart(2, "0");
+  }
+  return Object.freeze(array);
+})();
+
+function bytesToHex(bytes: Uint8Array): string {
+  const out: string[] = new Array(bytes.length);
+  for (let index = 0; index < bytes.length; index++)
+    out[index] = _HEX_LOOKUP[bytes[index] as number]!;
+  return out.join("");
+}
 
 /* -------------------------------------------------------------------------- */
 /* Low-level random bytes                                                      */
@@ -181,10 +229,9 @@ export function getSecureRandomBytesSync(length = 1): Uint8Array {
  *  - signal?: AbortSignal
  *  - enforceVisibility?: boolean (default true)
  */
-export async function getSecureRandomAsync(options?: {
-  readonly signal?: AbortSignal;
-  readonly enforceVisibility?: boolean;
-}): Promise<number> {
+export async function getSecureRandomAsync(
+  options?: RandomOptions,
+): Promise<number> {
   const crypto = await ensureCrypto();
   checkAbortOrHidden(options?.signal, options?.enforceVisibility ?? true);
 
@@ -193,22 +240,27 @@ export async function getSecureRandomAsync(options?: {
       const buffer = new BigUint64Array(1);
       crypto.getRandomValues(buffer);
       const value = buffer[0];
-      if (value === undefined) throw new CryptoUnavailableError("Failed to generate random value.");
+      if (value === undefined)
+        throw new CryptoUnavailableError("Failed to generate random value.");
       checkAbortOrHidden(options?.signal, options?.enforceVisibility ?? true);
       // Reduce to 52 bits of precision (safe for Number)
       return Number(value >> BigInt(12)) / 2 ** 52;
-    } catch (err) {
+    } catch (error) {
       // In development log this unexpected failure; production falls back silently.
       if (isDevelopment()) {
-        secureDevelopmentLog("warn", "security-kit", "BigUint64 fallback: %o", err);
+        secureDevelopmentLog(
+          "warn",
+          "security-kit",
+          "BigUint64 fallback: %o",
+          error,
+        );
       }
       // fall through to 32-bit path
     }
   }
 
   const buffer = new Uint32Array(1);
-  const cryptoWithGet = crypto;
-  cryptoWithGet.getRandomValues(buffer);
+  (crypto as Crypto).getRandomValues(buffer);
   checkAbortOrHidden(options?.signal, options?.enforceVisibility ?? true);
   return (buffer[0] ?? 0) / (0xffffffff + 1);
 }
@@ -227,12 +279,13 @@ export function getSecureRandom(): number {
 export async function getSecureRandomInt(
   min: number,
   max: number,
-  options?: { readonly signal?: AbortSignal; readonly enforceVisibility?: boolean },
+  options?: RandomOptions,
 ): Promise<number> {
   const MAX_SAFE_RANGE = 2 ** 31;
   validateNumericParameter(min, "min", -MAX_SAFE_RANGE, MAX_SAFE_RANGE);
   validateNumericParameter(max, "max", -MAX_SAFE_RANGE, MAX_SAFE_RANGE);
-  if (min > max) throw new InvalidParameterError("min must be less than or equal to max.");
+  if (min > max)
+    throw new InvalidParameterError("min must be less than or equal to max.");
   if (min === max) return min;
 
   const crypto = await ensureCrypto();
@@ -247,7 +300,7 @@ export async function getSecureRandomInt(
       for (let index = 0; index < RANDOM_ITERATION_CAP; index++) {
         if (options?.signal?.aborted) throw makeAbortError();
         checkAbortOrHidden(options?.signal, options?.enforceVisibility ?? true);
-        crypto.getRandomValues(array);
+        (crypto as Crypto).getRandomValues(array);
         const r = (array[0] ?? 0) >>> 0;
         if (r < threshold) return min + (r % range);
         if (index % 128 === 127) await Promise.resolve();
@@ -267,9 +320,10 @@ export async function getSecureRandomInt(
       for (let index = 0; index < RANDOM_ITERATION_CAP; index++) {
         if (options?.signal?.aborted) throw makeAbortError();
         checkAbortOrHidden(options?.signal, options?.enforceVisibility ?? true);
-        crypto.getRandomValues(array64);
+        (crypto as Crypto).getRandomValues(array64);
         const r = array64[0];
-        if (r !== undefined && r < threshold64) return min + Number(r % rangeBig);
+        if (r !== undefined && r < threshold64)
+          return min + Number(r % rangeBig);
         if (index % 128 === 127) await Promise.resolve();
       }
     } finally {
@@ -288,7 +342,9 @@ export async function getSecureRandomInt(
     throw new InvalidParameterError("Range too large for this platform.");
   }
 
-  throw new RandomGenerationError("Failed to generate unbiased random integer within safety limits.");
+  throw new RandomGenerationError(
+    "Failed to generate unbiased random integer within safety limits.",
+  );
 }
 
 /* -------------------------------------------------------------------------- */
@@ -297,7 +353,7 @@ export async function getSecureRandomInt(
 
 export async function shouldExecuteThrottledAsync(
   probability: number,
-  options?: { readonly signal?: AbortSignal; readonly enforceVisibility?: boolean },
+  options?: RandomOptions,
 ): Promise<boolean> {
   validateProbability(probability);
   return (await getSecureRandomAsync(options)) < probability;
@@ -322,7 +378,7 @@ export function shouldExecuteThrottled(probability: number): boolean {
 async function generateSecureStringInternalAsync(
   alphabet: string,
   size: number,
-  options?: { readonly signal?: AbortSignal; readonly enforceVisibility?: boolean },
+  options?: RandomOptions,
 ): Promise<string> {
   const { len, mask, step } = computeAlphabetParameters(alphabet, size);
   if (len === 1) return alphabet.repeat(size);
@@ -333,28 +389,37 @@ async function generateSecureStringInternalAsync(
 
   try {
     // Preallocate result array for lower allocation churn
-    const outArr: string[] = new Array(size);
+  const outArray: string[] = new Array(size);
+    /* eslint-disable functional/no-let, functional/immutable-data -- Justified: tight loop uses a small number of
+       controlled local mutations for performance and immediate wiping of random bytes. */
     let pos = 0;
 
     for (let iter = 0; iter < MAX_ITER && pos < size; iter++) {
       checkAbortOrHidden(options?.signal, options?.enforceVisibility ?? true);
-      crypto.getRandomValues(bytes);
+      (crypto as Crypto).getRandomValues(bytes);
       for (let index = 0; index < step && pos < size; index++) {
         const charIndex = (bytes[index] as number) & mask;
         if (charIndex < len) {
-          outArr[pos++] = alphabet[charIndex] as string;
+          outArray[pos++] = alphabet[charIndex] as string;
         }
       }
-      if (pos === size) return outArr.join("");
+      if (pos === size) {
+        /* eslint-enable functional/no-let, functional/immutable-data */
+        return outArray.join("");
+      }
       // Yield to event loop to keep UI responsive
       await Promise.resolve();
       checkAbortOrHidden(options?.signal, options?.enforceVisibility ?? true);
     }
 
-    if (pos === size) return outArr.join("");
+    if (pos === size) {
+      return outArray.join("");
+    }
+
     // If we fall through, build partial string for diagnostics then throw
-    const partial = outArr.slice(0, pos).join("");
-    throw new RandomGenerationError("Failed to generate secure string within safety limits.");
+    throw new RandomGenerationError(
+      "Failed to generate secure string within safety limits.",
+    );
   } finally {
     secureWipe(bytes, { forbidShared: true });
   }
@@ -369,7 +434,7 @@ async function generateSecureStringInternalAsync(
 export function generateSecureStringSync(
   alphabet: string,
   size: number,
-  options?: { readonly signal?: AbortSignal; readonly enforceVisibility?: boolean },
+  options?: RandomOptions,
 ): string {
   const { len, mask, step } = computeAlphabetParameters(alphabet, size);
   if (len === 1) return alphabet.repeat(size);
@@ -377,7 +442,9 @@ export function generateSecureStringSync(
   const crypto = assertCryptoAvailableSync();
   const bytes = new Uint8Array(step);
   try {
-    const outArr: string[] = new Array(size);
+  const outArray: string[] = new Array(size);
+    /* eslint-disable functional/no-let, functional/immutable-data -- Justified: tight loop uses a small number of
+       controlled local mutations for performance and immediate wiping of random bytes. */
     let pos = 0;
 
     // Cap attempts to avoid long blocking behavior on pathological alphabets
@@ -388,13 +455,18 @@ export function generateSecureStringSync(
       for (let index = 0; index < step && pos < size; index++) {
         const charIndex = (bytes[index] as number) & mask;
         if (charIndex < len) {
-          outArr[pos++] = alphabet[charIndex] as string;
+          outArray[pos++] = alphabet[charIndex] as string;
         }
       }
-      if (pos === size) return outArr.join("");
+      if (pos === size) {
+        /* eslint-enable functional/no-let, functional/immutable-data */
+        return outArray.join("");
+      }
     }
 
-    throw new RandomGenerationError("Failed to generate secure string within safety limits.");
+    throw new RandomGenerationError(
+      "Failed to generate secure string within safety limits.",
+    );
   } finally {
     secureWipe(bytes, { forbidShared: true });
   }
@@ -411,6 +483,16 @@ export async function generateSecureId(length = 64): Promise<string> {
   return generateSecureStringInternalAsync(HEX_ALPHABET, length);
 }
 
+// Backwards-compatible async API used by tests and consumers: wrapper around the
+// internal async generator. Kept as a named export for compatibility.
+export async function generateSecureStringAsync(
+  alphabet: string,
+  size: number,
+  options?: RandomOptions,
+): Promise<string> {
+  return generateSecureStringInternalAsync(alphabet, size, options);
+}
+
 /**
  * Sync generator for hex ID strings. Will throw if sync crypto is unavailable.
  */
@@ -424,7 +506,7 @@ export function generateSecureIdSync(length = 64): string {
 /* -------------------------------------------------------------------------- */
 
 /**
- * Return a wipeable Uint8Array of hex-encoded ascii bytes (two hex chars per byte).
+ * Return a wipeable Uint8Array of raw random bytes.
  * Caller must call `secureWipe` when finished.
  */
 export function generateSecureIdBytesSync(byteLength = 32): Uint8Array {
@@ -435,15 +517,21 @@ export function generateSecureIdBytesSync(byteLength = 32): Uint8Array {
 }
 
 /**
- * Async wipeable bytes generator.
+ * Async wipeable bytes generator. Returns a wipeable Uint8Array of raw random bytes.
+ * Caller must call `secureWipe` when finished.
  */
-export async function generateSecureBytesAsync(byteLength = 32, options?: { readonly signal?: AbortSignal; readonly enforceVisibility?: boolean }): Promise<Uint8Array> {
+export async function generateSecureBytesAsync(
+  byteLength = 32,
+  _options?: RandomOptions,
+): Promise<Uint8Array> {
   validateNumericParameter(byteLength, "byteLength", 1, 256);
   // Use ensureCrypto to satisfy environments where crypto is async-only
-  await ensureCrypto();
-  // Use sync crypto path after ensureCrypto to get random bytes quickly:
-  const bytes = getSecureRandomBytesSync(byteLength);
-  return bytes;
+  const crypto = await ensureCrypto();
+  // Use the returned crypto instance directly to avoid assumptions about
+  // globalThis.crypto wiring in different runtimes.
+  const out = new Uint8Array(byteLength);
+  (crypto as Crypto).getRandomValues(out);
+  return out;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -452,17 +540,22 @@ export async function generateSecureBytesAsync(byteLength = 32, options?: { read
 
 export async function generateSecureUUID(): Promise<string> {
   const crypto = await ensureCrypto();
-  const cryptoWithUUID = crypto as Crypto & { readonly randomUUID?: () => string };
+  const cryptoWithUUID = crypto as Crypto & {
+    readonly randomUUID?: () => string;
+  };
   if (typeof cryptoWithUUID.randomUUID === "function") {
     return cryptoWithUUID.randomUUID();
   }
   const bytes = new Uint8Array(16);
   try {
-    crypto.getRandomValues(bytes);
-    if (bytes.length !== 16) throw new CryptoUnavailableError("Failed to generate sufficient bytes for UUID.");
+    (crypto as Crypto).getRandomValues(bytes);
+    if (bytes.length !== 16)
+      throw new CryptoUnavailableError(
+        "Failed to generate sufficient bytes for UUID.",
+      );
     bytes[6] = ((bytes[6] as number) & 0x0f) | 0x40;
     bytes[8] = ((bytes[8] as number) & 0x3f) | 0x80;
-    const hex = Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+    const hex = bytesToHex(bytes);
     return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20, 32)}`;
   } finally {
     secureWipe(bytes, { forbidShared: true });
@@ -476,7 +569,12 @@ export async function generateSecureUUID(): Promise<string> {
 type KeyUsageAlias = "encrypt" | "decrypt" | "wrapKey" | "unwrapKey";
 type KeyUsagesArray = ReadonlyArray<KeyUsageAlias>;
 
-const ALLOWED_KEY_USAGES = new Set<KeyUsageAlias>(["encrypt", "decrypt", "wrapKey", "unwrapKey"]);
+const ALLOWED_KEY_USAGES = new Set<KeyUsageAlias>([
+  "encrypt",
+  "decrypt",
+  "wrapKey",
+  "unwrapKey",
+]);
 
 export async function createOneTimeCryptoKey(
   options: {
@@ -491,10 +589,16 @@ export async function createOneTimeCryptoKey(
   let bitLength: number;
 
   if (lengthBits !== undefined && deprecatedLength !== undefined) {
-    throw new InvalidParameterError("Cannot specify both lengthBits and deprecated length.");
+    throw new InvalidParameterError(
+      "Cannot specify both lengthBits and deprecated length.",
+    );
   }
   if (deprecatedLength !== undefined && isDevelopment()) {
-    secureDevelopmentLog("warn", "security-kit", "DEPRECATION: `length` is deprecated. Use `lengthBits`.");
+    secureDevelopmentLog(
+      "warn",
+      "security-kit",
+      "DEPRECATION: `length` is deprecated. Use `lengthBits`.",
+    );
   }
 
   bitLength = lengthBits ?? deprecatedLength ?? 256;
@@ -502,7 +606,11 @@ export async function createOneTimeCryptoKey(
     throw new InvalidParameterError("Key length must be 128 or 256 bits.");
   }
 
-  if (!Array.isArray(usages) || usages.length === 0 || usages.some((u) => !ALLOWED_KEY_USAGES.has(u))) {
+  if (
+    !Array.isArray(usages) ||
+    usages.length === 0 ||
+    usages.some((u) => !ALLOWED_KEY_USAGES.has(u))
+  ) {
     throw new InvalidParameterError("Invalid key usages provided.");
   }
 
@@ -512,13 +620,23 @@ export async function createOneTimeCryptoKey(
 
   const extractable = false;
   if (typeof subtle.generateKey === "function") {
-    return subtle.generateKey({ name: "AES-GCM", length: bitLength }, extractable, usages as readonly KeyUsage[]);
+    return subtle.generateKey(
+      { name: "AES-GCM", length: bitLength },
+      extractable,
+      Array.from(usages) as KeyUsage[],
+    );
   }
 
   const keyData = new Uint8Array(bitLength / 8);
   try {
-    crypto.getRandomValues(keyData);
-    return await subtle.importKey("raw", keyData, { name: "AES-GCM", length: bitLength }, extractable, Array.from(usages) as KeyUsage[]);
+    (crypto as Crypto).getRandomValues(keyData);
+    return await subtle.importKey(
+      "raw",
+      keyData,
+      { name: "AES-GCM", length: bitLength },
+      extractable,
+      Array.from(usages) as KeyUsage[],
+    );
   } finally {
     secureWipe(keyData, { forbidShared: true });
   }
@@ -529,11 +647,15 @@ export function createAesGcmNonce(byteLength = 12): Uint8Array {
   return getSecureRandomBytesSync(byteLength);
 }
 
-export function createAesGcmKey128(usages: KeyUsagesArray = ["encrypt", "decrypt"]): Promise<CryptoKey> {
+export function createAesGcmKey128(
+  usages: KeyUsagesArray = ["encrypt", "decrypt"],
+): Promise<CryptoKey> {
   return createOneTimeCryptoKey({ lengthBits: 128, usages });
 }
 
-export function createAesGcmKey256(usages: KeyUsagesArray = ["encrypt", "decrypt"]): Promise<CryptoKey> {
+export function createAesGcmKey256(
+  usages: KeyUsagesArray = ["encrypt", "decrypt"],
+): Promise<CryptoKey> {
   return createOneTimeCryptoKey({ lengthBits: 256, usages });
 }
 
@@ -548,7 +670,9 @@ export async function generateSRI(
   const crypto = await ensureCrypto();
   const subtle = (crypto as { readonly subtle?: SubtleCrypto }).subtle;
   if (!subtle?.digest) {
-    throw new CryptoUnavailableError("SubtleCrypto.digest is required for SRI generation.");
+    throw new CryptoUnavailableError(
+      "SubtleCrypto.digest is required for SRI generation.",
+    );
   }
 
   const subtleAlgoMap = {
@@ -561,7 +685,9 @@ export async function generateSRI(
     throw new InvalidParameterError(`Unsupported SRI algorithm: ${algorithm}`);
   }
   if (input == undefined) {
-    throw new InvalidParameterError("Input content is required for SRI generation");
+    throw new InvalidParameterError(
+      "Input content is required for SRI generation",
+    );
   }
 
   // IMPORTANT: If callers pass a string here, JavaScript strings are immutable
@@ -610,3 +736,65 @@ export const SIMPLE_API = Object.freeze({
   hasSyncCrypto,
   hasRandomUUID,
 });
+
+/* -------------------------------------------------------------------------- */
+/* Vitest test stubs (place in tests/random.test.ts)                           */
+/* -------------------------------------------------------------------------- */
+
+/*
+  Copy the following block into `tests/random.test.ts` in your project
+  (Vitest + tsconfig configured for testing). These tests are intentionally
+  small smoke tests to validate the most important behaviors.
+
+import { describe, it, expect } from 'vitest';
+import {
+  generateSecureId,
+  generateSecureIdSync,
+  generateSecureIdBytesSync,
+  generateSecureBytesAsync,
+  generateSecureUUID,
+  getSecureRandomInt,
+  shouldExecuteThrottled,
+} from '../src/secure-random-updated';
+
+describe('Secure random smoke tests', () => {
+  it('generates hex ids async & sync', async () => {
+    const a = await generateSecureId(32);
+    const b = generateSecureIdSync(32);
+    expect(typeof a).toBe('string');
+    expect(typeof b).toBe('string');
+    expect(a).toHaveLength(32);
+    expect(b).toHaveLength(32);
+  });
+
+  it('returns wipeable bytes', async () => {
+    const bytes = generateSecureIdBytesSync(16);
+    expect(bytes).toBeInstanceOf(Uint8Array);
+    expect(bytes.length).toBe(16);
+
+    const bytesAsync = await generateSecureBytesAsync(16);
+    expect(bytesAsync).toBeInstanceOf(Uint8Array);
+    expect(bytesAsync.length).toBe(16);
+  });
+
+  it('generates UUID and matches pattern', async () => {
+    const uuid = await generateSecureUUID();
+    expect(typeof uuid).toBe('string');
+    expect(uuid).toMatch(/[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}/i);
+  });
+
+  it('produces ints in range', async () => {
+    for (let i = 0; i < 10; i++) {
+      const v = await getSecureRandomInt(-1000, 1000);
+      expect(v).toBeGreaterThanOrEqual(-1000);
+      expect(v).toBeLessThanOrEqual(1000);
+    }
+  });
+
+  it('throttling respects probability bounds', () => {
+    expect(shouldExecuteThrottled(0)).toBe(false);
+    expect(shouldExecuteThrottled(1)).toBe(true);
+  });
+});
+
+*/

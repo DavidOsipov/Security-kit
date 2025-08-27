@@ -34,7 +34,8 @@ export function setCrypto(
       "Configuration is sealed and cannot be changed.",
     );
   }
-  _setCrypto(cryptoLike, options);
+  // normalize null to undefined to satisfy internal API typing
+  _setCrypto(cryptoLike ?? undefined, options);
 }
 
 /**
