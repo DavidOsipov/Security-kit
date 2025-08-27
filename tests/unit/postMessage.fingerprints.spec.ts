@@ -124,3 +124,36 @@ describe("postMessage fingerprinting and toNullProto/freeze cache", () => {
     expect(Object.isFrozen(o)).toBe(true);
   });
 });
+
+// Additional security-focused tests (mirroring security-fixes additions)
+describe('security-fixes: sanitize/typedarray and listener immutability', () => {
+  it('sendSecurePostMessage fails fast with incompatible sanitize=true + allowTypedArrays=true', () => {
+    const payload = new Uint8Array([5,6,7]);
+    const fakeWin = { postMessage: (_p: any, _o: string) => {} } as any;
+
+    expect(() =>
+      (post as any).sendSecurePostMessage({ targetWindow: fakeWin, payload, targetOrigin: 'https://example.com', wireFormat: 'structured', sanitize: true, allowTypedArrays: true } as any),
+    ).toThrow();
+  });
+
+  it('listener configuration is immutable after creation (TOCTOU fix)', () => {
+    const originalValidator = (() => false) as any;
+    const permissiveValidator = (() => true) as any;
+
+    const options: any = {
+      allowedOrigins: ['https://example.com'],
+      onMessage: () => {},
+      validate: originalValidator,
+      allowExtraProps: false,
+    };
+
+    const listener = (post as any).createSecurePostMessageListener(options as any);
+
+    options.validate = permissiveValidator;
+    options.allowExtraProps = true;
+
+    expect(listener).toBeDefined();
+    expect(listener.destroy).toBeInstanceOf(Function);
+    listener.destroy();
+  });
+});

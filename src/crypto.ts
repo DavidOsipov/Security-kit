@@ -30,6 +30,17 @@ import {
 } from "./utils";
 import { SHARED_ENCODER } from "./encoding";
 
+// Lightweight AbortError subclass so we can return a typed, non-mutated Error
+// instance without assigning properties at runtime (keeps immutable-data rules happy)
+class AbortError extends Error {
+  constructor(message?: string) {
+    super(message);
+    this.name = "AbortError";
+    // Ensure instanceof works across different JS runtimes
+    Object.setPrototypeOf(this, AbortError.prototype);
+  }
+}
+
 /* -------------------------------------------------------------------------- */
 /* Public option types                                                         */
 /* -------------------------------------------------------------------------- */
@@ -55,17 +66,20 @@ export interface RandomOptions {
 function makeAbortError(message = "Operation aborted"): Error {
   try {
     if (typeof DOMException !== "undefined") {
+      // Create a DOMException with the AbortError type where available.
       const ex = new DOMException(message, "AbortError");
-      // Some runtimes may differ — ensure name is correct.
-      (ex as any).name = "AbortError";
+      // Do not attempt to mutate host-provided objects. If the runtime for
+      // some reason does not expose the expected name, return a fresh Error
+      // with the correct name instead of mutating the DOMException.
+      if (ex.name !== "AbortError") {
+        return new AbortError(message);
+      }
       return ex as unknown as Error;
     }
   } catch {
     // Fall through to generic Error below.
   }
-  const e = new Error(message);
-  (e as any).name = "AbortError";
-  return e;
+  return new AbortError(message);
 }
 
 /**
@@ -179,19 +193,16 @@ export const URL_ALPHABET =
 const HEX_ALPHABET = "0123456789abcdef";
 
 // Precompute a fast hex lookup table for byte -> two-char hex conversion.
-const _HEX_LOOKUP: readonly string[] = (() => {
-  const array: string[] = new Array(256);
-  for (let index = 0; index < 256; index++) {
-    array[index] = index.toString(16).padStart(2, "0");
-  }
-  return Object.freeze(array);
-})();
+const _HEX_LOOKUP: readonly string[] = Object.freeze(
+  Array.from({ length: 256 }, (_, index) =>
+    index.toString(16).padStart(2, "0"),
+  ),
+);
 
 function bytesToHex(bytes: Uint8Array): string {
-  const out: string[] = new Array(bytes.length);
-  for (let index = 0; index < bytes.length; index++)
-    out[index] = _HEX_LOOKUP[bytes[index] as number]!;
-  return out.join("");
+  // Functional mapping avoids in-place mutation and satisfies immutable-data
+  // lint rules while remaining allocation-efficient for small arrays.
+  return Array.from(bytes, (b) => _HEX_LOOKUP[b as number]!).join("");
 }
 
 /* -------------------------------------------------------------------------- */
@@ -204,12 +215,8 @@ export function assertCryptoAvailableSync(): Crypto {
     const error = new CryptoUnavailableError(
       "Synchronous Web Crypto API is not available in this environment",
     );
-    Object.defineProperty(error, "code", {
-      value: "CRYPTO_UNAVAILABLE_SYNC",
-      configurable: false,
-      enumerable: false,
-      writable: false,
-    });
+    // CryptoUnavailableError already defines a stable `code` property.
+    // Avoid mutating the instance further to satisfy immutable-data lint rules.
     throw error;
   }
   return crypto;
@@ -292,6 +299,9 @@ export async function getSecureRandomInt(
   const rangeBig = BigInt(max) - BigInt(min) + BigInt(1);
   const RANDOM_ITERATION_CAP = 5000;
 
+  /* eslint-disable functional/no-let -- Controlled local
+    loop counters are necessary here for performance in the rejection-sampling
+    loop. */
   const tryUint32 = async (): Promise<number | undefined> => {
     const range = Number(rangeBig);
     const array = new Uint32Array(1);
@@ -310,7 +320,11 @@ export async function getSecureRandomInt(
     }
     return undefined;
   };
+  /* eslint-enable functional/no-let */
 
+  /* eslint-disable functional/no-let -- Controlled local
+    loop counters are necessary here for performance in the rejection-sampling
+    loop. */
   const tryUint64 = async (): Promise<number | undefined> => {
     if (typeof BigUint64Array === "undefined") return undefined;
     const array64 = new BigUint64Array(1);
@@ -331,6 +345,7 @@ export async function getSecureRandomInt(
     }
     return undefined;
   };
+  /* eslint-enable functional/no-let */
 
   if (rangeBig <= BigInt(0x100000000)) {
     const v = await tryUint32();
@@ -388,10 +403,12 @@ async function generateSecureStringInternalAsync(
   const MAX_ITER = 500;
 
   try {
+    /* eslint-disable functional/no-let, functional/immutable-data, functional/prefer-readonly-type --
+       Justified: tight loop uses a small number of controlled local mutations for
+       performance and immediate wiping of random bytes. Scope limited to this
+       function. */
     // Preallocate result array for lower allocation churn
-  const outArray: string[] = new Array(size);
-    /* eslint-disable functional/no-let, functional/immutable-data -- Justified: tight loop uses a small number of
-       controlled local mutations for performance and immediate wiping of random bytes. */
+    const outArray: string[] = new Array<string>(size);
     let pos = 0;
 
     for (let iter = 0; iter < MAX_ITER && pos < size; iter++) {
@@ -404,7 +421,7 @@ async function generateSecureStringInternalAsync(
         }
       }
       if (pos === size) {
-        /* eslint-enable functional/no-let, functional/immutable-data */
+        /* eslint-enable functional/no-let, functional/immutable-data, functional/prefer-readonly-type */
         return outArray.join("");
       }
       // Yield to event loop to keep UI responsive
@@ -442,9 +459,11 @@ export function generateSecureStringSync(
   const crypto = assertCryptoAvailableSync();
   const bytes = new Uint8Array(step);
   try {
-  const outArray: string[] = new Array(size);
-    /* eslint-disable functional/no-let, functional/immutable-data -- Justified: tight loop uses a small number of
-       controlled local mutations for performance and immediate wiping of random bytes. */
+    /* eslint-disable functional/no-let, functional/immutable-data, functional/prefer-readonly-type --
+       Justified: tight loop uses a small number of controlled local mutations for
+       performance and immediate wiping of random bytes. Scope limited to this
+       function. */
+    const outArray: string[] = new Array<string>(size);
     let pos = 0;
 
     // Cap attempts to avoid long blocking behavior on pathological alphabets
@@ -459,7 +478,7 @@ export function generateSecureStringSync(
         }
       }
       if (pos === size) {
-        /* eslint-enable functional/no-let, functional/immutable-data */
+        /* eslint-enable functional/no-let, functional/immutable-data, functional/prefer-readonly-type */
         return outArray.join("");
       }
     }
@@ -539,6 +558,8 @@ export async function generateSecureBytesAsync(
 /* -------------------------------------------------------------------------- */
 
 export async function generateSecureUUID(): Promise<string> {
+  /* eslint-disable functional/immutable-data -- We must mutate the 16-byte
+     UUID buffer to set version/variant bits and then securely wipe it. */
   const crypto = await ensureCrypto();
   const cryptoWithUUID = crypto as Crypto & {
     readonly randomUUID?: () => string;
@@ -556,10 +577,17 @@ export async function generateSecureUUID(): Promise<string> {
     bytes[6] = ((bytes[6] as number) & 0x0f) | 0x40;
     bytes[8] = ((bytes[8] as number) & 0x3f) | 0x80;
     const hex = bytesToHex(bytes);
-    return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20, 32)}`;
+    return [
+      hex.slice(0, 8),
+      hex.slice(8, 12),
+      hex.slice(12, 16),
+      hex.slice(16, 20),
+      hex.slice(20, 32),
+    ].join("-");
   } finally {
     secureWipe(bytes, { forbidShared: true });
   }
+  /* eslint-enable functional/immutable-data */
 }
 
 /* -------------------------------------------------------------------------- */
@@ -586,7 +614,6 @@ export async function createOneTimeCryptoKey(
 ): Promise<CryptoKey> {
   const { lengthBits, usages = ["encrypt", "decrypt"] } = options;
   const deprecatedLength = (options as { readonly length?: 128 | 256 }).length;
-  let bitLength: number;
 
   if (lengthBits !== undefined && deprecatedLength !== undefined) {
     throw new InvalidParameterError(
@@ -601,7 +628,7 @@ export async function createOneTimeCryptoKey(
     );
   }
 
-  bitLength = lengthBits ?? deprecatedLength ?? 256;
+  const bitLength = lengthBits ?? deprecatedLength ?? 256;
   if (bitLength !== 128 && bitLength !== 256) {
     throw new InvalidParameterError("Key length must be 128 or 256 bits.");
   }
@@ -620,22 +647,28 @@ export async function createOneTimeCryptoKey(
 
   const extractable = false;
   if (typeof subtle.generateKey === "function") {
+    /* eslint-disable functional/prefer-readonly-type -- WebCrypto expects a mutable KeyUsage[]; usages is a readonly input so we create a fresh array. */
+    const usagesArray = Array.from(usages) as KeyUsage[];
+    /* eslint-enable functional/prefer-readonly-type */
     return subtle.generateKey(
       { name: "AES-GCM", length: bitLength },
       extractable,
-      Array.from(usages) as KeyUsage[],
+      usagesArray,
     );
   }
 
   const keyData = new Uint8Array(bitLength / 8);
   try {
     (crypto as Crypto).getRandomValues(keyData);
+    /* eslint-disable functional/prefer-readonly-type -- WebCrypto expects a mutable KeyUsage[]; usages is a readonly input so we create a fresh array. */
+    const usagesArray = Array.from(usages) as KeyUsage[];
+    /* eslint-enable functional/prefer-readonly-type */
     return await subtle.importKey(
       "raw",
       keyData,
       { name: "AES-GCM", length: bitLength },
       extractable,
-      Array.from(usages) as KeyUsage[],
+      usagesArray,
     );
   } finally {
     secureWipe(keyData, { forbidShared: true });
@@ -694,7 +727,10 @@ export async function generateSRI(
   // and cannot be reliably wiped from memory. We therefore create an internal
   // Uint8Array copy which we wipe after use. For sensitive secrets prefer
   // passing an ArrayBuffer/Uint8Array so callers can securely wipe the source.
-  let internalView: Uint8Array | null = null;
+  // internalView and digest are assigned then wiped in finally; local mutation is intentional.
+  // eslint-disable-next-line functional/no-let -- controlled mutable locals for wiping
+  let internalView: Uint8Array | undefined = undefined;
+  // eslint-disable-next-line functional/no-let -- controlled mutable locals for wiping
   let digest: ArrayBuffer | undefined;
 
   try {
@@ -709,8 +745,12 @@ export async function generateSRI(
     digest = await subtle.digest(subtleAlgo, internalView as BufferSource);
     return `${algorithm}-${_arrayBufferToBase64(digest)}`;
   } finally {
-    if (digest) secureWipe(new Uint8Array(digest), { forbidShared: true });
-    if (internalView) secureWipe(internalView, { forbidShared: true });
+    if (digest) {
+      secureWipe(new Uint8Array(digest), { forbidShared: true });
+    }
+    if (internalView !== undefined) {
+      secureWipe(internalView, { forbidShared: true });
+    }
   }
 }
 

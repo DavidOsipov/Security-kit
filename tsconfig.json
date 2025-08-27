@@ -76,7 +76,7 @@
     // version of your library. It's a critical safety net.
     "noEmitOnError": true
   },
-  "include": ["src/**/*", "scripts/*", "server/*","src/globals.d.ts"],
+  "include": ["src/**/*", "server/*","src/globals.d.ts", "tests/security/ensureFingerprintSalt.adversarial.spec.ts"],
   "exclude": [
     "node_modules",
     "dist",

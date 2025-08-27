@@ -4,7 +4,6 @@
 // and is guarded at runtime by the same dev-guards used elsewhere in the repo.
 
 import { environment } from "./environment";
-import { sanitizeErrorForLogs } from "./errors";
 import * as postMessageModule from "./postMessage";
 
 function assertTestAllowed(): void {

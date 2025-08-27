@@ -537,17 +537,22 @@ export function validateURLStrict(
   | { readonly ok: true; readonly url: URL }
   | { readonly ok: false; readonly error: Error } {
   // Build options while avoiding explicitly passing `undefined` for optional fields
-  const args = {
+  const arguments_ = {
     requireHTTPS: true,
-    ...(options.allowedOrigins ? { allowedOrigins: options.allowedOrigins } : {}),
+    ...(options.allowedOrigins
+      ? { allowedOrigins: options.allowedOrigins }
+      : {}),
     ...(options.maxLength ? { maxLength: options.maxLength } : {}),
   } as const;
-  return validateURL(urlString, args as unknown as {
-    readonly allowedOrigins?: readonly string[];
-    readonly requireHTTPS?: boolean;
-    readonly allowedSchemes?: readonly string[];
-    readonly maxLength?: number;
-  });
+  return validateURL(
+    urlString,
+    arguments_ as unknown as {
+      readonly allowedOrigins?: readonly string[];
+      readonly requireHTTPS?: boolean;
+      readonly allowedSchemes?: readonly string[];
+      readonly maxLength?: number;
+    },
+  );
 }
 
 /**

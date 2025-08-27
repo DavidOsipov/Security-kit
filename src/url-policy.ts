@@ -47,19 +47,23 @@ export function configureUrlPolicy(
   if (!Array.isArray(safeSchemes) || safeSchemes.length === 0) {
     throw new InvalidParameterError("safeSchemes must be a non-empty array.");
   }
-  const normalized: string[] = [];
-  for (const s of safeSchemes) {
-    if (typeof s !== "string")
-      throw new InvalidParameterError("Each scheme must be a string.");
-    if (!isValidScheme(s))
-      throw new InvalidParameterError(
-        `Scheme '${s}' is not a valid URL scheme token. Include trailing ':'`,
-      );
-    if (DANGEROUS_SCHEMES.has(s))
-      throw new InvalidParameterError(`Scheme '${s}' is forbidden by policy.`);
-    normalized.push(s);
-  }
-  _safeSchemes = new Set(normalized);
+  const normalized = safeSchemes.reduce<readonly string[]>(
+    (accumulator, s) => {
+      if (typeof s !== "string")
+        throw new InvalidParameterError("Each scheme must be a string.");
+      if (!isValidScheme(s))
+        throw new InvalidParameterError(
+          `Scheme '${s}' is not a valid URL scheme token. Include trailing ':'`,
+        );
+      if (DANGEROUS_SCHEMES.has(s))
+        throw new InvalidParameterError(
+          `Scheme '${s}' is forbidden by policy.`,
+        );
+      return [...accumulator, s];
+    },
+    [] as readonly string[],
+  );
+  _safeSchemes = new Set(Array.from(normalized));
 }
 
 // Test-only helper to reset policy

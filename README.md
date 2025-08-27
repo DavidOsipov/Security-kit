@@ -232,6 +232,23 @@ export default defineConfig({
 });
 ```
 
+### Optional Dependencies & Bundle Size
+
+Some features (fast fallbacks and convenience parsers) are provided as optional dependencies to keep the core runtime small and secure by default. The package declares a few optional packages such as `hash-wasm`, `fast-sha256`, `css-what`, and `lru-cache` — they are only required in environments where the native Web Crypto API or other platform capabilities are unavailable.
+
+- If you rely on modern browsers or Node >= 18 with Web Crypto available, you do not need to install these optional packages; the kit will use the native secure implementations.
+- If you want the bundled fallbacks (for older runtimes or convenience), install the optional packages in your project. Example:
+
+```bash
+# Install optional fallbacks (only if you need them)
+npm install --save hash-wasm fast-sha256 css-what lru-cache
+```
+
+Implementation note: the library build excludes these optional packages from the main distributed bundle (they are externalized) to reduce package size. This keeps the published `dist/` small and lets bundlers (Webpack/Rollup/Vite/esbuild) handle tree-shaking and minification for your application.
+
+If you want a single-file bundle that includes fallbacks, install the optional deps in your project or contact the maintainers about publishing a "full" build variant.
+
+
 ### Production Error Reporting
 
 The kit includes a rate-limited, centralized production error reporter. Configure it once at startup.

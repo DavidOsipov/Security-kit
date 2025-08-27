@@ -21,10 +21,12 @@ function randomString(length = 6, rnd?: () => number) {
 function secureRandom(): number {
   const buf = Buffer.alloc(6);
   crypto.randomFillSync(buf);
-  const v = Array.from({ length: 6 }).reduce(
-    (accumulator, _, index) => (accumulator << 8) + buf.readUInt8(index),
-    0,
-  );
+  // Use a typed loop to compose a 48-bit integer from 6 random bytes
+  let accumulator = 0;
+  for (let index = 0; index < 6; index++) {
+    accumulator = (accumulator << 8) + buf.readUInt8(index);
+  }
+  const v = accumulator;
   return v / 2 ** 48;
 }
 
@@ -67,10 +69,9 @@ function makeHostilePayload(
   if (r < 0.8) {
     const o: Record<PropertyKey, unknown> = { nested: {} };
     // deliberate nested mutation to exercise prototype setters in sanitizer
-    // Narrow, intentional mutation for fuzzing: mutate a nested object to simulate
-    // hostile payload shapes (prototype mutation inside nested structure).
-    // eslint-disable-next-line functional/immutable-data -- intentional fuzz harness access
-    o.nested.deep = { __proto__: { p: index } };
+    // Cast to any for intentional test-only mutation
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (o as any).nested.deep = { __proto__: { p: index } };
 
     return o;
   }
@@ -118,10 +119,9 @@ function makeHostilePayload(
     const o: Record<PropertyKey, unknown> = { a: { b: 1 } };
     try {
       // intentionally mutate prototype to test sanitizer hardening
-      // Narrowly-scoped, auditable mutation: attempt to change the prototype of a nested
-      // object to ensure sanitizers and validators protect against these vectors.
-      // eslint-disable-next-line functional/immutable-data -- intentional fuzz harness access
-      Object.setPrototypeOf(o.a, { poisoned: true });
+      // Cast to any for test-only mutation
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      Object.setPrototypeOf((o as any).a, { poisoned: true });
     } catch (error) {
       console.warn(
         "setPrototypeOf failed during fuzz harness",

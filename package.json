@@ -51,7 +51,7 @@
   "files": [
     "dist",
     "sbom.json",
-    "Security Consitution.md",
+    "/docs/Security Consitution.md",
     "README.md",
     "LICENSE"
   ],
@@ -94,6 +94,12 @@
   },
   "peerDependencies": {
     "dompurify": "^3.2.0"
+  },
+  "optionalDependencies": {
+    "css-what": "^7.0.0",
+    "fast-sha256": "^1.3.0",
+    "hash-wasm": "^4.12.0",
+    "lru-cache": "^11.1.0"
   },
   "devDependencies": {
     "@types/eslint-plugin-security": "^3.0.0",

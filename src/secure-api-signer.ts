@@ -14,7 +14,6 @@
 import {
   InvalidParameterError,
   InvalidConfigurationError,
-  CryptoUnavailableError,
   WorkerError,
   RateLimitError,
   CircuitBreakerError,
@@ -29,7 +28,6 @@ import { safeStableStringify } from "./canonical.js";
 
 import { getSecureRandomBytesSync } from "./crypto";
 import { SHARED_ENCODER } from "./encoding";
-import { secureWipe as importedSecureWipe } from "./utils";
 import {
   bytesToBase64,
   base64ToBytes,
@@ -655,10 +653,14 @@ export class SecureApiSigner {
           } else if (isErrorResponse(data)) {
             reject(new WorkerError(`Worker handshake error: ${data.reason}`));
           } else {
-            reject(new WorkerError("Worker handshake returned unexpected message"));
+            reject(
+              new WorkerError("Worker handshake returned unexpected message"),
+            );
           }
         } catch (error) {
-          reject(error instanceof Error ? error : new WorkerError(String(error)));
+          reject(
+            error instanceof Error ? error : new WorkerError(String(error)),
+          );
         } finally {
           cleanupHandler();
         }
@@ -686,7 +688,9 @@ export class SecureApiSigner {
       await Promise.race([handshakePromise, timeoutPromise]);
       this.#resolveReady();
     } catch (error) {
-      this.#rejectReady(error instanceof Error ? error : new WorkerError(String(error)));
+      this.#rejectReady(
+        error instanceof Error ? error : new WorkerError(String(error)),
+      );
       throw error;
     } finally {
       if (timerId) clearTimeout(timerId);
