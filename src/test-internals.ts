@@ -24,24 +24,32 @@ export function toNullProtoTest(
   maxDepth?: number,
 ): unknown {
   assertTestAllowed();
-  return (postMessageModule as any).toNullProto(
-    object,
-    depth ?? 0,
-    maxDepth ?? 8,
-  );
+  const pm = postMessageModule as any;
+  const fn = pm.__test_internals?.toNullProto ?? pm.__test_toNullProto ?? pm.toNullProto;
+  if (typeof fn !== 'function') throw new Error('toNullProto test export not available');
+  return fn(object, depth ?? 0, maxDepth ?? 8);
 }
 
 export function getPayloadFingerprintTest(data: unknown): Promise<string> {
   assertTestAllowed();
-  return (postMessageModule as any).getPayloadFingerprint(data as any);
+  const pm = postMessageModule as any;
+  const fn = pm.__test_internals?.getPayloadFingerprint ?? pm.__test_getPayloadFingerprint ?? pm.getPayloadFingerprint;
+  if (typeof fn !== 'function') throw new Error('getPayloadFingerprint test export not available');
+  return fn(data as any);
 }
 
 export function ensureFingerprintSaltTest(): Promise<Uint8Array> {
   assertTestAllowed();
-  return (postMessageModule as any).ensureFingerprintSalt();
+  const pm = postMessageModule as any;
+  const fn = pm.__test_internals?.ensureFingerprintSalt ?? pm.__test_ensureFingerprintSalt ?? pm.ensureFingerprintSalt;
+  if (typeof fn !== 'function') throw new Error('ensureFingerprintSalt test export not available');
+  return fn();
 }
 
 export function deepFreezeTest<T>(object: T): T {
   assertTestAllowed();
-  return (postMessageModule as any).deepFreeze(object);
+  const pm = postMessageModule as any;
+  const fn = pm.__test_internals?.deepFreeze ?? pm.__test_deepFreeze ?? pm.deepFreeze;
+  if (typeof fn !== 'function') throw new Error('deepFreeze test export not available');
+  return fn(object);
 }

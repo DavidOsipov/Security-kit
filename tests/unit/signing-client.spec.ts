@@ -107,7 +107,7 @@ describe('SecureApiSigner (client) - basic flows', () => {
   });
 
   it('can create, sign and destroy (roundtrip with mock worker)', async () => {
-  const key = new Uint8Array(Buffer.from('test-key-0123456789'));
+  const key = new Uint8Array(Buffer.from('0123456789abcdef0123456789abcdef'));
   const signer = await SecureApiSigner.create({ secret: key, kid: 'unit-kid', workerUrl: new URL('./mock-worker.js', import.meta.url), integrity: 'none' });
 
     const signed = await signer.sign('hello-world');
@@ -120,7 +120,7 @@ describe('SecureApiSigner (client) - basic flows', () => {
   });
 
   it('enforces maxPendingRequests on the client', async () => {
-  const key = new Uint8Array(Buffer.from('test-key-16-bytes-OK'));
+  const key = new Uint8Array(Buffer.from('0123456789abcdef0123456789abcdef'));
   const signer = await SecureApiSigner.create({ secret: key, maxPendingRequests: 2, workerUrl: new URL('./mock-worker.js', import.meta.url), integrity: 'none' });
 
     // start two long-running sign calls (slow worker to ensure overlap)
@@ -144,7 +144,7 @@ describe('SecureApiSigner (client) - basic flows', () => {
       return new MockWorker(url, { delayMs: 100 });
     } as any;
 
-  const key = new Uint8Array(Buffer.from('timeout-key-zzz'));
+  const key = new Uint8Array(Buffer.from('0123456789abcdef0123456789abcdef'));
   const signer = await SecureApiSigner.create({ secret: key, requestTimeoutMs: 20, workerUrl: new URL('./mock-worker.js', import.meta.url), integrity: 'none' });
     await expect(signer.sign('slow')).rejects.toThrow(/timed out/);
     await signer.destroy();

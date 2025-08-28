@@ -14,7 +14,7 @@ function signWithKey(key: Buffer, timestamp: number, nonce: string, payload: unk
 
 describe('verifyApiRequestSignature - edge cases', () => {
   it('rejects when kid is missing', async () => {
-    const key = Buffer.from('test-key-1234567890ab');
+  const key = Buffer.from('0123456789abcdef0123456789abcdef');
     const ts = Date.now();
   const nonce = Buffer.from(getSecureRandomBytesSync(16)).toString('base64');
     const sig = signWithKey(key, ts, nonce, 'p', '');
@@ -25,7 +25,7 @@ describe('verifyApiRequestSignature - edge cases', () => {
   });
 
   it('rejects bad signature', async () => {
-    const key = Buffer.from('abc123def456789xyz');
+  const key = Buffer.from('0123456789abcdef0123456789abcdef');
     const ts = Date.now();
   const nonce = Buffer.from(getSecureRandomBytesSync(16)).toString('base64');
     const sig = 'invalidsig==';

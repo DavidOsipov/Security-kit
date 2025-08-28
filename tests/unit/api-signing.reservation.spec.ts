@@ -59,7 +59,7 @@ beforeEach(() => { origWorker = (globalThis as any).Worker; (globalThis as any).
 afterEach(() => { (globalThis as any).Worker = origWorker; });
 
 test('SecureApiSigner.create, sign and destroy (roundtrip)', async () => {
-  const secret = new Uint8Array(Buffer.from('test-key-32bytes-owasp-compliant-strength-256bit'));
+  const secret = new Uint8Array(Buffer.from('0123456789abcdef0123456789abcdef'));
   const signer = await SecureApiSigner.create({ secret, workerUrl: new URL('./mock-worker.js', import.meta.url), integrity: 'none' });
   const signed = await signer.sign('hello-world');
   expect(typeof signed.signature).toBe('string');

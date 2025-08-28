@@ -57,9 +57,9 @@ beforeEach(() => { origWorker = (globalThis as any).Worker; (globalThis as any).
 afterEach(() => { (globalThis as any).Worker = origWorker; });
 
 test('reservation prevents race conditions in multi-threaded environment', async () => {
-  const key = 'race-condition-key';
+  const key = '0123456789abcdef0123456789abcdef';
   // Create an initial signer to reserve the key
-  const secret = new Uint8Array(Buffer.from('test-key-32bytes-owasp-compliant-strength-256bit'));
+  const secret = new Uint8Array(Buffer.from('0123456789abcdef0123456789abcdef'));
   const signer1 = await SecureApiSigner.create({ secret, workerUrl: new URL('./mock-worker.js', import.meta.url), integrity: 'none' });
 
   // Concurrent attempts to create a signer with same key should fail.
@@ -79,8 +79,8 @@ test('reservation prevents race conditions in multi-threaded environment', async
 });
 
 test('reservation cleanup allows new signers after all are destroyed', async () => {
-  const key = 'cleanup-test-key';
-  const secret = new Uint8Array(Buffer.from(key));
+  const key = '0123456789abcdef0123456789abcdef';
+  const secret = new Uint8Array(Buffer.from('0123456789abcdef0123456789abcdef'));
 
   const signer1 = await SecureApiSigner.create({ secret, workerUrl: new URL('./mock-worker.js', import.meta.url), integrity: 'none' });
 
@@ -97,9 +97,24 @@ test('reservation cleanup allows new signers after all are destroyed', async () 
 });
 
 test('reservation is isolated per secret', async () => {
-  const keys = ['key1', 'key2', 'key3'];
+  // Use distinct 32-byte canonical secrets for each logical key to ensure
+  // tests exercise per-secret isolation while meeting the minimum-secret-size
+  // policy (32 bytes).
+  const keys = [
+    '0123456789abcdef0123456789abcdea',
+    '0123456789abcdef0123456789abcdeb',
+    '0123456789abcdef0123456789abcdec',
+  ];
 
-  const signers = await Promise.all(keys.map(k => SecureApiSigner.create({ secret: new Uint8Array(Buffer.from(k)), workerUrl: new URL('./mock-worker.js', import.meta.url), integrity: 'none' })));
+  const signers = await Promise.all(
+    keys.map(k =>
+      SecureApiSigner.create({
+        secret: new Uint8Array(Buffer.from(k)),
+        workerUrl: new URL('./mock-worker.js', import.meta.url),
+        integrity: 'none',
+      }),
+    ),
+  );
 
   signers.forEach(s => expect(s).toBeDefined());
 
@@ -116,8 +131,8 @@ test('reservation prevents key reuse in production environment', async () => {
   const originalEnv = process.env.NODE_ENV;
   process.env.NODE_ENV = 'production';
   try {
-    const key = 'production-key';
-    const secret = new Uint8Array(Buffer.from(key));
+  const key = '0123456789abcdef0123456789abcdef';
+  const secret = new Uint8Array(Buffer.from('0123456789abcdef0123456789abcdef'));
 
     const signer1 = await SecureApiSigner.create({ secret, workerUrl: new URL('./mock-worker.js', import.meta.url), integrity: 'none' });
 

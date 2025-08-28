@@ -13,6 +13,31 @@ The entire library is written in TypeScript, has zero production dependencies, a
 
 ---
 
+## Secret length policy
+
+Security-kit enforces a minimum secret length for HMAC-based API signing and
+verification. This protects users from weak keys and accidental downgrade to
+insufficient entropy. The library normalizes secrets to bytes and validates
+their length before use.
+
+- Minimum accepted length: 32 bytes (256 bits) is recommended for production.
+- Tests and examples in this repository have been upgraded to use 32-byte
+  secrets.
+
+Migration guidance:
+
+- If you use shorter secrets, rotate to a 32-byte key as soon as possible.
+- For existing systems where rotation is non-trivial, consider wrapping the
+  existing key with a KDF (e.g., HKDF-SHA256) that derives a 32-byte symmetric
+  key from your existing secret, and then adopt the derived key for signing.
+
+Preventing regressions:
+
+- This repository includes tests that validate the minimum secret length. We
+  recommend adding a CI check (or an eslint rule) that scans for short literal
+  secrets in test code to avoid accidental reintroduction of weak test keys.
+
+
 ## Table of Contents
 
 - [Core Philosophy](#core-philosophy)

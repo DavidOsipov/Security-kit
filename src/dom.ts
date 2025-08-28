@@ -181,6 +181,14 @@ function promiseWithTimeout<T>(
 async function sha256Hex(input: string, timeoutMs = 1500): Promise<string> {
   const enc = new TextEncoder();
 
+  // Test hook: allow unit tests to override dynamic imports deterministically.
+  // Tests may set __test_importOverride to a function that receives a module
+  // specifier and returns a Promise resolving to a module-like object.
+  // This is only used for testing and is intentionally opt-in.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const importer: (spec: string) => Promise<any> =
+    (sha256Hex as any).__test_importOverride ?? ((s: string) => import(s));
+
   // Helper strategies: try multiple implementations in order and return the first successful result.
   async function tryWebCrypto(): Promise<string | undefined> {
     let data: Uint8Array | undefined;
@@ -236,7 +244,7 @@ async function sha256Hex(input: string, timeoutMs = 1500): Promise<string> {
 
   async function tryNodeCrypto(): Promise<string | undefined> {
     try {
-      const nodeCryptoModulePromise = import("node:crypto") as Promise<
+      const nodeCryptoModulePromise = importer("node:crypto") as Promise<
         typeof import("node:crypto")
       >;
       const nodeCrypto = await promiseWithTimeout(
@@ -266,7 +274,7 @@ async function sha256Hex(input: string, timeoutMs = 1500): Promise<string> {
 
   async function tryFastSha256(): Promise<string | undefined> {
     try {
-      const fastModulePromise = import("fast-sha256") as Promise<unknown>;
+      const fastModulePromise = importer("fast-sha256") as Promise<unknown>;
       const fastModule = await promiseWithTimeout(
         fastModulePromise,
         timeoutMs,
@@ -298,7 +306,7 @@ async function sha256Hex(input: string, timeoutMs = 1500): Promise<string> {
 
   async function tryHashWasm(): Promise<string | undefined> {
     try {
-      const hwPromise = import("hash-wasm") as Promise<unknown>;
+      const hwPromise = importer("hash-wasm") as Promise<unknown>;
       const hw = await promiseWithTimeout(
         hwPromise,
         timeoutMs,
@@ -570,8 +578,12 @@ export class DOMValidator {
    */
   async #tryUpgradeCache(): Promise<void> {
     try {
+      // Allow tests to override dynamic imports deterministically.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const importer: (spec: string) => Promise<any> =
+        (DOMValidator as any).__test_importOverride ?? ((s: string) => import(s));
       const module_ = await promiseWithTimeout(
-        import("lru-cache"),
+        importer("lru-cache"),
         1200,
         "lru_import_timeout",
       );
@@ -732,8 +744,12 @@ export class DOMValidator {
     if (!selector) return;
     void (async () => {
       try {
+        // Allow tests to override dynamic imports deterministically.
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const importer: (spec: string) => Promise<any> =
+          (DOMValidator as any).__test_importOverride ?? ((s: string) => import(s));
         const module_ = await promiseWithTimeout(
-          import("css-what"),
+          importer("css-what"),
           800,
           "css-what_timeout",
         );
@@ -1192,6 +1208,16 @@ export class DOMValidator {
 
   /* ---------------------------- Misc helpers ----------------------------- */
   /* Misc helpers intentionally minimal; mask/truncate helpers live as top-level functions. */
+  // Test-only methods: allow unit tests to trigger internal background tasks
+  // in a controlled manner. These are part of the test surface only and
+  // do not change production behavior.
+  public async __test_tryUpgradeCache(): Promise<void> {
+    return await this.#tryUpgradeCache();
+  }
+
+  public __test_backgroundCssWhatParse(selector: string): void {
+    return this.#backgroundCssWhatParse(selector);
+  }
 }
 
 /* ---------------------------- Default helpers ---------------------------- */
@@ -1250,3 +1276,33 @@ export function getDefaultDOMValidator(): DOMValidator {
   if (!defaultInstance) defaultInstance = new DOMValidator(DEFAULT_CONFIG);
   return defaultInstance;
 }
+
+// Test-only helper: reset the lazily-constructed default instance so unit tests
+// can exercise both the creation and the cached-return branches deterministically.
+// This is intentionally test-only and should not be used in application code.
+export function __test_resetDefaultValidatorForUnitTests(): void {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (defaultInstance as any) = undefined;
+}
+
+/* -------------------------------------------------------------------------- */
+/* Test-only exports (intentionally named to indicate non-public API).         */
+/* These are provided to support unit tests and debugging; they are small,
+ * auditable wrappers that do not change runtime behavior.                   */
+export const __test_redactAttributesSafely = redactAttributesSafely;
+export const __test_removeQuotedSegmentsSafely = removeQuotedSegmentsSafely;
+export const __test_extractAttributeSegments = extractAttributeSegments;
+export const __test_fingerprintHexSync = fingerprintHexSync;
+export const __test_promiseWithTimeout = promiseWithTimeout;
+export const __test_sha256Hex = sha256Hex;
+export const __test_sanitizeSelectorForLogs = sanitizeSelectorForLogs;
+
+// Also expose the helpers under their original names for test consumers that
+// import the module directly in unit tests. These are considered non-breaking
+// for runtime behavior but are intended for test use only.
+export {
+  redactAttributesSafely,
+  removeQuotedSegmentsSafely,
+  extractAttributeSegments,
+};
+

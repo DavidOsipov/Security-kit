@@ -175,7 +175,7 @@ describe('SecureApiSigner - Extended Canonical Format & Security Features', () =
     it('creates signatures compatible with server verification', async () => {
       const secret = new Uint8Array(32);
       crypto.getRandomValues(secret);
-      const kid = 'test-key-001';
+  const kid = '0123456789abcdef0123456789abcdef';
       
   const signer = await SecureApiSigner.create({ secret, kid, workerUrl: new URL('./mock-worker.js', import.meta.url), integrity: 'none', wipeProvidedSecret: false });
       
@@ -422,7 +422,7 @@ describe('Server-side verification - Security Constitution Compliance', () => {
         nonce: Buffer.from(getSecureRandomBytesSync(16)).toString('base64'),
         timestamp: Date.now(),
         signatureBase64: 'dGVzdC1zaWduYXR1cmU=', // "test-signature" base64
-        kid: 'test-key',
+  kid: '0123456789abcdef0123456789abcdef',
         method: 'POST',
         path: '/api/test'
       };
