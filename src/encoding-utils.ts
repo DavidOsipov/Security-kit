@@ -7,8 +7,8 @@ const DEFAULT_CHUNK = 8192;
 // Normalize base64url to standard base64 and fix padding
 function normalizeBase64(input: string): string {
   const s = input.replace(/-/g, "+").replace(/_/g, "/");
-  const padLen = (4 - (s.length % 4)) % 4;
-  return s + "=".repeat(padLen);
+  const padLength = (4 - (s.length % 4)) % 4;
+  return s + "=".repeat(padLength);
 }
 
 export function bytesToBase64(
@@ -71,7 +71,7 @@ export function base64ToBytes(b64: string): Uint8Array {
 export function isLikelyBase64(s: string): boolean {
   // Accept base64 and base64url chars; allow unpadded base64url but ensure padding would make length % 4 === 0
   if (typeof s !== "string" || s.length === 0) return false;
-  if (!/^[A-Za-z0-9+/=_-]+$/.test(s)) return false;
+  if (!/^[\w+/=-]+$/.test(s)) return false;
   const normalized = normalizeBase64(s);
   return normalized.length % 4 === 0 && normalized.length >= 4; // Minimum valid base64 is 4 chars
 }

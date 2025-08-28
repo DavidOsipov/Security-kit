@@ -1,0 +1,44 @@
+import * as postMessage from '../../src/postMessage';
+import * as state from '../../src/state';
+
+describe('postMessage fingerprinting (subtle and fallback)', () => {
+  beforeEach(() => {
+    (globalThis as any).__SECURITY_KIT_ALLOW_TEST_APIS = true;
+    postMessage.__test_resetForUnitTests();
+  });
+  afterEach(() => {
+    delete (globalThis as any).__SECURITY_KIT_ALLOW_TEST_APIS;
+    postMessage.__test_resetForUnitTests();
+    vi.restoreAllMocks();
+  });
+
+  test('getPayloadFingerprint uses subtle.digest when available', async () => {
+    // Fake crypto with subtle.digest that returns a deterministic ArrayBuffer
+    const fakeDigest = async (_alg: string, _buf: ArrayBuffer) => {
+      // return 32-byte zero buffer
+      return new Uint8Array(32).buffer;
+    };
+    const fakeCrypto = {
+      getRandomValues: (buf: Uint8Array) => {
+        for (let i = 0; i < buf.length; i++) buf[i] = i & 0xff;
+        return buf;
+      },
+      subtle: { digest: fakeDigest },
+    } as unknown as Crypto;
+
+    vi.spyOn(state, 'ensureCrypto').mockResolvedValue(fakeCrypto);
+
+    const fp = await postMessage.__test_getPayloadFingerprint({ a: 1 });
+    expect(typeof fp).toBe('string');
+    expect(fp.length).toBeGreaterThan(0);
+  });
+
+  test('ensureFingerprintSalt fallback when ensureCrypto rejects', async () => {
+    const spy = vi.spyOn(state, 'ensureCrypto').mockRejectedValue(new Error('no crypto'));
+    // calling ensureFingerprintSalt should not throw in dev and should produce a Uint8Array
+    const salt = await postMessage.__test_ensureFingerprintSalt();
+    expect(salt).toBeInstanceOf(Uint8Array);
+    expect(salt.length).toBeGreaterThan(0);
+    spy.mockRestore();
+  });
+});

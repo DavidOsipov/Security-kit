@@ -965,11 +965,11 @@ export class SecureApiSigner {
           /* ignore */
         }
       }
-      
+
       // More efficient immutable update: copy and delete
       const newActivePorts = new Map(this.#state.activePorts);
       newActivePorts.delete(port);
-      
+
       // eslint-disable-next-line functional/immutable-data -- controlled state transition
       this.#state = this.#withActivePorts(newActivePorts);
     }

@@ -730,28 +730,30 @@ export function createSecurePostMessageListener(
 
   // Lock configuration at creation time to prevent TOCTOU attacks
   // Build canonical options object and freeze it to prevent mutation
-  const finalOptions = (optionsObject
-    ? { ...optionsObject, allowedOrigins: optionsObject.allowedOrigins ?? [] }
-    : {
-        allowedOrigins: allowedOrigins ?? [],
-        onMessage,
-        validate: validator,
-        allowOpaqueOrigin: false,
-        expectedSource: undefined,
-        allowExtraProps: false,
-        enableDiagnostics: false,
-        freezePayload: true,
-        wireFormat: "json",
-        deepFreezeNodeBudget: DEFAULT_DEEP_FREEZE_NODE_BUDGET,
-        allowTransferables: false,
-        allowTypedArrays: false,
-      }) as CreateSecurePostMessageListenerOptions;
+  const finalOptions = (
+    optionsObject
+      ? { ...optionsObject, allowedOrigins: optionsObject.allowedOrigins ?? [] }
+      : {
+          allowedOrigins: allowedOrigins ?? [],
+          onMessage,
+          validate: validator,
+          allowOpaqueOrigin: false,
+          expectedSource: undefined,
+          allowExtraProps: false,
+          enableDiagnostics: false,
+          freezePayload: true,
+          wireFormat: "json",
+          deepFreezeNodeBudget: DEFAULT_DEEP_FREEZE_NODE_BUDGET,
+          allowTransferables: false,
+          allowTypedArrays: false,
+        }
+  ) as CreateSecurePostMessageListenerOptions;
   Object.freeze(finalOptions);
 
   // Extract immutable locals to prevent runtime configuration changes
   const validatorLocal = finalOptions.validate;
   const expectedSourceLocal = finalOptions.expectedSource;
-  const allowExtraPropsLocal = finalOptions.allowExtraProps ?? false;
+  const allowExtraPropertiesLocal = finalOptions.allowExtraProps ?? false;
   const freezePayloadLocal = finalOptions.freezePayload !== false;
   const enableDiagnosticsLocal = !!finalOptions.enableDiagnostics;
   const wireFormatLocal = finalOptions.wireFormat ?? "json";
@@ -845,7 +847,7 @@ export function createSecurePostMessageListener(
     const cache = getDeepFreezeCache();
     const nodeBudget =
       finalOptions.deepFreezeNodeBudget ?? DEFAULT_DEEP_FREEZE_NODE_BUDGET;
-  if (cache) {
+    if (cache) {
       if (!cache.has(asObject)) {
         try {
           deepFreeze(asObject, nodeBudget);
@@ -906,7 +908,7 @@ export function createSecurePostMessageListener(
       const validationResult = _validatePayloadWithExtras(
         data,
         validatorLocal,
-        allowExtraPropsLocal,
+        allowExtraPropertiesLocal,
       );
       if (!validationResult.valid) {
         // Gate expensive fingerprinting behind diagnostics and a small budget to avoid DoS
@@ -920,7 +922,7 @@ export function createSecurePostMessageListener(
 
       // Freeze payload by default (immutable) with an identity cache to avoid
       // repeated work. Consumers can opt out with freezePayload: false.
-        if (freezePayloadLocal) freezePayloadIfNeeded(data);
+      if (freezePayloadLocal) freezePayloadIfNeeded(data);
       // Call the consumer in a small helper so this handler stays simple.
       invokeConsumerSafely(onMessage, data, event.origin);
     } catch (error: unknown) {

@@ -185,7 +185,7 @@ async function sha256Hex(input: string, timeoutMs = 1500): Promise<string> {
   // Tests may set __test_importOverride to a function that receives a module
   // specifier and returns a Promise resolving to a module-like object.
   // This is only used for testing and is intentionally opt-in.
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+
   const importer: (spec: string) => Promise<any> =
     (sha256Hex as any).__test_importOverride ?? ((s: string) => import(s));
 
@@ -579,9 +579,10 @@ export class DOMValidator {
   async #tryUpgradeCache(): Promise<void> {
     try {
       // Allow tests to override dynamic imports deterministically.
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+
       const importer: (spec: string) => Promise<any> =
-        (DOMValidator as any).__test_importOverride ?? ((s: string) => import(s));
+        (DOMValidator as any).__test_importOverride ??
+        ((s: string) => import(s));
       const module_ = await promiseWithTimeout(
         importer("lru-cache"),
         1200,
@@ -745,9 +746,10 @@ export class DOMValidator {
     void (async () => {
       try {
         // Allow tests to override dynamic imports deterministically.
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+
         const importer: (spec: string) => Promise<any> =
-          (DOMValidator as any).__test_importOverride ?? ((s: string) => import(s));
+          (DOMValidator as any).__test_importOverride ??
+          ((s: string) => import(s));
         const module_ = await promiseWithTimeout(
           importer("css-what"),
           800,
@@ -1281,7 +1283,6 @@ export function getDefaultDOMValidator(): DOMValidator {
 // can exercise both the creation and the cached-return branches deterministically.
 // This is intentionally test-only and should not be used in application code.
 export function __test_resetDefaultValidatorForUnitTests(): void {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   (defaultInstance as any) = undefined;
 }
 
@@ -1305,4 +1306,3 @@ export {
   removeQuotedSegmentsSafely,
   extractAttributeSegments,
 };
-
