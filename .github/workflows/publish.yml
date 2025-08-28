@@ -54,7 +54,7 @@ jobs:
         with:
           args: verify-blob --certificate-output sbom.spdx.json.crt sbom.spdx.json sig:sbom.spdx.json.sig || true
       - name: Upload SBOM signatures to release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
           files: sbom.json.sig sbom.spdx.json.sig
         env:
