@@ -265,7 +265,8 @@ export class SecureApiSigner {
   readonly #pendingReservations = 0;
   readonly #reservationTokens = new Set<number>();
   readonly #nextReservationId = 1;
-  // no double-bookkeeping counter; concurrency is enforced via #activePorts size
+  // #pendingReservations provides synchronous slot reservation to prevent races under concurrent sign() calls.
+  // Concurrency is enforced via the size of #state.activePorts after reservation is converted into an active port.
   readonly #resolveReady!: () => void;
   readonly #rejectReady!: (reason: unknown) => void;
   readonly #destroyAckTimeoutMs: number;
@@ -964,14 +965,11 @@ export class SecureApiSigner {
           /* ignore */
         }
       }
-      // immutable transition: construct a new map without the port
-      const newActivePorts = new Map<MessagePort, ActivePortMeta>();
-      this.#state.activePorts.forEach((meta, currentPort) => {
-        if (currentPort !== port) {
-          // eslint-disable-next-line functional/immutable-data -- Controlled Map.set for O(1) performance vs O(N) spread reconstruction. Encapsulated within private method.
-          newActivePorts.set(currentPort, meta);
-        }
-      });
+      
+      // More efficient immutable update: copy and delete
+      const newActivePorts = new Map(this.#state.activePorts);
+      newActivePorts.delete(port);
+      
       // eslint-disable-next-line functional/immutable-data -- controlled state transition
       this.#state = this.#withActivePorts(newActivePorts);
     }

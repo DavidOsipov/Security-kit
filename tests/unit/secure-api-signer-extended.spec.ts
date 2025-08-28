@@ -210,7 +210,7 @@ describe('SecureApiSigner - Extended Canonical Format & Security Features', () =
     });
 
     it('includes all canonical parts in correct order', async () => {
-      const secret = Buffer.from('test-secret-for-canonical-check');
+      const secret = Buffer.from('test-secret-canonical-check-32bytes-owasp-compliant-strength');
       const kid = 'canonical-test';
       
   const signer = await SecureApiSigner.create({ secret, kid, workerUrl: new URL('./mock-worker.js', import.meta.url), integrity: 'none', wipeProvidedSecret: false });
@@ -244,7 +244,7 @@ describe('SecureApiSigner - Extended Canonical Format & Security Features', () =
     });
 
     it('handles empty/missing context fields correctly', async () => {
-      const secret = Buffer.from('test-secret-empty-context');
+      const secret = Buffer.from('test-secret-empty-context-32bytes-owasp-compliant-key');
       
   const signer = await SecureApiSigner.create({ secret, workerUrl: new URL('./mock-worker.js', import.meta.url), integrity: 'none', wipeProvidedSecret: false });
       
@@ -417,7 +417,7 @@ describe('Server-side verification - Security Constitution Compliance', () => {
 
   describe('Input Validation (Positive Validation)', () => {
     const validInput: VerifyExtendedInput = {
-        secret: Buffer.from('test-secret'),
+        secret: Buffer.from('test-secret-validation-32bytes-owasp-compliant-strength'),
         payload: 'test-payload',
         nonce: Buffer.from(getSecureRandomBytesSync(16)).toString('base64'),
         timestamp: Date.now(),
@@ -430,26 +430,26 @@ describe('Server-side verification - Security Constitution Compliance', () => {
     it('validates nonce format', async () => {
       const invalidInput = { ...validInput, nonce: 'invalid-nonce!' };
       await expect(verifyApiRequestSignature(invalidInput, nonceStore))
-        .rejects.toThrow('nonce must be base64-encoded');
+        .rejects.toThrow('[security-kit] nonce must be standard base64');
     });
 
     it('validates signature format', async () => {
       const invalidInput = { ...validInput, signatureBase64: 'invalid-signature!' };
       await expect(verifyApiRequestSignature(invalidInput, nonceStore))
-        .rejects.toThrow('signatureBase64 must be base64-encoded');
+        .rejects.toThrow('[security-kit] signatureBase64 must be base64 or base64url');
     });
 
     it('validates HTTP method', async () => {
       const invalidInput = { ...validInput, method: 'INVALID_METHOD_NAME' };
       // Implementation throws a generic InvalidParameterError with message 'Invalid method'
       await expect(verifyApiRequestSignature(invalidInput, nonceStore))
-        .rejects.toThrow('Invalid method');
+        .rejects.toThrow('[security-kit] method must be a valid HTTP method');
     });
 
     it('validates path format', async () => {
       const invalidInput = { ...validInput, path: 'not-a-path' };
       await expect(verifyApiRequestSignature(invalidInput, nonceStore))
-        .rejects.toThrow('path contains invalid characters');
+        .rejects.toThrow('[security-kit] path must start with \'/\'');
     });
 
     it('validates kid format', async () => {
@@ -474,7 +474,7 @@ describe('Server-side verification - Security Constitution Compliance', () => {
 
   describe('Timestamp Validation', () => {
     it('rejects timestamps outside acceptable window', async () => {
-      const secret = Buffer.from('test-secret');
+      const secret = Buffer.from('test-secret-timestamp-32bytes-owasp-compliant-key');
         const oldTimestamp = Date.now() - (5 * 60 * 1000) - 1000; // 5 minutes + 1s ago (exceeds skew)
       
       const input: VerifyExtendedInput = {
@@ -491,7 +491,7 @@ describe('Server-side verification - Security Constitution Compliance', () => {
     });
 
     it('accepts timestamps within acceptable window', async () => {
-      const secret = Buffer.from('test-secret');
+      const secret = Buffer.from('test-secret-timestamp-32bytes-owasp-compliant-key');
       const timestamp = Date.now() - (30 * 1000); // 30 seconds ago
   const nonce = Buffer.from(getSecureRandomBytesSync(16)).toString('base64');
       const kid = 'test';
@@ -518,7 +518,7 @@ describe('Server-side verification - Security Constitution Compliance', () => {
 
   describe('Replay Attack Protection', () => {
     it('rejects reused nonces', async () => {
-      const secret = Buffer.from('test-secret');
+      const secret = Buffer.from('test-secret-replay-protection-32bytes-owasp-compliant');
       const timestamp = Date.now();
   const nonce = Buffer.from(getSecureRandomBytesSync(16)).toString('base64');
       const kid = 'test';
@@ -550,7 +550,7 @@ describe('Server-side verification - Security Constitution Compliance', () => {
 
   describe('Signature Verification', () => {
     it('rejects invalid signatures', async () => {
-      const secret = Buffer.from('test-secret');
+      const secret = Buffer.from('test-secret-signature-32bytes-owasp-compliant-key');
       const timestamp = Date.now();
   const nonce = Buffer.from(getSecureRandomBytesSync(16)).toString('base64');
       const kid = 'test';
@@ -572,7 +572,7 @@ describe('Server-side verification - Security Constitution Compliance', () => {
   describe('Nonce Store Interface Compliance', () => {
     it('requires nonce store implementation', async () => {
       const input: VerifyExtendedInput = {
-        secret: Buffer.from('test'),
+        secret: Buffer.from('test-secret-nonce-store-32bytes-owasp-compliant-key'),
         payload: 'test',
   nonce: Buffer.from(getSecureRandomBytesSync(16)).toString('base64'),
         timestamp: Date.now(),

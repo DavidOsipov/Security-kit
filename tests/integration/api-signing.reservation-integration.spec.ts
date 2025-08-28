@@ -59,7 +59,7 @@ afterEach(() => { (globalThis as any).Worker = origWorker; });
 test('reservation prevents race conditions in multi-threaded environment', async () => {
   const key = 'race-condition-key';
   // Create an initial signer to reserve the key
-  const secret = new Uint8Array(Buffer.from('test-key-xyz'));
+  const secret = new Uint8Array(Buffer.from('test-key-32bytes-owasp-compliant-strength-256bit'));
   const signer1 = await SecureApiSigner.create({ secret, workerUrl: new URL('./mock-worker.js', import.meta.url), integrity: 'none' });
 
   // Concurrent attempts to create a signer with same key should fail.

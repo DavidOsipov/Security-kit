@@ -4,6 +4,13 @@
 
 const DEFAULT_CHUNK = 8192;
 
+// Normalize base64url to standard base64 and fix padding
+function normalizeBase64(input: string): string {
+  const s = input.replace(/-/g, "+").replace(/_/g, "/");
+  const padLen = (4 - (s.length % 4)) % 4;
+  return s + "=".repeat(padLen);
+}
+
 export function bytesToBase64(
   bytes: Uint8Array,
   chunkSize = DEFAULT_CHUNK,
@@ -33,9 +40,10 @@ export function bytesToBase64(
 }
 
 export function base64ToBytes(b64: string): Uint8Array {
+  const normalized = normalizeBase64(b64.trim());
   try {
     if (typeof atob === "function") {
-      const bin = atob(b64);
+      const bin = atob(normalized);
       const length = bin.length;
       const out = new Uint8Array(length);
       for (let index = 0; index < length; index++)
@@ -50,7 +58,7 @@ export function base64ToBytes(b64: string): Uint8Array {
     // @ts-ignore
     const BufferCtor = (globalThis as any).Buffer;
     if (BufferCtor && typeof BufferCtor.from === "function") {
-      const buf = BufferCtor.from(b64, "base64");
+      const buf = BufferCtor.from(normalized, "base64");
       return new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength);
     }
   } catch {
@@ -61,7 +69,11 @@ export function base64ToBytes(b64: string): Uint8Array {
 }
 
 export function isLikelyBase64(s: string): boolean {
-  return /^[A-Z0-9+/]+={0,2}$/i.test(s);
+  // Accept base64 and base64url chars; allow unpadded base64url but ensure padding would make length % 4 === 0
+  if (typeof s !== "string" || s.length === 0) return false;
+  if (!/^[A-Za-z0-9+/=_-]+$/.test(s)) return false;
+  const normalized = normalizeBase64(s);
+  return normalized.length % 4 === 0 && normalized.length >= 4; // Minimum valid base64 is 4 chars
 }
 
 async function getSubtle(): Promise<SubtleCrypto> {

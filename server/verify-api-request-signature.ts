@@ -21,10 +21,12 @@ import {
   InvalidParameterError, 
   TimestampError, 
   ReplayAttackError,
-  SignatureVerificationError 
+  SignatureVerificationError,
+  InvalidConfigurationError
 } from "../src/errors.js";
 import { SHARED_ENCODER } from "../src/encoding.js";
 import { safeStableStringify } from "../src/canonical.js";
+import { base64ToBytes, bytesToBase64, isLikelyBase64 } from "../src/encoding-utils.js";
 
 /** Input shape expected by verification with positive validation */
 export type VerifyExtendedInput = {
@@ -43,6 +45,20 @@ export type VerifyExtendedInput = {
 const DEFAULT_SKEW_MS = 120_000; // 2 minutes — conservative default
 const NONCE_TTL_MS = 300_000; // 5 minutes — shorter replay window by default
 const DEFAULT_RESERVATION_TTL_MS = 10_000; // 10s provisional reservation to mitigate nonce-store DoS
+
+// Precompiled regex patterns for performance
+const NONCE_BASE64_RE = /^[A-Za-z0-9+/]+={0,2}$/;
+const METHOD_RE = /^[A-Z]+$/;
+const PATH_RE = /^\/[\w\/.%-]*$/;
+const KID_RE = /^[a-zA-Z0-9._-]+$/;
+
+// Security limits
+const MAX_NONCE_LENGTH = 256;
+const MAX_SIGNATURE_LENGTH = 512;
+const MAX_PATH_LENGTH = 2048;
+const MAX_METHOD_LENGTH = 20;
+const MIN_SECRET_BYTES = 16; // recommended >= 32 bytes
+const MAX_SECRET_BYTES = 4096;
 
 /**
  * Interface for nonce storage backends.
@@ -191,7 +207,7 @@ function validateVerifyInput(input: VerifyExtendedInput): void {
     throw new InvalidParameterError("Invalid input object");
   }
 
-  // Secret validation
+  // Secret quick type check (full length validation occurs after normalization)
   const { secret } = input;
   if (!secret) {
     throw new InvalidParameterError("Missing secret");
@@ -212,15 +228,15 @@ function validateVerifyInput(input: VerifyExtendedInput): void {
     throw new InvalidParameterError("Secret must be string, ArrayBuffer, or Uint8Array");
   }
 
-  // Nonce validation (positive validation)
+  // Nonce validation (positive validation) - must be standard base64 (client produces this)
   if (typeof input.nonce !== "string" || input.nonce.length === 0) {
     throw new InvalidParameterError("nonce must be a non-empty string");
   }
-  if (input.nonce.length > 256) {
+  if (input.nonce.length > MAX_NONCE_LENGTH) {
     throw new InvalidParameterError("nonce too long");
   }
-  if (!/^[A-Za-z0-9+/]+={0,2}$/.test(input.nonce)) {
-    throw new InvalidParameterError("nonce must be base64-encoded");
+  if (!NONCE_BASE64_RE.test(input.nonce)) {
+    throw new InvalidParameterError("nonce must be standard base64");
   }
 
   // Timestamp validation
@@ -251,33 +267,36 @@ function validateVerifyInput(input: VerifyExtendedInput): void {
     throw new InvalidParameterError('Invalid payload');
   }
 
-  // Signature validation
+  // Signature validation (accept base64 or base64url)
   if (typeof input.signatureBase64 !== "string" || input.signatureBase64.length === 0) {
     throw new InvalidParameterError("signatureBase64 must be a non-empty string");
   }
-  if (input.signatureBase64.length > 512) {
+  if (input.signatureBase64.length > MAX_SIGNATURE_LENGTH) {
     throw new InvalidParameterError("Signature too long");
   }
-  if (!/^[A-Za-z0-9+/]+={0,2}$/.test(input.signatureBase64)) {
-    throw new InvalidParameterError("signatureBase64 must be base64-encoded");
+  if (!isLikelyBase64(input.signatureBase64)) {
+    throw new InvalidParameterError("signatureBase64 must be base64 or base64url");
   }
 
   // Optional fields validation (allowlist approach)
   if (input.method !== undefined) {
-    if (typeof input.method !== "string" || input.method.length > 16) {
+    if (typeof input.method !== "string" || input.method.length > MAX_METHOD_LENGTH) {
       throw new InvalidParameterError("Invalid method");
     }
-    if (!/^[A-Z]+$/.test(input.method)) {
+    if (!METHOD_RE.test(input.method.toUpperCase())) {
       throw new InvalidParameterError("method must be a valid HTTP method");
     }
   }
 
   if (input.path !== undefined) {
-    if (typeof input.path !== "string" || input.path.length > 2048) {
+    if (typeof input.path !== "string" || input.path.length > MAX_PATH_LENGTH) {
       throw new InvalidParameterError("Invalid path");
     }
-    if (!/^\//.test(input.path)) {
-      throw new InvalidParameterError("path contains invalid characters");
+    if (!input.path.startsWith("/")) {
+      throw new InvalidParameterError("path must start with '/'");
+    }
+    if (input.path.includes("..") || input.path.includes("//")) {
+      throw new InvalidParameterError("path traversal patterns are not allowed");
     }
   }
 
@@ -285,8 +304,8 @@ function validateVerifyInput(input: VerifyExtendedInput): void {
     if (typeof input.bodyHash !== "string" || input.bodyHash.length > 256) {
       throw new InvalidParameterError("Invalid bodyHash");
     }
-    if (input.bodyHash.length > 0 && !/^[A-Za-z0-9+/]+={0,2}$/.test(input.bodyHash)) {
-      throw new InvalidParameterError("bodyHash must be base64");
+    if (input.bodyHash.length > 0 && !isLikelyBase64(input.bodyHash)) {
+      throw new InvalidParameterError("bodyHash must be base64 or base64url");
     }
   }
 
@@ -294,7 +313,7 @@ function validateVerifyInput(input: VerifyExtendedInput): void {
     if (typeof input.kid !== "string" || input.kid.length === 0 || input.kid.length > 128) {
       throw new InvalidParameterError("Invalid kid");
     }
-    if (!/^[a-zA-Z0-9._-]+$/.test(input.kid)) {
+    if (!KID_RE.test(input.kid)) {
       throw new InvalidParameterError("kid contains invalid characters");
     }
   }
@@ -303,23 +322,31 @@ function validateVerifyInput(input: VerifyExtendedInput): void {
 // Normalize secret to Uint8Array for HMAC operations
 function normalizeSecret(secret: ArrayBuffer | Uint8Array | string): Uint8Array {
   if (typeof secret === "string") {
-    // Assume base64-encoded secret
-    try {
-      const binary = atob(secret);
-      const bytes = new Uint8Array(binary.length);
-      for (let i = 0; i < binary.length; i++) {
-        bytes[i] = binary.charCodeAt(i);
-      }
-      return bytes;
-    } catch {
-      // If not base64, treat as UTF-8
-      return SHARED_ENCODER.encode(secret);
+    // If it looks like base64, decode; otherwise treat as UTF-8
+    if (isLikelyBase64(secret)) {
+      return base64ToBytes(secret);
     }
+    return SHARED_ENCODER.encode(secret);
   }
   if (secret instanceof ArrayBuffer) {
     return new Uint8Array(secret);
   }
-  return secret;
+  if (ArrayBuffer.isView(secret)) {
+    return new Uint8Array(secret.buffer, secret.byteOffset, secret.byteLength);
+  }
+  throw new InvalidParameterError("Unsupported secret type");
+}
+
+// Constant-time compare for bytes (length-influenced but avoids early return)
+function timingSafeEqualBytes(a: Uint8Array, b: Uint8Array): boolean {
+  const len = Math.max(a.length, b.length);
+  let diff = a.length ^ b.length;
+  for (let i = 0; i < len; i++) {
+    const av = a[i] ?? 0;
+    const bv = b[i] ?? 0;
+    diff |= av ^ bv;
+  }
+  return diff === 0;
 }
 
 // Robust bytes → base64 (browser or Node)
@@ -340,38 +367,44 @@ function bytesToBase64(bytes: Uint8Array): string {
   throw new Error("No base64 encoding available");
 }
 
-// Compute HMAC-SHA256 (cross-platform)
+// Compute HMAC-SHA256 (cross-platform, ESM-safe)
 async function computeHmacSha256(keyBytes: Uint8Array, messageBytes: Uint8Array): Promise<Uint8Array> {
-  if (typeof crypto !== "undefined" && crypto.subtle) {
-    // Web Crypto API: copy into fresh ArrayBuffers to avoid SAB typing issues
+  const subtle = (globalThis as unknown as { crypto?: { subtle?: SubtleCrypto } }).crypto?.subtle;
+  if (subtle) {
+    // Copy into fresh buffers to satisfy typed array semantics
     const keyCopy = new Uint8Array(keyBytes.length);
     keyCopy.set(keyBytes);
     const msgCopy = new Uint8Array(messageBytes.length);
     msgCopy.set(messageBytes);
-    const key = await crypto.subtle.importKey(
-      "raw",
-      keyCopy,
-      { name: "HMAC", hash: { name: "SHA-256" } },
-      false,
-      ["sign"],
-    );
-    const signature = await crypto.subtle.sign("HMAC", key, msgCopy);
-    return new Uint8Array(signature);
-  }
-  
-  // Node.js crypto fallback
-  if (typeof require !== "undefined") {
     try {
-      const crypto = require("crypto");
-      const hmac = crypto.createHmac("sha256", Buffer.from(keyBytes));
-      hmac.update(Buffer.from(messageBytes));
-      return Uint8Array.from(hmac.digest());
-    } catch {
-      throw new Error("No HMAC implementation available");
+      const key = await subtle.importKey(
+        "raw",
+        keyCopy,
+        { name: "HMAC", hash: { name: "SHA-256" } },
+        false,
+        ["sign"],
+      );
+      const signature = await subtle.sign("HMAC", key, msgCopy);
+      return new Uint8Array(signature);
+    } finally {
+      // Best-effort wipe of keyCopy
+      for (let i = 0; i < keyBytes.length; i++) keyCopy[i] = 0;
     }
   }
-  
-  throw new Error("No crypto implementation available");
+
+  // Node.js fallback (ESM-safe)
+  try {
+    const nodeCrypto = await import("node:crypto");
+    const hmac = nodeCrypto.createHmac("sha256", Buffer.from(keyBytes));
+    hmac.update(Buffer.from(messageBytes));
+    return Uint8Array.from(hmac.digest());
+  } catch {
+    // Older Node alias (in case node:crypto is unavailable)
+    const nodeCrypto = await import("crypto");
+    const hmac = (nodeCrypto as any).createHmac("sha256", Buffer.from(keyBytes));
+    hmac.update(Buffer.from(messageBytes));
+    return Uint8Array.from(hmac.digest());
+  }
 }
 
 /**
@@ -380,14 +413,13 @@ async function computeHmacSha256(keyBytes: Uint8Array, messageBytes: Uint8Array)
  * SECURITY FEATURES:
  * - Uses shared canonicalization (same as client) to ensure signature consistency
  * - Atomic nonce operations prevent replay attacks in distributed systems
- * - Timing-safe signature comparison prevents timing attacks
+ * - Constant-time byte comparison prevents timing attacks
  * - Comprehensive input validation with positive validation
- * - Fail-closed behavior: returns false on any error
  * 
- * @param input - Verification input with signature, nonce, payload, etc.
- * @param nonceStore - Nonce storage implementation (must be atomic for production)
- * @param options - Optional configuration (max skew, nonce TTL)
- * @returns Promise resolving to true if signature is valid, false otherwise
+ * Throws typed errors on any failure:
+ * - InvalidParameterError | TimestampError | ReplayAttackError | SignatureVerificationError | InvalidConfigurationError
+ * 
+ * @returns Promise resolving to true if signature is valid (otherwise throws)
  */
 export async function verifyApiRequestSignature(
   input: VerifyExtendedInput,
@@ -411,6 +443,12 @@ export async function verifyApiRequestSignature(
     throw new TimestampError('timestamp out of reasonable range');
   }
 
+  // Normalize secret and enforce length constraints
+  const keyBytes = normalizeSecret(secret);
+  if (keyBytes.length < MIN_SECRET_BYTES || keyBytes.length > MAX_SECRET_BYTES) {
+    throw new InvalidParameterError("Secret length is out of bounds");
+  }
+
   // Shared canonicalization for payload (match client behaviour)
   const payloadString = safeStableStringify(payload);
 
@@ -425,63 +463,49 @@ export async function verifyApiRequestSignature(
     kid ?? "",
   ];
   const canonical = canonicalParts.join(".");
-
-  const keyBytes = normalizeSecret(secret);
   const messageBytes = SHARED_ENCODER.encode(canonical);
 
   // Atomic nonce reservation first, if supported
   const kidForStore = kid ?? "default";
-  let reserved = false;
-  const reserveTtl = Math.min(DEFAULT_RESERVATION_TTL_MS, Math.max(1000, Math.floor(nonceTtl / 10)));
-  if (typeof (nonceStore as INonceStore).reserve === "function") {
-    reserved = await (nonceStore as INonceStore).reserve!(kidForStore, nonce, reserveTtl);
-    if (!reserved) throw new ReplayAttackError('nonce already used');
+  const reserveTtl = Math.min(
+    DEFAULT_RESERVATION_TTL_MS,
+    Math.max(1000, Math.floor(nonceTtl / 10)),
+  );
+
+  if (typeof nonceStore.reserve === "function") {
+    const ok = await nonceStore.reserve(kidForStore, nonce, reserveTtl);
+    if (!ok) throw new ReplayAttackError("Nonce already used");
   } else if (typeof nonceStore.storeIfNotExists === "function") {
-    reserved = await nonceStore.storeIfNotExists(kidForStore, nonce, reserveTtl);
-    if (!reserved) throw new ReplayAttackError('nonce already used');
+    const ok = await nonceStore.storeIfNotExists(kidForStore, nonce, reserveTtl);
+    if (!ok) throw new ReplayAttackError("Nonce already used");
   } else {
-    // Fallback (non-atomic): check existing
-    if (await nonceStore.has(kidForStore, nonce)) {
-      throw new ReplayAttackError('nonce already used');
-    }
+    // No atomic method available: insecure to proceed
+    throw new InvalidConfigurationError(
+      "NonceStore must implement reserve() or storeIfNotExists() for atomic replay protection",
+    );
   }
 
-  // Compute HMAC and compare in constant time
+  // Compute HMAC and compare in constant time (bytes)
   const mac = await computeHmacSha256(keyBytes, messageBytes);
-  const computedB64 = bytesToBase64(mac);
-
-  const isEqual = await secureCompareAsync(signatureBase64, computedB64);
-  if (!isEqual) {
-    // If we reserved atomically, optionally delete reservation (best-effort)
-    try {
-      if (reserved && typeof nonceStore.delete === "function") {
-        await nonceStore.delete(kidForStore, nonce);
-      }
-    } catch {
-      // Keep reservation to throttle repeated bad attempts
-    }
-    throw new SignatureVerificationError('signature mismatch');
+  const sigBytes = base64ToBytes(signatureBase64);
+  const equal = timingSafeEqualBytes(mac, sigBytes);
+  if (!equal) {
+    // Best-effort cleanup: keep reservation by default to throttle repeated bad attempts.
+    // Optionally delete if your operational policy prefers allowing immediate retry.
+    throw new SignatureVerificationError("Signature mismatch");
   }
 
-  // Record nonce if we did not atomically reserve
-  if (!reserved) {
+  // Finalize nonce to full TTL if reserve/finalize exists
+  if (typeof nonceStore.finalize === "function") {
     try {
-      await nonceStore.store(kidForStore, nonce, nonceTtl);
-    } catch (err) {
-      // If we cannot persist the nonce, treat as a verification failure
-      throw new InvalidParameterError('Failed to persist nonce');
+      await nonceStore.finalize(kidForStore, nonce, nonceTtl);
+    } catch {
+      // If finalize fails, fail closed (prevents replay window)
+      throw new ReplayAttackError("Failed to persist nonce");
     }
   } else {
-    // Finalize reservation to full TTL where supported
-    try {
-      if (typeof (nonceStore as INonceStore).finalize === "function") {
-        await (nonceStore as INonceStore).finalize!(kidForStore, nonce, nonceTtl);
-      } else if (typeof nonceStore.store === "function") {
-        await nonceStore.store(kidForStore, nonce, nonceTtl);
-      }
-    } catch {
-      // Non-fatal: the nonce remains reserved for a short period; better throttle than allow replay
-    }
+    // If we used storeIfNotExists (with full TTL) there's nothing to finalize.
+    // In stores that only reserved to short TTL, ensure your implementation extends TTL on success.
   }
 
   return true;
@@ -489,6 +513,22 @@ export async function verifyApiRequestSignature(
 
 // Backward compatibility alias
 export { verifyApiRequestSignature as verifyApiRequestSignatureExtended };
+
+/**
+ * Safe wrapper that returns boolean without throwing typed errors.
+ * Use this when you do not want verification failure reasons to leak to callers.
+ */
+export async function verifyApiRequestSignatureSafe(
+  input: VerifyExtendedInput,
+  nonceStore: INonceStore,
+  options?: { maxSkewMs?: number; nonceTtlMs?: number },
+): Promise<boolean> {
+  try {
+    return await verifyApiRequestSignature(input, nonceStore, options);
+  } catch {
+    return false;
+  }
+}
 
 /**
  * Production-friendly wrapper that retrieves the secret material via a key provider based on kid.

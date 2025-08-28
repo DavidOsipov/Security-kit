@@ -120,7 +120,7 @@ describe('SecureApiSigner (client) - basic flows', () => {
   });
 
   it('enforces maxPendingRequests on the client', async () => {
-  const key = new Uint8Array(Buffer.from('test-key-xx'));
+  const key = new Uint8Array(Buffer.from('test-key-16-bytes-OK'));
   const signer = await SecureApiSigner.create({ secret: key, maxPendingRequests: 2, workerUrl: new URL('./mock-worker.js', import.meta.url), integrity: 'none' });
 
     // start two long-running sign calls (slow worker to ensure overlap)

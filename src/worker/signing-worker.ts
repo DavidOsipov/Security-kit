@@ -297,22 +297,13 @@ async function doSign(
     return;
   }
 
-  try {
-    const data = SHARED_ENCODER.encode(canonical);
-    const sig = await crypto.subtle.sign("HMAC", hmacKey, data);
-    const b64 = bytesToBase64(new Uint8Array(sig));
-    const message = { type: "signed", requestId, signature: b64 } as const;
-    if (replyPort) replyPort.postMessage(message);
-    else postMessage(message);
-  } catch {
-    const message = {
-      type: "error",
-      requestId,
-      reason: "sign-failed",
-    } as const;
-    if (replyPort) replyPort.postMessage(message);
-    else postMessage(message);
-  }
+  // Let the caller handle crypto exceptions
+  const data = SHARED_ENCODER.encode(canonical);
+  const sig = await crypto.subtle.sign("HMAC", hmacKey, data);
+  const b64 = bytesToBase64(new Uint8Array(sig));
+  const message = { type: "signed", requestId, signature: b64 } as const;
+  if (replyPort) replyPort.postMessage(message);
+  else postMessage(message);
 }
 
 // --- Utility Functions & Type Guards ---

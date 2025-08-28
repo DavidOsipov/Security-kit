@@ -27,7 +27,7 @@ beforeEach(() => {
 });
 
 test('verify succeeds for valid signature and fresh nonce', async () => {
-  const secretRaw = Buffer.from('my-secret-key-which-is-long-enough');
+  const secretRaw = Buffer.from('my-secret-key-32bytes-owasp-compliant-strength-256bit');
   const secret = secretRaw.toString('base64');
   const timestamp = Date.now();
   const nonce = Buffer.from(getSecureRandomBytesSync(16)).toString('base64');
@@ -51,7 +51,7 @@ test('verify succeeds for valid signature and fresh nonce', async () => {
 });
 
 test('verify fails for wrong signature', async () => {
-  const secretRaw = Buffer.from('secret-A');
+  const secretRaw = Buffer.from('secret-A-32bytes-owasp-compliant-strength-256bit-key');
   const secret = secretRaw.toString('base64');
   const timestamp = Date.now();
   const nonce = Buffer.from(getSecureRandomBytesSync(16)).toString('base64');
@@ -60,7 +60,7 @@ test('verify fails for wrong signature', async () => {
   const payloadString = safeStableStringify(payload);
   const canonical = [String(timestamp), nonce, '', '', '', payloadString, ''].join('.');
 
-  const badSignature = hmacSha256Base64(Buffer.from('other-secret'), canonical);
+  const badSignature = hmacSha256Base64(Buffer.from('other-secret-32bytes-owasp-compliant-strength'), canonical);
 
   const input: VerifyExtendedInput = {
     secret,
@@ -80,7 +80,7 @@ test('verify fails for wrong signature', async () => {
 });
 
 test('verify fails for replayed nonce (atomic store simulated)', async () => {
-  const secretRaw = Buffer.from('k');
+  const secretRaw = Buffer.from('k-secret-32bytes-owasp-compliant-strength');
   const secret = secretRaw.toString('base64');
   const timestamp = Date.now();
   const nonce = Buffer.from(getSecureRandomBytesSync(16)).toString('base64');
@@ -104,11 +104,11 @@ test('verify fails for replayed nonce (atomic store simulated)', async () => {
 
   // Second attempt with same nonce should throw ReplayAttackError
   await expect(verifyApiRequestSignature(input, nonceStore, { maxSkewMs: 60_000 }))
-    .rejects.toThrow('nonce already used');
+    .rejects.toThrow('[security-kit] Nonce already used');
 });
 
 test('verify fails for timestamp outside skew window', async () => {
-  const secretRaw = Buffer.from('k2');
+  const secretRaw = Buffer.from('k2-secret-32bytes-owasp-compliant-strength');
   const secret = secretRaw.toString('base64');
   const timestamp = Date.now() - 10 * 60_000; // 10 minutes ago
   const nonce = Buffer.from(getSecureRandomBytesSync(16)).toString('base64');

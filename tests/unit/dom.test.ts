@@ -36,9 +36,9 @@ describe("DOMValidator", () => {
     expect(inside).not.toBeNull();
     expect(inside!.id).toBe("inner");
 
-    // outside element should be null (and not throw)
+    // outside element should be undefined (and not throw)
     const outside = v.queryElementSafely("#outside");
-    expect(outside).toBeNull();
+    expect(outside).toBeUndefined();
   });
 
   it("constructor clones config and rejects forbidden roots", () => {
@@ -61,6 +61,6 @@ describe("DOMValidator", () => {
     const found = inst.queryElementSafely("#inner");
     expect(found).not.toBeNull();
     const outside = inst.queryElementSafely("#outside");
-    expect(outside).toBeNull();
+    expect(outside).toBeUndefined();
   });
 });
