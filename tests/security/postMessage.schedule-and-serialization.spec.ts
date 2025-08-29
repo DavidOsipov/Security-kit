@@ -26,10 +26,15 @@ test("scheduleDiagnostic handles subtle.digest rejection gracefully", async () =
 
   const ev = new MessageEvent("message", { data: JSON.stringify({ a: "x" }), origin: "http://localhost" });
   const spy = vi.spyOn(console, "warn").mockImplementation(() => {});
-  window.dispatchEvent(ev as any);
+  // Enable fake timers before dispatch so async fingerprint/diagnostic runs under mocked timers
+  vi.useFakeTimers();
+  try {
+    window.dispatchEvent(ev as any);
+    await vi.runAllTimersAsync();
+  } finally {
+    vi.useRealTimers();
+  }
 
-  // Allow async fingerprint attempt to run
-  await new Promise((r) => setTimeout(r, 50));
   // Should have logged, but without crashing; at least one warn call expected
   expect(spy).toHaveBeenCalled();
   listener.destroy();
@@ -58,7 +63,12 @@ test("listener onMessage async errors are sanitized and logged without leaking s
   const spy = vi.spyOn(console, "error").mockImplementation(() => {});
   window.dispatchEvent(ev as any);
   // allow async handler to run
-  await new Promise((r) => setTimeout(r, 20));
+    vi.useFakeTimers();
+    try {
+      await vi.runAllTimersAsync();
+    } finally {
+      vi.useRealTimers();
+    }
   expect(spy).toHaveBeenCalled();
   listener.destroy();
 });

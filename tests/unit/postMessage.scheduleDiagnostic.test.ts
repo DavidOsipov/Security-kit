@@ -1,5 +1,11 @@
-import { test, expect, vi } from 'vitest';
-import { createSecurePostMessageListener } from '../../src/postMessage';
+import { test, expect, vi, beforeEach, afterEach } from 'vitest';
+
+beforeEach(() => {
+  vi.useFakeTimers();
+  vi.resetModules();
+});
+
+afterEach(() => vi.useRealTimers());
 import * as state from '../../src/state';
 import { environment } from '../../src/environment';
 
@@ -11,7 +17,8 @@ test('scheduleDiagnostic handles ensureCrypto rejection in development', async (
 
     const spy = vi.spyOn(state as any, 'ensureCrypto').mockRejectedValueOnce(new Error('no crypto'));
 
-    const listener = createSecurePostMessageListener(
+  const postMessage = await import('../../src/postMessage');
+  const listener = postMessage.createSecurePostMessageListener(
       {
         allowedOrigins: [location.origin],
         onMessage: () => {},
@@ -24,8 +31,8 @@ test('scheduleDiagnostic handles ensureCrypto rejection in development', async (
     const ev = new MessageEvent('message', { data: JSON.stringify({ x: 1 }), origin: location.origin, source: window as any });
     window.dispatchEvent(ev);
 
-    // wait for async computeAndLog to run
-    await new Promise((r) => setTimeout(r, 50));
+  // wait for async computeAndLog to run
+  await vi.runAllTimersAsync();
 
     listener.destroy();
     spy.mockRestore();
@@ -54,7 +61,8 @@ test('scheduleDiagnostic sets diagnostics disabled flag when ensureCrypto reject
     }
 
     const spy = vi.spyOn(state as any, 'ensureCrypto').mockRejectedValueOnce(new Error('no crypto'));
-    const listener = createSecurePostMessageListener(
+  const postMessage = await import('../../src/postMessage');
+  const listener = postMessage.createSecurePostMessageListener(
       {
         allowedOrigins: [location.origin],
         onMessage: () => {},
@@ -66,7 +74,7 @@ test('scheduleDiagnostic sets diagnostics disabled flag when ensureCrypto reject
     const ev = new MessageEvent('message', { data: JSON.stringify({ x: 2 }), origin: location.origin, source: window as any });
     window.dispatchEvent(ev);
 
-    await new Promise((r) => setTimeout(r, 50));
+  await vi.runAllTimersAsync();
 
     listener.destroy();
     spy.mockRestore();

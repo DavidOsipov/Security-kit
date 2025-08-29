@@ -33,7 +33,15 @@ describe('ensureFingerprintSalt stress test (manual)', () => {
     const mockEnsure = async () => {
       calls += 1;
       // small random jitter to simulate realistic service startup delays
-      await new Promise((r) => setTimeout(r, 5 + Math.floor(Math.random() * 15)));
+      const jitter = 5 + Math.floor(Math.random() * 15);
+      vi.useFakeTimers();
+      try {
+        setTimeout(() => {}, jitter);
+        vi.advanceTimersByTime(jitter);
+        await vi.runAllTimersAsync();
+      } finally {
+        vi.useRealTimers();
+      }
       return {
         getRandomValues: (u: Uint8Array) => {
           for (let i = 0; i < u.length; i++) u[i] = (i * 31) & 0xff;

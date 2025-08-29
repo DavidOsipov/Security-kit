@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { InMemoryNonceStore as NonceStore } from '../../server/verify-api-request-signature';
 
 describe('NonceStore - edge cases', () => {
@@ -17,7 +17,13 @@ describe('NonceStore - edge cases', () => {
     const n = 'n2';
     await s.store(kid, n, 10);
     expect(await s.has(kid, n)).toBe(true);
-    await new Promise(res => setTimeout(res, 30));
-    expect(await s.has(kid, n)).toBe(false);
+    vi.useFakeTimers();
+    try {
+      const now = Date.now();
+      vi.setSystemTime(now + 1000);
+      expect(await s.has(kid, n)).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

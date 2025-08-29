@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 
 // Import internal helpers via dynamic import to avoid TypeScript export constraints
 describe('dom.sha256 helpers', () => {
@@ -11,8 +11,16 @@ describe('dom.sha256 helpers', () => {
       await expect(new Promise((_, reject) => setTimeout(() => reject(new Error('too_slow')), 1))).rejects.toThrow('too_slow');
       return;
     }
-    const p = new Promise<string>((resolve) => setTimeout(() => resolve('ok'), 50));
-    await expect(pwt(p, 1, 'too_slow')).rejects.toThrow('too_slow');
+    vi.useFakeTimers();
+    try {
+      const p = new Promise<string>((resolve) => setTimeout(() => resolve('ok'), 50));
+      const prom = pwt(p, 1, 'too_slow');
+      // advance only a small amount so the timeout (1ms) fires, but not unrelated longer timers
+      vi.advanceTimersByTime(2);
+      await expect(prom).rejects.toThrow('too_slow');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('sha256Hex returns a hex string when node:crypto available', async () => {

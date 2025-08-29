@@ -1,8 +1,16 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 const DEFAULT_DIAGNOSTIC_BUDGET = 5;
 
 describe("postMessage diagnostics - refill and transient crypto failures", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it("refills diagnostic budget after time window", async () => {
     vi.resetModules();
     // adjustable performance.now
@@ -40,12 +48,12 @@ describe("postMessage diagnostics - refill and transient crypto failures", () =>
       const ev = new MessageEvent("message", { data: JSON.stringify(bad), origin: "http://localhost", source: window });
       window.dispatchEvent(ev);
       // allow scheduling
-      // eslint-disable-next-line no-await-in-loop
-      await new Promise((r) => setTimeout(r, 15));
+  // eslint-disable-next-line no-await-in-loop
+  await vi.runAllTimersAsync();
     }
 
-    // let background tasks finish
-    await new Promise((r) => setTimeout(r, 50));
+  // let background tasks finish
+  await vi.runAllTimersAsync();
 
     const calls1 = secureDevLogSpy.mock.calls.filter((c) => {
       try {
@@ -59,13 +67,16 @@ describe("postMessage diagnostics - refill and transient crypto failures", () =>
     expect(calls1.length).toBeGreaterThan(0);
     expect(calls1.length).toBeLessThanOrEqual(DEFAULT_DIAGNOSTIC_BUDGET);
 
-    // advance time beyond refill window
-    now += 61_000;
+
+  // advance time beyond refill window
+  now += 61_000;
+  // because we use fake timers, advance them as well
+  vi.setSystemTime(Date.now() + 61_000);
 
     // send one more message which should be fingerprinted after refill
     const ev2 = new MessageEvent("message", { data: JSON.stringify(bad), origin: "http://localhost", source: window });
     window.dispatchEvent(ev2);
-    await new Promise((r) => setTimeout(r, 50));
+  await vi.runAllTimersAsync();
 
     const calls2 = secureDevLogSpy.mock.calls.filter((c) => {
       try {
@@ -120,7 +131,7 @@ describe("postMessage diagnostics - refill and transient crypto failures", () =>
     // first message will trigger ensureCrypto rejection and no fingerprint
     const ev1 = new MessageEvent("message", { data: JSON.stringify(bad), origin: "http://localhost", source: window });
     window.dispatchEvent(ev1);
-    await new Promise((r) => setTimeout(r, 50));
+  await vi.runAllTimersAsync();
 
     const callsAfter1 = secureDevLogSpy.mock.calls.filter((c) => {
       try {
@@ -136,7 +147,7 @@ describe("postMessage diagnostics - refill and transient crypto failures", () =>
     // second message should succeed (ensureCrypto returns crypto) and produce fingerprint
     const ev2 = new MessageEvent("message", { data: JSON.stringify(bad), origin: "http://localhost", source: window });
     window.dispatchEvent(ev2);
-    await new Promise((r) => setTimeout(r, 50));
+  await vi.runAllTimersAsync();
 
     const callsAfter2 = secureDevLogSpy.mock.calls.filter((c) => {
       try {

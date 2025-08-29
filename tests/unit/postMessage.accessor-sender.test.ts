@@ -1,6 +1,13 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 describe("postMessage sender-side accessor tests", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    // Clear module cache so each test can import a fresh instance and
+    // set up per-test mocks before importing the module under test.
+    vi.resetModules();
+  });
+  afterEach(() => vi.useRealTimers());
   it("sendSecurePostMessage should reject payloads whose getters throw during serialization", async () => {
     // Build an object whose getter throws; JSON.stringify should invoke it
     const o: any = { a: 1 };
@@ -25,8 +32,7 @@ describe("postMessage sender-side accessor tests", () => {
   it("receiving pre-serialized JSON string should not execute sender getters (safe to parse)", async () => {
     // Simulate a remote sender that already serialized a JSON string;
     // the receiver should only parse strings and not re-invoke any getters.
-    vi.resetModules();
-  const postMessage = await import("../../src/postMessage");
+    const postMessage = await import("../../src/postMessage");
     const onMessage = vi.fn();
     const listener = postMessage.createSecurePostMessageListener({
       allowedOrigins: ["http://localhost"],
@@ -38,7 +44,7 @@ describe("postMessage sender-side accessor tests", () => {
   const safeSerialized = JSON.stringify({ x: 1 });
     window.dispatchEvent(new MessageEvent("message", { data: safeSerialized, origin: "http://localhost", source: window }));
 
-    await new Promise((r) => setTimeout(r, 20));
+    await vi.runAllTimersAsync();
     expect(onMessage).toHaveBeenCalled();
     listener.destroy();
   });

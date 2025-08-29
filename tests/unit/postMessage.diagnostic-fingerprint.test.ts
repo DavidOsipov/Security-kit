@@ -1,4 +1,7 @@
-import { test, expect, vi } from 'vitest';
+import { test, expect, vi, beforeEach, afterEach } from 'vitest';
+
+beforeEach(() => vi.useFakeTimers());
+afterEach(() => vi.useRealTimers());
 import { createSecurePostMessageListener } from '../../src/postMessage';
 import * as state from '../../src/state';
 import { environment } from '../../src/environment';
@@ -58,8 +61,8 @@ test('scheduleDiagnosticForFailedValidation uses crypto.subtle.digest when avail
     // Send to window: this will call the listener's handler
     window.postMessage(event.data, event.origin);
 
-    // Wait briefly to allow async diagnostic to run
-    await new Promise((r) => setTimeout(r, 50));
+  // Wait for async diagnostic to run
+  await vi.runAllTimersAsync();
 
     // cleanup
     listener.destroy();

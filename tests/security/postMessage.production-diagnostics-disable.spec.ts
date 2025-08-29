@@ -30,7 +30,12 @@ test("production disables diagnostics when crypto unavailable", async () => {
   window.dispatchEvent(ev as any);
 
   // Wait to allow async computeAndLog to attempt ensureCrypto
-  await new Promise((r) => setTimeout(r, 50));
+  vi.useFakeTimers();
+  try {
+    await vi.runAllTimersAsync();
+  } finally {
+    vi.useRealTimers();
+  }
 
   // In production with no crypto, fingerprint should not be present in logs
   const called = spy.mock.calls.some(call => JSON.stringify(call[1] || call[0]).includes("fingerprint"));

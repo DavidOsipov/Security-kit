@@ -1,6 +1,9 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 describe("postMessage structured wire format", () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
   it("accepts structured-clone payloads when wireFormat=structured", async () => {
     vi.resetModules();
     const state = await import("../../src/state");
@@ -21,7 +24,7 @@ describe("postMessage structured wire format", () => {
     const ev = new MessageEvent("message", { data: payload, origin: "http://localhost", source: window as any });
     window.dispatchEvent(ev);
     // small wait to allow handler
-    await new Promise((r) => setTimeout(r, 10));
+    await vi.runAllTimersAsync();
     listener.destroy();
     expect(onMessage).toHaveBeenCalledTimes(1);
     const calledWith = onMessage.mock.calls[0][0];
@@ -48,10 +51,9 @@ describe("postMessage structured wire format", () => {
     // cross-origin structured should be rejected
     const cross = new MessageEvent("message", { data: { x: 2 }, origin: "http://example.com", source: window as any });
     window.dispatchEvent(cross);
-    // wait
-    await new Promise((r) => setTimeout(r, 10));
+    // wait for scheduled tasks
+    await vi.runAllTimersAsync();
     listener.destroy();
-    expect(onMessage).toHaveBeenCalled();
     const called = onMessage.mock.calls.map((c) => c[0]);
     // only x:1 should be accepted
     expect(called).toContainEqual({ x: 1 });

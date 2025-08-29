@@ -1,14 +1,23 @@
-import { expect, test, vi, afterEach } from "vitest";
-import { sendSecurePostMessage, createSecurePostMessageListener, __test_resetForUnitTests } from "../../src/postMessage";
+import { expect, test, vi, afterEach, beforeEach } from "vitest";
+// Note: import of module-under-test is dynamic inside tests to allow module cache reset
 import * as state from "../../src/state";
 import { environment } from "../../src/environment";
 
 (globalThis as any).__SECURITY_KIT_ALLOW_TEST_APIS = true;
 
-afterEach(() => {
+beforeEach(() => {
+  vi.useFakeTimers();
+  vi.resetModules();
+});
+
+afterEach(async () => {
   vi.restoreAllMocks();
-  try { __test_resetForUnitTests(); } catch {}
+  try {
+    const pm = await import("../../src/postMessage");
+    try { if (typeof (pm as any).__test_resetForUnitTests === 'function') (pm as any).__test_resetForUnitTests(); } catch {}
+  } catch {}
   try { if (typeof (state as any).__test_resetCryptoStateForUnitTests === 'function') (state as any).__test_resetCryptoStateForUnitTests(); } catch {}
+  vi.useRealTimers();
 });
 
 // Test A: scheduleDiagnostic when subtle.digest throws (fingerprint promise rejects -> no fingerprint logged)
@@ -21,7 +30,8 @@ test("scheduleDiagnostic handles subtle.digest throwing without crashing", async
 
   // create listener with diagnostics enabled and schema validator
   const onMessage = vi.fn();
-  const listener = createSecurePostMessageListener({
+  const postMessage = await import("../../src/postMessage");
+  const listener = postMessage.createSecurePostMessageListener({
     allowedOrigins: ["http://localhost"],
     onMessage,
     validate: { a: "number" },
@@ -35,23 +45,25 @@ test("scheduleDiagnostic handles subtle.digest throwing without crashing", async
   window.dispatchEvent(ev as any);
 
   // Wait a tick for async fingerprint attempt
-  await new Promise((r) => setTimeout(r, 50));
+  await vi.runAllTimersAsync();
 
   listener.destroy();
 });
 
 // Test B: sendSecurePostMessage rejects circular payload
-test("sendSecurePostMessage rejects circular payloads", () => {
+test("sendSecurePostMessage rejects circular payloads", async () => {
+  const postMessage = await import("../../src/postMessage");
   const target: any = { postMessage: () => {} };
   const a: any = {};
   a.self = a;
-  expect(() => sendSecurePostMessage({ targetWindow: target as Window, payload: a, targetOrigin: "https://example.com" })).toThrow();
+  expect(() => postMessage.sendSecurePostMessage({ targetWindow: target as Window, payload: a, targetOrigin: "https://example.com" })).toThrow();
 });
 
 // Test C: listener handler error sanitization (sanitizeErrorForLogs path)
-test("listener handler errors are sanitized and don't leak full stack", () => {
+test("listener handler errors are sanitized and don't leak full stack", async () => {
   // Force validator to throw to trigger handler error path
-  const listener = createSecurePostMessageListener({
+  const postMessage = await import("../../src/postMessage");
+  const listener = postMessage.createSecurePostMessageListener({
     allowedOrigins: ["https://trusted.example.com"],
     onMessage: () => {},
     validate: (d: any) => { throw new Error("validator boom"); }

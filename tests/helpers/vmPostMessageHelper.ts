@@ -131,6 +131,32 @@ export function loadPostMessageInternals(opts?: {
   } else if (opts?.stubCrypto) {
     contextRoot.crypto = opts.stubCrypto;
   } else if ((globalThis as any).crypto) contextRoot.crypto = (globalThis as any).crypto;
+
+  // Provide minimal host timer & location/window shims so modules that expect a
+  // browser-like global environment (window, location, timers) can initialize
+  // inside the VM without hanging or throwing ReferenceErrors. We intentionally
+  // forward to the host timers so behavior is predictable in tests.
+  try {
+    contextRoot.setTimeout = (globalThis as any).setTimeout;
+    contextRoot.clearTimeout = (globalThis as any).clearTimeout;
+    contextRoot.setInterval = (globalThis as any).setInterval;
+    contextRoot.clearInterval = (globalThis as any).clearInterval;
+    // Node's setImmediate may not exist in some platforms; forward if present
+    if (typeof (globalThis as any).setImmediate === 'function')
+      contextRoot.setImmediate = (globalThis as any).setImmediate;
+    if (typeof (globalThis as any).clearImmediate === 'function')
+      contextRoot.clearImmediate = (globalThis as any).clearImmediate;
+    // Promise and scheduling primitives
+    contextRoot.Promise = (globalThis as any).Promise;
+    // simple window/location shims so modules that reference window.* don't crash
+    contextRoot.window = contextRoot;
+    contextRoot.location = { origin: 'http://localhost' };
+    // minimal event listener API used by postMessage.js
+    contextRoot.addEventListener = function () { /* noop */ };
+    contextRoot.removeEventListener = function () { /* noop */ };
+  } catch {
+    // best-effort: if anything fails, proceed without shims
+  }
   if (typeof opts?.production === 'boolean') {
     // if production flag set, inject a process.env.NODE_ENV into VM to control environment detection
     contextRoot.process = { env: { NODE_ENV: opts.production ? 'production' : 'development' } };

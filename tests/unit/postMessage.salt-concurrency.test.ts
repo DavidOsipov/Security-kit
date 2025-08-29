@@ -1,8 +1,16 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 describe("postMessage fingerprint salt concurrency", () => {
-  it("memoizes salt promise so concurrent calls get the same salt", async () => {
+  beforeEach(() => {
     vi.resetModules();
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("memoizes salt promise so concurrent calls get the same salt", async () => {
     const state = await import("../../src/state");
 
     let callCount = 0;
@@ -15,7 +23,7 @@ describe("postMessage fingerprint salt concurrency", () => {
     } as any;
     vi.spyOn(state, "ensureCrypto").mockImplementation(async () => {
       callCount += 1;
-      // small delay to force interleaving
+      // small delay to force interleaving - uses real timers abstraction
       await new Promise((r) => setTimeout(r, 5));
       return fakeCrypto as any;
     });
@@ -24,9 +32,12 @@ describe("postMessage fingerprint salt concurrency", () => {
     (globalThis as any).__SECURITY_KIT_ALLOW_TEST_APIS = true;
 
     // Kick off multiple concurrent ensureFingerprintSalt via test accessor
-    const p1 = postMessage.__test_ensureFingerprintSalt();
-    const p2 = postMessage.__test_ensureFingerprintSalt();
-    const [s1, s2] = await Promise.all([p1, p2]);
+  const p1 = postMessage.__test_ensureFingerprintSalt();
+  const p2 = postMessage.__test_ensureFingerprintSalt();
+
+  // advance fake timers so any pending delays in ensureCrypto resolve
+  await vi.runAllTimersAsync();
+  const [s1, s2] = await Promise.all([p1, p2]);
 
     expect(s1).toBeInstanceOf(Uint8Array);
     expect(s2).toBeInstanceOf(Uint8Array);

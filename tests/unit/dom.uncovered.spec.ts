@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi, beforeEach } from "vitest";
 import * as utils from "../../src/utils";
 import {
   createDefaultDOMValidator,
@@ -7,6 +7,11 @@ import {
 } from "../../src/dom";
 
 describe("dom.ts uncovered branches", () => {
+  beforeEach(() => {
+    vi.resetModules();
+    vi.useFakeTimers();
+  });
+
   afterEach(() => {
     // restore any test-only overrides and reset default singleton
     try {
@@ -63,7 +68,12 @@ describe("dom.ts uncovered branches", () => {
     await expect(async () => v.validateElement("not-an-element" as unknown)).rejects.toThrow();
 
   // allow background follow-up IIFE to run (give more time for async follow-up)
-  await new Promise((r) => setTimeout(r, 300));
+  vi.useFakeTimers();
+  try {
+    await vi.runAllTimersAsync();
+  } finally {
+    vi.useRealTimers();
+  }
 
     // base validation_failure should be present; follow-up validation_failure_hash should NOT
     expect(events.some((e: any) => e && e.kind === "validation_failure")).toBeTruthy();
@@ -92,7 +102,7 @@ describe("dom.ts uncovered branches", () => {
     v.invalidateCache();
 
     // wait enough for timeout-based branch to execute
-    await new Promise((r) => setTimeout(r, 300));
+  await vi.runAllTimersAsync();
 
     expect(calls.length).toBeGreaterThan(0);
   });
@@ -205,7 +215,7 @@ describe("dom.ts uncovered branches", () => {
     await expect(async () => v.validateElement("not-an-element" as unknown)).rejects.toThrow();
 
     // wait for async follow-up
-    await new Promise((r) => setTimeout(r, 300));
+  await vi.runAllTimersAsync();
 
     expect(events.some((e: any) => e && e.kind === "validation_failure")).toBeTruthy();
 
@@ -236,7 +246,14 @@ describe("dom.ts uncovered branches", () => {
 
     await expect(async () => v.validateElement("not-an-element" as unknown)).rejects.toThrow();
 
-    await new Promise((r) => setTimeout(r, 300));
+    // advance timers so background processing runs
+    vi.useFakeTimers();
+    try {
+      vi.advanceTimersByTime(500);
+      await vi.runAllTimersAsync();
+    } finally {
+      vi.useRealTimers();
+    }
 
     // base event was emitted, and inner logging threw but was swallowed
     expect(events.some((e: any) => e && e.kind === "validation_failure")).toBeTruthy();
@@ -256,8 +273,8 @@ describe("dom.ts uncovered branches", () => {
       },
     });
 
-    v.invalidateCache();
-    await new Promise((r) => setTimeout(r, 300));
+  v.invalidateCache();
+  await vi.runAllTimersAsync();
     // no exception should propagate even though secureDevLog threw inside catch
     spy.mockRestore();
   });

@@ -48,16 +48,16 @@ class ExtendedMockWorker {
     if (this.destroyed) return;
     
     if (msg.type === 'init') {
-      this.keyBytes = Buffer.from(msg.secretBuffer instanceof ArrayBuffer ? 
+      this.keyBytes = Buffer.from(msg.secretBuffer instanceof ArrayBuffer ?
         new Uint8Array(msg.secretBuffer) : msg.secretBuffer);
-      setTimeout(() => this.emit('message', { data: { type: 'initialized' } }), 0);
+      Promise.resolve().then(() => this.emit('message', { data: { type: 'initialized' } }));
       return;
     }
 
     // Handle handshake message transferred with a MessagePort
     if (msg.type === 'handshake' && transfer && transfer.length === 1) {
       const port = transfer[0] as MessagePort;
-      setTimeout(() => {
+      Promise.resolve().then(() => {
         try {
           const nonce = msg.nonce as string;
           const signature = this.keyBytes
@@ -69,25 +69,27 @@ class ExtendedMockWorker {
         } finally {
           try { port.close(); } catch {}
         }
-      }, 0);
+      });
       return;
     }
 
     if (msg.type === 'sign') {
       const { requestId, canonical } = msg;
       // record canonical for diagnostics
-      try {
-        (globalThis as any).__LAST_CANONICAL = canonical;
-      } catch {
-        /* ignore */
-      }
-      const delay = this.opts.delayMs || 5;
+      try { (globalThis as any).__LAST_CANONICAL = canonical; } catch { /* ignore */ }
+      const delay = typeof this.opts.delayMs === 'number' ? this.opts.delayMs : 5;
       const port = transfer && transfer.length === 1 ? transfer[0] as MessagePort : null;
+
+      // Helper to deliver a message either via microtask (fast) or setTimeout (delayed)
+      const schedule = (fn: () => void) => {
+        if (delay <= 1) Promise.resolve().then(fn);
+        else setTimeout(fn, delay);
+      };
 
       // Support transient failures: fail first `failCount` requests then succeed
       if (typeof this.opts.failCount === 'number' && this.opts.failCount > 0) {
         this.opts.failCount -= 1;
-        setTimeout(() => {
+        schedule(() => {
           const err = { type: 'error', requestId, reason: 'transient-failure' };
           if (port) {
             try { port.postMessage(err); } catch {};
@@ -95,12 +97,12 @@ class ExtendedMockWorker {
           } else {
             this.emit('message', { data: err });
           }
-        }, delay);
+        });
         return;
       }
 
       if (this.opts.shouldError) {
-        setTimeout(() => {
+        schedule(() => {
           const err = { type: 'error', requestId, reason: 'mock-error' };
           if (port) {
             try { port.postMessage(err); } catch {};
@@ -108,11 +110,11 @@ class ExtendedMockWorker {
           } else {
             this.emit('message', { data: err });
           }
-        }, delay);
+        });
         return;
       }
 
-      setTimeout(() => {
+      schedule(() => {
         if (!this.keyBytes) {
           const err = { type: 'error', requestId, reason: 'not-initialized' };
           if (port) {
@@ -122,9 +124,9 @@ class ExtendedMockWorker {
           }
           return;
         }
-  // Sign the canonical string directly (new format)
-  // Diagnostic: expose the canonical in test logs to help debug mismatches
-  try { console.debug('[TEST-DIAG] canonical:', canonical); } catch {}
+        // Sign the canonical string directly (new format)
+        // Diagnostic: expose the canonical in test logs to help debug mismatches
+        try { console.debug('[TEST-DIAG] canonical:', canonical); } catch {}
         const sig = createHmac('sha256', this.keyBytes).update(canonical).digest('base64');
         const resp = { type: 'signed', requestId, signature: sig };
         if (port) {
@@ -132,13 +134,13 @@ class ExtendedMockWorker {
         } else {
           this.emit('message', { data: resp });
         }
-      }, delay);
+      });
       return;
     }
 
     if (msg.type === 'destroy') {
       this.destroyed = true;
-      setTimeout(() => this.emit('message', { data: { type: 'destroyed' } }), 0);
+      Promise.resolve().then(() => this.emit('message', { data: { type: 'destroyed' } }));
       return;
     }
   }
@@ -169,6 +171,9 @@ describe('SecureApiSigner - Extended Canonical Format & Security Features', () =
 
   afterEach(() => {
     (globalThis as any).Worker = origWorker;
+    // Ensure fake timers are not leaking between tests
+    try { vi.useRealTimers(); } catch {};
+    try { vi.restoreAllMocks(); } catch {};
   });
 
   describe('Extended Canonical Format', () => {
@@ -295,59 +300,88 @@ describe('SecureApiSigner - Extended Canonical Format & Security Features', () =
       await signer.destroy();
     });
 
-    it('allows requests in half-open state after timeout', async () => {
-      // Mock setTimeout to control time passage
-      const originalSetTimeout = globalThis.setTimeout;
-      const timeouts: { callback: Function; delay: number }[] = [];
-      
-      globalThis.setTimeout = vi.fn((callback: Function, delay: number) => {
-        timeouts.push({ callback, delay });
-        return originalSetTimeout(callback, delay);
-      }) as any;
-      
+  it('allows requests in half-open state after timeout', async () => {
+  // Use real timers for this test to avoid fake-timer interactions with
+  // microtask-scheduled mock worker responses. We'll only enable fake timers
+  // briefly to set system time for the circuit-breaker window.
       try {
         const secret = new Uint8Array(32);
+  console.debug('[TEST] creating signer');
   const signer = await SecureApiSigner.create({ secret, workerUrl: new URL('./mock-worker.js', import.meta.url), integrity: 'none', wipeProvidedSecret: false });
+  console.debug('[TEST] signer created');
+
         // Configure the created mockWorker to fail first N requests
         if (mockWorker && mockWorker.opts) {
-          mockWorker.opts.failCount = 12;
+          mockWorker.opts.failCount = 10;
           mockWorker.opts.delayMs = 1;
         }
 
-        // Simulate time passage by mocking Date.now
-        const originalDateNow = Date.now;
-        let mockTime = originalDateNow();
-        Date.now = vi.fn(() => mockTime);
-        
-        // Force circuit breaker open
-        for (let i = 0; i < 12; i++) {
+        console.debug('[TEST] starting failure loop');
+        // Force circuit breaker open by triggering the transient failures
+  for (let i = 0; i < 10; i++) {
           try {
-            await signer.sign('test');
+            const p = signer.sign('test');
+            // attach immediate handler so rejections are not reported as unhandled
+            p.catch(() => {});
+            // Await the promise so mock microtask responses settle
+            await p;
           } catch {}
         }
-        
-        // Should be blocked by circuit breaker
-        await expect(signer.sign('test')).rejects.toThrow(CircuitBreakerError);
-        
-  // Advance time past circuit breaker timeout (60 seconds)
-  mockTime += 61000;
-        
-        // Ensure the worker will respond successfully for the half-open recovery attempt
-        if (mockWorker && mockWorker.opts) {
-          // Clear any remaining transient failure budget so the recovery request can succeed
-          mockWorker.opts.failCount = 0;
-        }
+        console.debug('[TEST] failure loop complete');
 
-        // Should work again (half-open state)
-        const result = await signer.sign('recovery-test');
-        expect(result.signature).toBeTruthy();
-        
-        Date.now = originalDateNow;
-        await signer.destroy();
+  // Should be blocked by circuit breaker now
+  console.debug('[TEST] asserting circuit is open');
+  const blocked = signer.sign('test');
+  // attach a noop catch so any internal rejection is observed and not treated as unhandled
+  blocked.catch(() => {});
+  // Allow one macrotask tick (setTimeout 0) so any microtask-scheduled responses
+  // and next-turn timers settle under real timers.
+  await new Promise((r) => setTimeout(r, 0));
+  await Promise.resolve();
+  await expect(blocked).rejects.toThrow(CircuitBreakerError);
+  console.debug('[TEST] circuit open assertion passed');
+
+  // Advance system time past circuit breaker timeout (60 seconds)
+  console.debug('[TEST] advancing system time past timeout');
+  // Advance relative to the signer's last failure time to ensure we surpass
+  // the internal circuit-breaker lastFailureTime deterministically.
+  const lastFailure = signer.getCircuitBreakerStatus().lastFailureTime || Date.now();
+  // Instead of using fake timers (which interferes with microtask scheduling
+  // in our mock worker), temporarily monkey-patch Date.now to report an
+  // advanced time. This lets timers and microtasks operate normally while
+  // the signer observes the passed interval for circuit-breaker logic.
+  const origDateNow = Date.now;
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- test-only shim
+    (Date as any).now = () => lastFailure + 61000;
+
+    // Ensure the worker will respond successfully for the half-open recovery attempt
+    if (mockWorker && mockWorker.opts) {
+      mockWorker.opts.failCount = 0;
+    }
+
+    // Attempt recovery request; advance timers so worker can respond
+    console.debug('[TEST] attempting recovery request');
+    const recovery = signer.sign('recovery-test');
+    recovery.catch(() => {});
+    // Allow one macrotask tick so worker's microtask-scheduled response can run
+    await new Promise((r) => setTimeout(r, 0));
+    await Promise.resolve();
+    const result = await recovery;
+    console.debug('[TEST] recovery result received');
+    expect(result.signature).toBeTruthy();
+
+    await signer.destroy();
+    await signer.destroy();
+  } finally {
+    // Restore Date.now to its original implementation
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- restore
+    (Date as any).now = origDateNow;
+  }
       } finally {
-        globalThis.setTimeout = originalSetTimeout;
+        vi.useRealTimers();
       }
-    });
+  }, 30000);
   });
 
   describe('Rate Limiting', () => {

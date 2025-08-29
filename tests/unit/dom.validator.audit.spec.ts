@@ -1,8 +1,13 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 import { createDefaultDOMValidator } from '../../src/dom';
 
 describe('DOMValidator audit hook with emitSelectorHash', () => {
+  beforeEach(() => {
+    vi.resetModules();
+    vi.useFakeTimers();
+  });
+
   it('calls audit hook immediate and then follow-up hash event when enabled', async () => {
     const events: any[] = [];
     const hook = async (e: any) => {
@@ -18,8 +23,12 @@ describe('DOMValidator audit hook with emitSelectorHash', () => {
       // expected
     }
 
-    // Wait briefly to allow async follow-up hash + hook to run (sha256Hex is async)
-    await new Promise((r) => setTimeout(r, 500));
+  // Wait briefly to allow async follow-up hash + hook to run (sha256Hex is async)
+  try {
+    await vi.runAllTimersAsync();
+  } finally {
+    vi.useRealTimers();
+  }
 
     // At minimum one immediate validation_failure event should have been emitted
     expect(events.length).toBeGreaterThanOrEqual(1);
@@ -29,7 +38,11 @@ describe('DOMValidator audit hook with emitSelectorHash', () => {
     // Some environments may delay hashing; assert that either present or will appear soon.
     if (!kinds.includes('validation_failure_hash')) {
       // wait a bit longer
-      await new Promise((r) => setTimeout(r, 1200));
+      try {
+        await vi.runAllTimersAsync();
+      } finally {
+        vi.useRealTimers();
+      }
     }
     const kinds2 = events.map((x) => x.kind);
     expect(kinds2).toContain('validation_failure');

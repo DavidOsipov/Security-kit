@@ -1,6 +1,9 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 describe("postMessage deepFreeze budget", () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
   it("respects deepFreeze node budget and still calls handler", async () => {
     vi.resetModules();
     const state = await import("../../src/state");
@@ -22,7 +25,7 @@ describe("postMessage deepFreeze budget", () => {
 
     const ev = new MessageEvent("message", { data: JSON.stringify(wide), origin: "http://localhost", source: window as any });
     window.dispatchEvent(ev);
-    await new Promise((r) => setTimeout(r, 10));
+  await vi.runAllTimersAsync();
     listener.destroy();
     expect(onMessage).toHaveBeenCalledTimes(1);
   });

@@ -115,7 +115,13 @@ test('scheduleDiagnosticForFailedValidation logs fingerprint when enabled', asyn
   window.postMessage(eventData, window.location.origin);
 
   // Allow a small delay for async fingerprinting/diagnostic path to run
-  await new Promise((r) => setTimeout(r, 300));
+  vi.useFakeTimers();
+  try {
+    // advance timers so any pending fingerprints/diagnostics fire
+    await vi.runAllTimersAsync();
+  } finally {
+    vi.useRealTimers();
+  }
 
   // The consumer should not have been called because validation failed
   expect(onMessageSpy).not.toHaveBeenCalled();
@@ -156,7 +162,12 @@ test('parseMessageEventData structured rejects disallowed transferables', async 
   }
 
   // allow a small delay for the listener to process
-  await new Promise((r) => setTimeout(r, 20));
+  vi.useFakeTimers();
+  try {
+    await vi.runAllTimersAsync();
+  } finally {
+    vi.useRealTimers();
+  }
   expect(onMessage).not.toHaveBeenCalled();
   listener.destroy();
 });

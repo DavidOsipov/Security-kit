@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 
 // We import the module dynamically in tests to avoid brittle named-export assumptions
 describe('dom helpers and DOMValidator (jsdom)', () => {
@@ -85,8 +85,10 @@ describe('dom helpers and DOMValidator (jsdom)', () => {
     v.queryAllSafely('div');
     v.invalidateCache();
 
-    // allow the fire-and-forget audit call to run
-    await new Promise((r) => setTimeout(r, 20));
+  // allow the fire-and-forget audit call to run
+  vi.useFakeTimers();
+  await vi.runAllTimersAsync();
+  vi.useRealTimers();
     expect(spy).toHaveBeenCalled();
     const called = spy.mock.calls[0][0];
     expect(called.kind).toBe('cache_refresh');
@@ -131,8 +133,10 @@ describe('dom helpers and DOMValidator (jsdom)', () => {
       // expected
     }
 
-    // allow async follow-up hash emission to complete
-    await new Promise((r) => setTimeout(r, 300));
+  // allow async follow-up hash emission to complete
+  vi.useFakeTimers();
+  await vi.runAllTimersAsync();
+  vi.useRealTimers();
     // we expect at least two calls: initial validation_failure and follow-up validation_failure_hash
     expect(spy.mock.calls.length).toBeGreaterThanOrEqual(1);
     const kinds = spy.mock.calls.map((c: any) => c[0].kind);

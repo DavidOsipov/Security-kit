@@ -1,4 +1,4 @@
-import { test, expect, beforeEach, afterEach } from 'vitest';
+import { test, expect, beforeEach, afterEach, vi } from 'vitest';
 import { SecureApiSigner } from '../../src/secure-api-signer';
 import { createHmac } from 'crypto';
 import { InvalidParameterError } from '../../src/errors';
@@ -55,21 +55,39 @@ class MockWorker {
 }
 
 let origWorker: any;
-beforeEach(() => { origWorker = (globalThis as any).Worker; (globalThis as any).Worker = MockWorker; });
-afterEach(() => { (globalThis as any).Worker = origWorker; });
+beforeEach(() => { origWorker = (globalThis as any).Worker; (globalThis as any).Worker = MockWorker; vi.useFakeTimers(); });
+afterEach(() => { (globalThis as any).Worker = origWorker; vi.useRealTimers(); });
 
 test('SecureApiSigner.create, sign and destroy (roundtrip)', async () => {
   const secret = new Uint8Array(Buffer.from('0123456789abcdef0123456789abcdef'));
-  const signer = await SecureApiSigner.create({ secret, workerUrl: new URL('./mock-worker.js', import.meta.url), integrity: 'none' });
-  const signed = await signer.sign('hello-world');
+  // start create and allow the worker's init message to fire via timers
+  const createP = SecureApiSigner.create({ secret, workerUrl: new URL('./mock-worker.js', import.meta.url), integrity: 'none' });
+  await vi.runAllTimersAsync();
+  const signer = await createP;
+
+  // sign and allow worker reply
+  const signP = signer.sign('hello-world');
+  await vi.runAllTimersAsync();
+  const signed = await signP;
+
   expect(typeof signed.signature).toBe('string');
   expect(signed.nonce).toBeTruthy();
   expect(typeof signed.timestamp).toBe('number');
-  await signer.destroy();
+
+  const destroyP = signer.destroy();
+  await vi.runAllTimersAsync();
+  await destroyP;
 });
 
 test('SecureApiSigner.create rejects invalid secret types', async () => {
-  await expect(
-    SecureApiSigner.create({ secret: '' as any, workerUrl: new URL('./mock-worker.js', import.meta.url), integrity: 'none' })
-  ).rejects.toThrow("secret must be ArrayBuffer or an ArrayBuffer view");
+  // This test expects create() to reject synchronously for invalid secret
+  // Use real timers here to allow any immediate worker handshakes/timeouts to run
+  vi.useRealTimers();
+  try {
+    await expect(
+      SecureApiSigner.create({ secret: '' as any, workerUrl: new URL('./mock-worker.js', import.meta.url), integrity: 'none' })
+    ).rejects.toThrow("secret must be ArrayBuffer or an ArrayBuffer view");
+  } finally {
+    vi.useFakeTimers();
+  }
 });

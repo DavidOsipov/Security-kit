@@ -21,9 +21,12 @@ describe("dom.ts comprehensive coverage", () => {
     } catch {
       /* ignore */
     }
+    // isolate module state; tests that need fake timers will enable them locally
+    vi.resetModules();
   });
   afterEach(() => {
     vi.restoreAllMocks();
+    vi.useRealTimers();
   });
 
   it("fingerprintHexSync is deterministic and handles empty string", () => {
@@ -32,13 +35,20 @@ describe("dom.ts comprehensive coverage", () => {
   });
 
   it("promiseWithTimeout resolves and rejects with provided message", async () => {
-    await expect(
-      promiseWithTimeout(Promise.resolve("ok"), 20, "nope"),
-    ).resolves.toBe("ok");
+    // This helper relies on timers; use fake timers for determinism
+    vi.useFakeTimers();
+    try {
+      await expect(
+        promiseWithTimeout(Promise.resolve("ok"), 20, "nope"),
+      ).resolves.toBe("ok");
 
-    await expect(
-      promiseWithTimeout(new Promise(() => {}), 5, "myerr"),
-    ).rejects.toThrow("myerr");
+      const p = promiseWithTimeout(new Promise(() => {}), 5, "myerr");
+      // advance timers so the timeout fires
+      vi.advanceTimersByTime(10);
+      await expect(p).rejects.toThrow("myerr");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("redactAttributesSafely handles quoted and unquoted attributes", () => {
@@ -87,9 +97,10 @@ describe("dom.ts comprehensive coverage", () => {
     });
 
     it("uses node:crypto when provided via importer override", async () => {
+      const mod: any = await import("../../src/dom");
       // fake node:crypto module
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (__test_sha256Hex as any).__test_importOverride = async (spec: string) => {
+      (mod.__test_sha256Hex as any).__test_importOverride = async (spec: string) => {
         if (spec === "node:crypto") {
           return {
             createHash: () => ({ update: () => ({ digest: () => "aabb" }) }),
@@ -101,58 +112,84 @@ describe("dom.ts comprehensive coverage", () => {
       // ensure native WebCrypto (if present) does not override our importer
       try {
         // stub global crypto.subtle.digest to throw so the importer path is used
-        // @ts-expect-error test only
         vi.stubGlobal("crypto", { subtle: { digest: () => { throw new Error('no'); } } });
       } catch {
         /* ignore */
       }
-      await expect(__test_sha256Hex("x" as unknown as string)).resolves.toBe(
-        "aabb",
-      );
+      try {
+        await expect(mod.__test_sha256Hex("x" as unknown as string)).resolves.toBe("aabb");
+      } finally {
+        try { delete (mod.__test_sha256Hex as any).__test_importOverride; } catch {}
+      }
     });
 
     it("uses fast-sha256 object API when available", async () => {
+      const mod: any = await import("../../src/dom");
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (__test_sha256Hex as any).__test_importOverride = async (spec: string) => {
+      (mod.__test_sha256Hex as any).__test_importOverride = async (spec: string) => {
         if (spec === "fast-sha256") {
           return { hashHex: (s: string) => "ff11" };
         }
         return Promise.reject(new Error("not found"));
       };
-      await expect(__test_sha256Hex("x")).resolves.toBe("ff11");
+      try {
+        await expect(mod.__test_sha256Hex("x")).resolves.toBe("ff11");
+      } finally {
+        try { delete (mod.__test_sha256Hex as any).__test_importOverride; } catch {}
+      }
     });
 
     it("uses fast-sha256 function export when module is a function", async () => {
+      const mod: any = await import("../../src/dom");
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (__test_sha256Hex as any).__test_importOverride = async (spec: string) => {
+      (mod.__test_sha256Hex as any).__test_importOverride = async (spec: string) => {
         if (spec === "fast-sha256") return (s: string) => "f-func";
         return Promise.reject(new Error("not found"));
       };
-      await expect(__test_sha256Hex("x")).resolves.toBe("f-func");
+      try {
+        await expect(mod.__test_sha256Hex("x")).resolves.toBe("f-func");
+      } finally {
+        try { delete (mod.__test_sha256Hex as any).__test_importOverride; } catch {}
+      }
     });
 
     it("uses hash-wasm async or sync sha256 export when available", async () => {
       // async
+      const mod: any = await import("../../src/dom");
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (__test_sha256Hex as any).__test_importOverride = async (spec: string) => {
+      (mod.__test_sha256Hex as any).__test_importOverride = async (spec: string) => {
         if (spec === "hash-wasm") return { sha256: async (s: string) => "hh-async" };
         return Promise.reject(new Error("not found"));
       };
-      await expect(__test_sha256Hex("x")).resolves.toBe("hh-async");
+      try {
+        await expect(mod.__test_sha256Hex("x")).resolves.toBe("hh-async");
+      } finally {
+        try { delete (mod.__test_sha256Hex as any).__test_importOverride; } catch {}
+      }
 
       // sync
+      const mod2: any = await import("../../src/dom");
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (__test_sha256Hex as any).__test_importOverride = async (spec: string) => {
+      (mod2.__test_sha256Hex as any).__test_importOverride = async (spec: string) => {
         if (spec === "hash-wasm") return { sha256: (s: string) => "hh-sync" };
         return Promise.reject(new Error("not found"));
       };
-      await expect(__test_sha256Hex("x")).resolves.toBe("hh-sync");
+      try {
+        await expect(mod2.__test_sha256Hex("x")).resolves.toBe("hh-sync");
+      } finally {
+        try { delete (mod2.__test_sha256Hex as any).__test_importOverride; } catch {}
+      }
     });
 
     it("throws when no strategies available", async () => {
+      const mod: any = await import("../../src/dom");
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (__test_sha256Hex as any).__test_importOverride = async () => Promise.reject(new Error("nope"));
-      await expect(__test_sha256Hex("x")).rejects.toThrow("No crypto available");
+      (mod.__test_sha256Hex as any).__test_importOverride = async () => Promise.reject(new Error("nope"));
+      try {
+        await expect(mod.__test_sha256Hex("x")).rejects.toThrow("No crypto available");
+      } finally {
+        try { delete (mod.__test_sha256Hex as any).__test_importOverride; } catch {}
+      }
     });
   });
 
@@ -170,7 +207,12 @@ describe("dom.ts comprehensive coverage", () => {
       const v = createDefaultDOMValidator({ auditHook: hook, emitSelectorHash: false } as any);
       v.invalidateCache();
       // wait a tick for async fire-and-forget to run
-      await new Promise((r) => setTimeout(r, 10));
+      vi.useFakeTimers();
+      try {
+        await vi.runAllTimersAsync();
+      } finally {
+        vi.useRealTimers();
+      }
       expect(calls.length).toBeGreaterThanOrEqual(1);
       expect(calls[0].kind).toBe("cache_refresh");
     });
@@ -288,8 +330,13 @@ describe("dom.ts comprehensive coverage", () => {
       (v as any).__test_backgroundCssWhatParse('div[foo="__throw__"]');
       // cleanup importer override
       try { delete (DOMValidator as any).__test_importOverride; } catch {}
-      // wait a short moment for fire-and-forget audit emission
-      await new Promise((r) => setTimeout(r, 50));
+  // wait a short moment for fire-and-forget audit emission
+  vi.useFakeTimers();
+  try {
+    await vi.runAllTimersAsync();
+  } finally {
+    vi.useRealTimers();
+  }
       // should have emitted a validation_failure audit event due to parse failure
       expect(calls.some((c) => c && c.kind === "validation_failure")).toBe(true);
     });
@@ -307,8 +354,13 @@ describe("dom.ts comprehensive coverage", () => {
       // Trigger a selector validation failure that will call #emitValidationFailureEvent
       expect(() => v.validateSelectorSyntax("a:has(b)")).toThrow();
 
-      // wait a short while for async follow-up to run
-      await new Promise((r) => setTimeout(r, 20));
+  // wait a short while for async follow-up to run
+  vi.useFakeTimers();
+  try {
+    await vi.runAllTimersAsync();
+  } finally {
+    vi.useRealTimers();
+  }
 
       // base event should have been emitted; follow-up hash event may have failed and been handled
       expect(calls.length).toBeGreaterThanOrEqual(1);
@@ -327,8 +379,14 @@ describe("dom.ts comprehensive coverage", () => {
       const v = createDefaultDOMValidator({ auditHook: hook, auditHookTimeoutMs: 1 } as any);
       // invalidateCache triggers a cache_refresh audit event which will race with timeout
       v.invalidateCache();
-      // wait a bit longer than the hook to allow timeout handling
-      await new Promise((r) => setTimeout(r, 60));
+      // use fake timers and advance so the timeout path runs deterministically
+      vi.useFakeTimers();
+      try {
+        vi.advanceTimersByTime(100);
+        await vi.runAllTimersAsync();
+      } finally {
+        vi.useRealTimers();
+      }
 
       // hook may have been invoked but the wrapper should have timed out and caught the error
       expect(calls.length).toBeGreaterThanOrEqual(0);
@@ -346,8 +404,13 @@ describe("dom.ts comprehensive coverage", () => {
 
       expect(() => v.validateSelectorSyntax("a:has(b)")).toThrow();
 
-      // wait for async follow-up
-      await new Promise((r) => setTimeout(r, 20));
+  // wait for async follow-up
+  vi.useFakeTimers();
+  try {
+    await vi.runAllTimersAsync();
+  } finally {
+    vi.useRealTimers();
+  }
 
       // Should have at least two calls: base validation_failure and follow-up validation_failure_hash
       const kinds = calls.map((c) => c.kind).sort();
@@ -365,8 +428,13 @@ describe("dom.ts comprehensive coverage", () => {
       const v = createDefaultDOMValidator({ auditHook: hook } as any);
       // invalidateCache should call hook but not throw
       v.invalidateCache();
-      // allow the fire-and-forget to run
-      await new Promise((r) => setTimeout(r, 10));
+      // allow the fire-and-forget to run via fake timers
+      vi.useFakeTimers();
+      try {
+        await vi.runAllTimersAsync();
+      } finally {
+        vi.useRealTimers();
+      }
       expect(hook).toHaveBeenCalled();
     });
 

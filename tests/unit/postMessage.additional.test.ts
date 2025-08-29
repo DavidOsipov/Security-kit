@@ -1,6 +1,8 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 describe("postMessage additional hardening tests", () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
   it("freezePayload default: payload is deeply frozen when passed to onMessage", async () => {
     vi.resetModules();
     const postMessage = await import("../../src/postMessage");
@@ -29,8 +31,8 @@ describe("postMessage additional hardening tests", () => {
     const ev = new MessageEvent("message", { data: JSON.stringify(payload), origin: "http://localhost", source: window });
     window.dispatchEvent(ev);
 
-    // give event loop a tick
-    await new Promise((r) => setTimeout(r, 20));
+  // give event loop a tick
+  await vi.runAllTimersAsync();
 
     expect(onMessage).toHaveBeenCalled();
     const calledArg = onMessage.mock.calls[0][0];
@@ -63,9 +65,9 @@ describe("postMessage additional hardening tests", () => {
     const ev2 = new MessageEvent("message", { data: JSON.stringify(payload), origin: "http://localhost", source: fakePort as any });
     window.dispatchEvent(ev2);
 
-    await new Promise((r) => setTimeout(r, 20));
-    // only first call should succeed
-    expect(onMessage).toHaveBeenCalledTimes(1);
+  await vi.runAllTimersAsync();
+  // only first call should succeed
+  expect(onMessage).toHaveBeenCalledTimes(1);
 
     listener.destroy();
   });

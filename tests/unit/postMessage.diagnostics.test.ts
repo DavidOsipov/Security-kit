@@ -1,6 +1,14 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 describe("postMessage diagnostics and fingerprinting", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it("produces a fingerprint when crypto is available and diagnostics enabled", async () => {
     vi.resetModules();
     // load state and spy ensureCrypto to provide a fake crypto
@@ -32,8 +40,8 @@ describe("postMessage diagnostics and fingerprinting", () => {
     const ev = new MessageEvent("message", { data: JSON.stringify(bad), origin: "http://localhost", source: window });
     window.dispatchEvent(ev);
 
-    // wait for queueMicrotask and async fingerprinting
-    await new Promise((r) => setTimeout(r, 50));
+  // wait for queueMicrotask and async fingerprinting scheduled via timers
+  await vi.runAllTimersAsync();
 
     // secureDevLog should be called; find a call with message 'Message dropped due to failed validation' and fingerprint in context
     const calls = secureDevLogSpy.mock.calls;
@@ -77,7 +85,7 @@ describe("postMessage diagnostics and fingerprinting", () => {
       const ev = new MessageEvent("message", { data: JSON.stringify(bad), origin: "http://localhost", source: window });
       window.dispatchEvent(ev);
 
-      await new Promise((r) => setTimeout(r, 50));
+  await vi.runAllTimersAsync();
 
       const calls = secureDevLogSpy.mock.calls;
       const found = calls.some((c) => {

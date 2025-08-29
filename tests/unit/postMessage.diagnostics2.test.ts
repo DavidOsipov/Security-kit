@@ -1,6 +1,14 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 describe("postMessage diagnostics - budget and ensureCrypto error paths", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it("rate-limits diagnostic fingerprinting and respects budget", async () => {
     vi.resetModules();
     const state = await import("../../src/state");
@@ -35,12 +43,12 @@ describe("postMessage diagnostics - budget and ensureCrypto error paths", () => 
       window.dispatchEvent(ev);
       // small delay to allow async fingerprinting to be scheduled
       // but not long enough to refill the budget
-      // eslint-disable-next-line no-await-in-loop
-      await new Promise((r) => setTimeout(r, 10));
+  // eslint-disable-next-line no-await-in-loop
+  await vi.runAllTimersAsync();
     }
 
-    // allow background tasks to settle
-    await new Promise((r) => setTimeout(r, 100));
+  // allow background tasks to settle
+  await vi.runAllTimersAsync();
 
     // Count fingerprinted logs
     const fpCalls = secureDevLogSpy.mock.calls.filter((c) => {
@@ -86,7 +94,7 @@ describe("postMessage diagnostics - budget and ensureCrypto error paths", () => 
       const ev = new MessageEvent("message", { data: JSON.stringify(bad), origin: "http://localhost", source: window });
       window.dispatchEvent(ev);
 
-      await new Promise((r) => setTimeout(r, 50));
+      await vi.runAllTimersAsync();
 
       // Ensure that secureDevLog was called but without fingerprint property
       const calls = secureDevLogSpy.mock.calls;
