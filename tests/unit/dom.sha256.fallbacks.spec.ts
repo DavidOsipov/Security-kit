@@ -1,4 +1,5 @@
 import { vi, describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { CryptoUnavailableError } from '../../src/errors';
 
 // Purpose: deterministically exercise sha256Hex fallback strategies by mocking
 // dynamic imports and globalThis.crypto. We import the module under test
@@ -148,6 +149,12 @@ describe('sha256Hex fallback strategies (deterministic)', () => {
   const mod = await importDomModule();
   const sha = (mod as any).__test_sha256Hex as any as (s: string) => Promise<string>;
   (sha as any).__test_importOverride = async () => Promise.reject(new Error('unavailable'));
-  await expect(sha('abc')).rejects.toThrow();
+  try {
+    await sha('abc');
+    expect.fail('Expected function to throw CryptoUnavailableError');
+  } catch (error) {
+    expect((error as any).name).toBe('CryptoUnavailableError');
+    expect((error as any).code).toBe('ERR_CRYPTO_UNAVAILABLE');
+  }
   });
 });

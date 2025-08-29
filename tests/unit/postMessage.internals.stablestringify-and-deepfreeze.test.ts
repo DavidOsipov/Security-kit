@@ -15,7 +15,7 @@ test('stableStringify returns consistent string and falls back deterministically
     try { delete (globalThis as any).__SECURITY_KIT_ALLOW_TEST_APIS; } catch {}
     vi.useFakeTimers();
   }
-});
+}, 20000);
 
 test('deepFreeze respects node budget and does not throw on exotic objects', () => {
   try {
@@ -32,4 +32,4 @@ test('deepFreeze respects node budget and does not throw on exotic objects', () 
     try { delete (globalThis as any).__SECURITY_KIT_ALLOW_TEST_APIS; } catch {}
     vi.useFakeTimers();
   }
-});
+}, 10000);

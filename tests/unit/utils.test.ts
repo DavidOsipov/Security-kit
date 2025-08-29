@@ -5,8 +5,8 @@ import {
   secureCompare,
   secureCompareAsync,
   _redact,
-  _arrayBufferToBase64,
 } from "../../src/utils";
+import { arrayBufferToBase64 } from "../../src/encoding-utils";
 import { encodeComponentRFC3986, strictDecodeURIComponent } from "../../src/url";
 import { InvalidParameterError } from "../../src/errors";
 
@@ -25,7 +25,7 @@ describe("utils module", () => {
   it("secureCompare handles equal and different strings", () => {
     expect(secureCompare("abc", "abc")).toBe(true);
     expect(secureCompare("abc", "abx")).toBe(false);
-    expect(secureCompare(null, undefined)).toBe(true); // both -> ''
+    expect(() => secureCompare(undefined, undefined)).toThrow(InvalidParameterError);
   });
 
   it("secureCompare throws on too long inputs", () => {
@@ -55,7 +55,7 @@ describe("utils module", () => {
 
   it("_arrayBufferToBase64 produces expected base64", () => {
     const buf = new Uint8Array([0, 1, 2, 3]).buffer;
-    const b64 = _arrayBufferToBase64(buf);
+    const b64 = arrayBufferToBase64(buf);
     expect(typeof b64).toBe("string");
   });
 

@@ -23,11 +23,11 @@ import {
   secureWipe,
   validateNumericParam as validateNumericParameter,
   validateProbability,
-  _arrayBufferToBase64,
   secureCompare,
   secureCompareAsync,
   secureDevLog as secureDevelopmentLog,
 } from "./utils";
+import { arrayBufferToBase64 } from "./encoding-utils";
 import { SHARED_ENCODER } from "./encoding";
 
 // Lightweight AbortError subclass so we can return a typed, non-mutated Error
@@ -743,7 +743,7 @@ export async function generateSRI(
     }
 
     digest = await subtle.digest(subtleAlgo, internalView as BufferSource);
-    return `${algorithm}-${_arrayBufferToBase64(digest)}`;
+    return `${algorithm}-${arrayBufferToBase64(digest)}`;
   } finally {
     if (digest) {
       secureWipe(new Uint8Array(digest), { forbidShared: true });

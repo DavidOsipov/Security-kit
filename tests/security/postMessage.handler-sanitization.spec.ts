@@ -1,15 +1,19 @@
 import { expect, test, vi, afterEach } from "vitest";
-import { createSecurePostMessageListener, __test_resetForUnitTests } from "../../src/postMessage";
 
 (globalThis as any).__SECURITY_KIT_ALLOW_TEST_APIS = true;
 
-afterEach(() => {
+afterEach(async () => {
   vi.restoreAllMocks();
-  try { __test_resetForUnitTests(); } catch {}
+  vi.resetModules();
+  try {
+    const postMessage = await import("../../src/postMessage");
+    (postMessage as any).__test_resetForUnitTests();
+  } catch {}
 });
 
-test("handler sanitizes thrown validator errors and logs a warn", () => {
-  const listener = createSecurePostMessageListener({
+test("handler sanitizes thrown validator errors and logs a warn", async () => {
+  const postMessage = await import("../../src/postMessage");
+  const listener = (postMessage as any).createSecurePostMessageListener({
     allowedOrigins: ["https://example.com"],
     onMessage: () => {},
     validate: () => { throw new Error("secret-stack"); }

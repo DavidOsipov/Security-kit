@@ -230,7 +230,10 @@ describe("dom.ts remaining branches", () => {
   });
 
   it("safeCallAuditHook handles hook that throws and times out", async () => {
-    const longHook = vi.fn(() => new Promise((_, rej) => setTimeout(() => rej(new Error("boom")), 50)));
+    const longHook = vi.fn(() => new Promise((_, rej) => {
+      vi.useFakeTimers();
+      setTimeout(() => rej(new Error("boom")), 50);
+    }));
     const auditHook = (e: dom.AuditEvent) => longHook();
   const mod9: any = await import("../../src/dom");
   const v = new mod9.DOMValidator({ auditHook, auditHookTimeoutMs: 10 } as any);

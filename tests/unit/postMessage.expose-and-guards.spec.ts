@@ -192,10 +192,13 @@ test('runtime test API guard throws in production unless explicitly allowed', ()
       };
     }
     if (spec === './utils' || spec.endsWith('/utils')) {
-      return { secureDevLog: () => {}, _arrayBufferToBase64: (_: ArrayBuffer) => 'AAA' };
+      return { secureDevLog: () => {} };
     }
     if (spec === './encoding' || spec.endsWith('/encoding')) {
       return { SHARED_ENCODER: { encode: (s: string) => new TextEncoder().encode(s) } };
+    }
+    if (spec === './encoding-utils' || spec.endsWith('/encoding-utils')) {
+      return { arrayBufferToBase64: (_: ArrayBuffer) => 'AAA' };
     }
     if (spec === './constants' || spec.endsWith('/constants')) {
       return { isForbiddenKey: (_: string) => false };

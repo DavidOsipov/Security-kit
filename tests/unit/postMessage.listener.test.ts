@@ -1,10 +1,21 @@
-import { describe, it, expect, vi } from "vitest";
-import { createSecurePostMessageListener, POSTMESSAGE_MAX_PAYLOAD_DEPTH } from "../../src/postMessage";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 
 describe("createSecurePostMessageListener basic hardening", () => {
-  it("drops messages from non-allowlisted origins", () => {
+  beforeEach(async () => {
+    // Reset module cache before each test to ensure clean state
+    vi.resetModules();
+    // Allow test APIs in runtime by setting global flag
+    (globalThis as any).__SECURITY_KIT_ALLOW_TEST_APIS = true;
+  });
+  afterEach(async () => {
+    delete (globalThis as any).__SECURITY_KIT_ALLOW_TEST_APIS;
+    vi.restoreAllMocks();
+  });
+
+  it("drops messages from non-allowlisted origins", async () => {
+    const postMessage = await import("../../src/postMessage");
     const onMessage = vi.fn();
-    const listener = createSecurePostMessageListener({
+    const listener = postMessage.createSecurePostMessageListener({
       allowedOrigins: ["https://example.com"],
       onMessage,
       validate: { x: "number" },
@@ -16,9 +27,10 @@ describe("createSecurePostMessageListener basic hardening", () => {
     listener.destroy();
   });
 
-  it("removes __proto__ from parsed payload and enforces depth limit", () => {
+  it("removes __proto__ from parsed payload and enforces depth limit", async () => {
+    const postMessage = await import("../../src/postMessage");
     const onMessage = vi.fn();
-    const listener = createSecurePostMessageListener({
+    const listener = postMessage.createSecurePostMessageListener({
       allowedOrigins: ["http://localhost"],
       onMessage,
       validate: { a: "object" },
@@ -35,7 +47,7 @@ describe("createSecurePostMessageListener basic hardening", () => {
     // depth limit test: craft deep payload
     const deep: any = { a: {} };
     let cur = deep.a;
-    for (let i = 0; i < POSTMESSAGE_MAX_PAYLOAD_DEPTH + 2; i++) {
+    for (let i = 0; i < postMessage.POSTMESSAGE_MAX_PAYLOAD_DEPTH + 2; i++) {
       cur.next = {};
       cur = cur.next;
     }

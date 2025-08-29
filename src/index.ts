@@ -48,8 +48,6 @@ export {
   secureCompare,
   secureCompareAsync,
   secureDevLog,
-  secureDevNotify,
-  __test_arrayBufferToBase64,
 } from "./utils";
 
 // Sanitizer Utilities (requires peer dependency 'dompurify')

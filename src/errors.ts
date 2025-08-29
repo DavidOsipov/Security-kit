@@ -26,6 +26,15 @@ export class InvalidParameterError extends RangeError {
   }
 }
 
+export class EncodingError extends Error {
+  public readonly code = "ERR_ENCODING";
+
+  constructor(message = "Encoding operation failed.") {
+    super(`[security-kit] ${message}`);
+    this.name = "EncodingError";
+  }
+}
+
 export class RandomGenerationError extends Error {
   public readonly code = "ERR_RANDOM_GENERATION";
 

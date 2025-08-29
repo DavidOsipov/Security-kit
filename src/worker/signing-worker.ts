@@ -5,6 +5,8 @@
 import { SHARED_ENCODER } from "../encoding";
 import type { InitMessage, SignRequest } from "../protocol";
 import { bytesToBase64, secureWipeWrapper } from "../encoding-utils";
+import { secureDevLog } from "../utils";
+import { sanitizeErrorForLogs } from "../errors";
 
 // --- State Management ---
 
@@ -207,7 +209,7 @@ function enforceRateLimit(requestId: number, replyPort?: MessagePort): boolean {
 
   if (total >= rateLimitPerMinute) {
     if (developmentLogging) {
-      console.warn("signing-worker: rate limit exceeded", {
+      secureDevLog("warn", "signing-worker", "rate limit exceeded", {
         total,
         rateLimitPerMinute,
       });
@@ -235,7 +237,7 @@ function checkOverload(requestId: number, replyPort?: MessagePort): boolean {
     getCurrent();
   if (pendingCount >= maxConcurrentSigning) {
     if (developmentLogging) {
-      console.warn("signing-worker: overloaded", {
+      secureDevLog("warn", "signing-worker", "worker overloaded", {
         pendingCount,
         maxConcurrentSigning,
       });
@@ -258,7 +260,10 @@ async function executeSign(
     await doSign(requestId, canonical, replyPort);
   } catch (signError) {
     if (getCurrent().developmentLogging) {
-      console.error("signing-worker: sign operation failed", signError);
+      secureDevLog("error", "signing-worker", "sign operation failed", {
+        error: sanitizeErrorForLogs(signError),
+        requestId,
+      });
     }
     const message = {
       type: "error",
@@ -411,7 +416,12 @@ self.addEventListener("message", async (event: MessageEvent) => {
       reason: "worker-exception",
     });
     if (getCurrent().developmentLogging) {
-      console.error("signing-worker: Unhandled exception in event listener", e);
+      secureDevLog(
+        "error",
+        "signing-worker",
+        "Unhandled exception in worker event listener",
+        { error: sanitizeErrorForLogs(e) },
+      );
     }
   }
 });

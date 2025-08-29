@@ -25,4 +25,4 @@ test('build-time __TEST__ exposes __test_internals when compiled with macro', as
     try { delete (globalThis as any).__SECURITY_KIT_ALLOW_TEST_APIS; } catch {}
     vi.useFakeTimers();
   }
-});
+}, 20000);

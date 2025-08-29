@@ -7,8 +7,10 @@ describe('dom.sha256 helpers', () => {
     const pwt = (mod as any).promiseWithTimeout ?? (mod as any).__test_promiseWithTimeout;
     if (typeof pwt !== 'function') {
       // Fallback: emulate behavior
+      vi.useFakeTimers();
       const p = new Promise<string>((resolve) => setTimeout(() => resolve('ok'), 50));
       await expect(new Promise((_, reject) => setTimeout(() => reject(new Error('too_slow')), 1))).rejects.toThrow('too_slow');
+      vi.useRealTimers();
       return;
     }
     vi.useFakeTimers();

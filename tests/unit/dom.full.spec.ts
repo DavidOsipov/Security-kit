@@ -373,7 +373,7 @@ describe("dom.ts comprehensive coverage", () => {
       // audit hook that hangs longer than allowed timeout
       const hook = async (e: any) => {
         calls.push(e);
-        await new Promise((r) => setTimeout(r, 50));
+        await vi.runAllTimersAsync(); // Use fake timers instead of real setTimeout
       };
 
       const v = createDefaultDOMValidator({ auditHook: hook, auditHookTimeoutMs: 1 } as any);

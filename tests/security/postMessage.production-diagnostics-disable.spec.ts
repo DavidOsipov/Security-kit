@@ -1,24 +1,32 @@
 import { expect, test, vi, afterEach } from "vitest";
-import * as state from "../../src/state";
-import { createSecurePostMessageListener, __test_resetForUnitTests } from "../../src/postMessage";
-import { environment } from "../../src/environment";
 
 (globalThis as any).__SECURITY_KIT_ALLOW_TEST_APIS = true;
 
-afterEach(() => {
+afterEach(async () => {
   vi.restoreAllMocks();
-  try { __test_resetForUnitTests(); } catch {}
-  try { environment.setExplicitEnv("development"); } catch {}
+  vi.resetModules();
+  try {
+    const postMessage = await import("../../src/postMessage");
+    (postMessage as any).__test_resetForUnitTests();
+  } catch {}
+  try {
+    const env = await import("../../src/environment");
+    env.environment.setExplicitEnv("development");
+  } catch {}
 });
 
 test("production disables diagnostics when crypto unavailable", async () => {
+  vi.resetModules();
   // Simulate production environment
-  environment.setExplicitEnv("production");
+  const env = await import("../../src/environment");
+  env.environment.setExplicitEnv("production");
 
   // Make ensureCrypto reject to simulate no crypto available
+  const state = await import("../../src/state");
   vi.spyOn(state, "ensureCrypto").mockRejectedValue(new Error("no crypto"));
 
-  const listener = createSecurePostMessageListener({
+  const postMessage = await import("../../src/postMessage");
+  const listener = (postMessage as any).createSecurePostMessageListener({
     allowedOrigins: ["http://localhost"],
     onMessage: () => {},
     validate: { a: "number" },

@@ -1,5 +1,4 @@
-import { createSecurePostMessageListener } from "../../src/postMessage";
-import { expect, it, describe } from "vitest";
+import { expect, it, describe, vi } from "vitest";
 
 // Minimal DOM-like environment mock for message events
 class MockWindow {
@@ -19,11 +18,13 @@ class MockWindow {
 declare const window: any;
 
 describe("postMessage freezePayload option", () => {
-  it("freezes payload by default", () => {
+  it("freezes payload by default", async () => {
+    vi.resetModules();
     const mockWin = new MockWindow() as any;
     (globalThis as any).window = mockWin;
     let received: any = null;
-    const listener = createSecurePostMessageListener(
+    const postMessage = await import("../../src/postMessage");
+    const listener = (postMessage as any).createSecurePostMessageListener(
       { allowedOrigins: ["https://trusted.example.com"], onMessage: (d: unknown) => (received = d), validate: () => true },
     );
     mockWin.postMessage(JSON.stringify({ a: 1 }), "https://trusted.example.com");
@@ -31,11 +32,13 @@ describe("postMessage freezePayload option", () => {
     expect(Object.isFrozen(received)).toBe(true);
   });
 
-  it("does not freeze when freezePayload=false", () => {
+  it("does not freeze when freezePayload=false", async () => {
+    vi.resetModules();
     const mockWin = new MockWindow() as any;
     (globalThis as any).window = mockWin;
     let received: any = null;
-    const listener = createSecurePostMessageListener(
+    const postMessage = await import("../../src/postMessage");
+    const listener = (postMessage as any).createSecurePostMessageListener(
       { allowedOrigins: ["https://trusted.example.com"], onMessage: (d: unknown) => (received = d), validate: () => true, freezePayload: false },
     );
     mockWin.postMessage(JSON.stringify({ a: 1 }), "https://trusted.example.com");

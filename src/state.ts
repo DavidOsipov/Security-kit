@@ -13,7 +13,7 @@ import {
 } from "./errors";
 import { environment, isDevelopment } from "./environment";
 import { reportProdError as reportProductionError } from "./reporting";
-import { secureDevLog as secureDevelopmentLog } from "./utils";
+import { devLog as secureDevelopmentLog } from "./dev-logger";
 
 // --- State Machine ---
 export const CryptoState = Object.freeze({

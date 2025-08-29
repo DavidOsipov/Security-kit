@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 
 import * as testInternals from '../../src/test-internals';
 import { environment } from '../../src/environment';
+import { InvalidConfigurationError } from '../../src/errors';
 
 describe('test-internals guards', () => {
   let origEnv: any;
@@ -33,7 +34,7 @@ describe('test-internals guards', () => {
     // environment detection recomputes from process.env.
     process.env.NODE_ENV = 'production';
     environment.clearCache();
-    expect(() => testInternals.toNullProtoTest({})).toThrow();
+    expect(() => testInternals.toNullProtoTest({})).toThrow(InvalidConfigurationError);
   });
 
   it('allows when global flag set', async () => {

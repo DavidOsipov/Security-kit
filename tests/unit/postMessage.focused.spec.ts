@@ -1,13 +1,16 @@
 import { beforeEach, afterEach, expect, test, vi } from 'vitest';
-import * as postMessage from '../../src/postMessage';
 
-// Enable test APIs at runtime
-beforeEach(() => {
+// Enable test APIs at runtime and reset modules
+beforeEach(async () => {
+  vi.resetModules();
   (globalThis as any).__SECURITY_KIT_ALLOW_TEST_APIS = true;
+  const postMessage = await import('../../src/postMessage');
   postMessage.__test_resetForUnitTests();
 });
-afterEach(() => {
+
+afterEach(async () => {
   delete (globalThis as any).__SECURITY_KIT_ALLOW_TEST_APIS;
+  const postMessage = await import('../../src/postMessage');
   postMessage.__test_resetForUnitTests();
   vi.restoreAllMocks();
 });
@@ -30,6 +33,7 @@ test('ensureFingerprintSalt succeeds when crypto available (subtle path mocked)'
 
   const spy = vi.spyOn(state, 'ensureCrypto').mockResolvedValue(fakeCrypto);
 
+  const postMessage = await import('../../src/postMessage');
   const salt = await postMessage.__test_ensureFingerprintSalt();
   expect(salt).toBeInstanceOf(Uint8Array);
   expect(salt.length).toBeGreaterThan(0);
@@ -44,9 +48,10 @@ test('ensureFingerprintSalt succeeds when crypto available (subtle path mocked)'
 test('ensureFingerprintSalt honors cooldown (throws when timestamp recent)', async () => {
   // Set a recent failure timestamp to trigger cooldown
   const now = Date.now();
-  postMessage.__test_setSaltFailureTimestamp(now);
+  const postMessage = await import('../../src/postMessage');
+  (postMessage as any).__test_setSaltFailureTimestamp(now);
   try {
-    await postMessage.__test_ensureFingerprintSalt();
+    await (postMessage as any).__test_ensureFingerprintSalt();
     throw new Error('Expected ensureFingerprintSalt to throw due to cooldown');
   } catch (err: any) {
     expect(err).toBeDefined();
@@ -70,7 +75,8 @@ test('getPayloadFingerprint uses subtle.digest when available', async () => {
   } as unknown as Crypto;
   const spy = vi.spyOn(state, 'ensureCrypto').mockResolvedValue(fakeCrypto);
 
-  const fp = await postMessage.__test_getPayloadFingerprint({ a: 1 });
+  const postMessage = await import('../../src/postMessage');
+  const fp = await (postMessage as any).__test_getPayloadFingerprint({ a: 1 });
   expect(typeof fp).toBe('string');
   // Since base64 slice(0,12) may be used, ensure it's not the error token
   expect(fp).not.toBe('FINGERPRINT_ERR');
@@ -98,7 +104,8 @@ test('scheduleDiagnosticForFailedValidation logs fingerprint when enabled', asyn
   // Create a listener with enableDiagnostics true and a schema validator
   // Use a spy for the consumer so we can assert messages are not delivered when validation fails
   const onMessageSpy = vi.fn();
-  const listener = postMessage.createSecurePostMessageListener(
+  const postMessage = await import('../../src/postMessage');
+  const listener = (postMessage as any).createSecurePostMessageListener(
     {
       allowedOrigins: ['http://localhost'],
       onMessage: onMessageSpy,
@@ -132,7 +139,8 @@ test('scheduleDiagnosticForFailedValidation logs fingerprint when enabled', asyn
 test('parseMessageEventData structured rejects disallowed transferables', async () => {
   // Create a listener configured for structured wireFormat
   const onMessage = vi.fn();
-  const listener = postMessage.createSecurePostMessageListener(
+  const postMessage = await import('../../src/postMessage');
+  const listener = (postMessage as any).createSecurePostMessageListener(
     {
       allowedOrigins: ['http://localhost'],
       onMessage,

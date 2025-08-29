@@ -4,6 +4,7 @@
 // and is guarded at runtime by the same dev-guards used elsewhere in the repo.
 
 import { environment } from "./environment";
+import { InvalidConfigurationError } from "./errors";
 import * as postMessageModule from "./postMessage";
 
 function assertTestAllowed(): void {
@@ -12,7 +13,7 @@ function assertTestAllowed(): void {
     process?.env?.["SECURITY_KIT_ALLOW_TEST_APIS"] === "true";
   const globalAllow = !!(globalThis as any).__SECURITY_KIT_ALLOW_TEST_APIS;
   if (environment.isProduction && !environmentAllow && !globalAllow) {
-    throw new Error(
+    throw new InvalidConfigurationError(
       "Test internals not allowed in production. Set SECURITY_KIT_ALLOW_TEST_APIS or set global flag.",
     );
   }
@@ -28,7 +29,9 @@ export function toNullProtoTest(
   const function_ =
     pm.__test_internals?.toNullProto ?? pm.__test_toNullProto ?? pm.toNullProto;
   if (typeof function_ !== "function")
-    throw new Error("toNullProto test export not available");
+    throw new InvalidConfigurationError(
+      "toNullProto test export not available",
+    );
   return function_(object, depth ?? 0, maxDepth ?? 8);
 }
 
@@ -40,7 +43,9 @@ export function getPayloadFingerprintTest(data: unknown): Promise<string> {
     pm.__test_getPayloadFingerprint ??
     pm.getPayloadFingerprint;
   if (typeof function_ !== "function")
-    throw new Error("getPayloadFingerprint test export not available");
+    throw new InvalidConfigurationError(
+      "getPayloadFingerprint test export not available",
+    );
   return function_(data as any);
 }
 
@@ -52,7 +57,9 @@ export function ensureFingerprintSaltTest(): Promise<Uint8Array> {
     pm.__test_ensureFingerprintSalt ??
     pm.ensureFingerprintSalt;
   if (typeof function_ !== "function")
-    throw new Error("ensureFingerprintSalt test export not available");
+    throw new InvalidConfigurationError(
+      "ensureFingerprintSalt test export not available",
+    );
   return function_();
 }
 
@@ -62,6 +69,6 @@ export function deepFreezeTest<T>(object: T): T {
   const function_ =
     pm.__test_internals?.deepFreeze ?? pm.__test_deepFreeze ?? pm.deepFreeze;
   if (typeof function_ !== "function")
-    throw new Error("deepFreeze test export not available");
+    throw new InvalidConfigurationError("deepFreeze test export not available");
   return function_(object);
 }

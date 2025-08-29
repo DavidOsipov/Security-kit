@@ -25,13 +25,14 @@ import {
   InvalidConfigurationError,
   CryptoUnavailableError,
   TransferableNotAllowedError,
+  EncodingError,
   sanitizeErrorForLogs,
 } from "./errors";
 import { ensureCrypto } from "./state";
 import {
   secureDevLog as secureDevelopmentLog,
-  _arrayBufferToBase64,
 } from "./utils";
+import { arrayBufferToBase64 } from "./encoding-utils";
 import { SHARED_ENCODER } from "./encoding";
 import { isForbiddenKey } from "./constants";
 import { environment } from "./environment";
@@ -73,12 +74,7 @@ export type CreateSecurePostMessageListenerOptions = {
   readonly allowTransferables?: boolean; // default false: disallow transferables like MessagePort/ArrayBuffer
   readonly allowTypedArrays?: boolean; // default false: disallow TypedArray/DataView/ArrayBuffer without opt-in
 };
-
-// Re-export TransferableNotAllowedError for consumers
-export { TransferableNotAllowedError } from "./errors";
-
-// Export validateTransferables for testing
-export { validateTransferables };
+export { validateTransferables, TransferableNotAllowedError };
 
 // --- Constants ---
 
@@ -768,10 +764,10 @@ export function createSecurePostMessageListener(
       const norm = normalizeUrlOrigin(o);
       // Validate canonicalization by parsing norm
       const u = new URL(norm);
-      if (u.origin === "null") throw new Error("opaque origin");
+      if (u.origin === "null") throw new InvalidParameterError("opaque origin");
       const isLocalhost = isHostnameLocalhost(u.hostname);
       if (u.protocol !== "https:" && !isLocalhost)
-        throw new Error("insecure origin");
+        throw new InvalidParameterError("insecure origin");
       return norm;
     } catch {
       throw new InvalidParameterError(
@@ -1189,10 +1185,10 @@ function stableStringify(
   let nodes = 0;
 
   function norm(o: unknown, depth: number): unknown {
-    if (++nodes > nodeBudget) throw new Error("budget");
+    if (++nodes > nodeBudget) throw new InvalidParameterError("budget");
     if (o === null || typeof o !== "object") return o;
-    if (depth > maxDepth) throw new Error("depth");
-    if (seen.has(o as object)) throw new Error("circular");
+    if (depth > maxDepth) throw new InvalidParameterError("depth");
+    if (seen.has(o as object)) throw new InvalidParameterError("circular");
     seen.add(o as object);
     if (Array.isArray(o))
       return (o as readonly unknown[]).map((v) => norm(v, depth + 1));
@@ -1372,7 +1368,7 @@ async function getPayloadFingerprint(data: unknown): Promise<string> {
   if (!stable.ok) {
     // If canonicalization fails, return an explicit error token in prod or a fallback in dev
     if (environment.isProduction)
-      throw new Error("Fingerprinting failed due to resource constraints");
+      throw new EncodingError("Fingerprinting failed due to resource constraints");
     // dev/test fallback: use best-effort raw string truncated
 
     const s = JSON.stringify(sanitized).slice(0, POSTMESSAGE_MAX_PAYLOAD_BYTES);
@@ -1400,7 +1396,7 @@ async function getPayloadFingerprint(data: unknown): Promise<string> {
       input.set(saltArray, 0);
       input.set(payloadBytes, saltArray.length);
       const digest = await subtle.digest("SHA-256", input.buffer);
-      return _arrayBufferToBase64(digest).slice(0, 12);
+      return arrayBufferToBase64(digest).slice(0, 12);
     }
   } catch {
     /* fall through to non-crypto fallback */
@@ -1431,7 +1427,7 @@ async function computeFingerprintFromString(s: string): Promise<string> {
   try {
     saltBuf = await ensureFingerprintSalt();
   } catch {
-    if (environment.isProduction) throw new Error("Fingerprinting unavailable");
+    if (environment.isProduction) throw new InvalidConfigurationError("Fingerprinting unavailable");
   }
 
   try {
@@ -1444,7 +1440,7 @@ async function computeFingerprintFromString(s: string): Promise<string> {
       input.set(saltArray, 0);
       input.set(payloadBytes, saltArray.length);
       const digest = await subtle.digest("SHA-256", input.buffer);
-      return _arrayBufferToBase64(digest).slice(0, 12);
+      return arrayBufferToBase64(digest).slice(0, 12);
     }
   } catch {
     /* fall through to non-crypto fallback */

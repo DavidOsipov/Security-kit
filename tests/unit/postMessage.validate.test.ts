@@ -1,32 +1,56 @@
-import { describe, it, expect } from "vitest";
-import { _validatePayload, _validatePayloadWithExtras } from "../../src/postMessage";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 
 describe("_validatePayload (schema)", () => {
-  it("validates simple schema and rejects forbidden keys", () => {
-    const schema = { id: "string" as const, n: "number" as const };
-    expect(_validatePayload({ id: "x", n: 1 }, schema).valid).toBe(true);
-    expect(_validatePayload({ id: "x" }, schema).valid).toBe(false);
-    expect(_validatePayload({ id: "x", n: "no" }, schema).valid).toBe(false);
-    // forbidden key test
-    expect(_validatePayload({ __proto__: {} }, schema).valid).toBe(false);
+  beforeEach(async () => {
+    // Reset module cache before each test to ensure clean state
+    vi.resetModules();
+    // Allow test APIs in runtime by setting global flag
+    (globalThis as any).__SECURITY_KIT_ALLOW_TEST_APIS = true;
+  });
+  afterEach(async () => {
+    delete (globalThis as any).__SECURITY_KIT_ALLOW_TEST_APIS;
+    vi.restoreAllMocks();
   });
 
-  it("allows function validators and surfaces thrown errors", () => {
+  it("validates simple schema and rejects forbidden keys", async () => {
+    const postMessage = await import("../../src/postMessage");
+    const schema = { id: "string" as const, n: "number" as const };
+    expect(postMessage._validatePayload({ id: "x", n: 1 }, schema).valid).toBe(true);
+    expect(postMessage._validatePayload({ id: "x" }, schema).valid).toBe(false);
+    expect(postMessage._validatePayload({ id: "x", n: "no" }, schema).valid).toBe(false);
+    // forbidden key test
+    expect(postMessage._validatePayload({ __proto__: {} }, schema).valid).toBe(false);
+  });
+
+  it("allows function validators and surfaces thrown errors", async () => {
+    const postMessage = await import("../../src/postMessage");
     const fn = (d: unknown) => {
       if (typeof d !== "object" || d == null) throw new Error("bad");
       return true;
     };
-    const res = _validatePayload({ a: 1 }, fn as any);
+    const res = postMessage._validatePayload({ a: 1 }, fn as any);
     expect(res.valid).toBe(true);
-    const res2 = _validatePayload("no", fn as any);
+    const res2 = postMessage._validatePayload("no", fn as any);
     expect(res2.valid).toBe(false);
   });
 });
 
 describe("_validatePayloadWithExtras", () => {
-  it("rejects unexpected extra props when not allowed", () => {
+  beforeEach(async () => {
+    // Reset module cache before each test to ensure clean state
+    vi.resetModules();
+    // Allow test APIs in runtime by setting global flag
+    (globalThis as any).__SECURITY_KIT_ALLOW_TEST_APIS = true;
+  });
+  afterEach(async () => {
+    delete (globalThis as any).__SECURITY_KIT_ALLOW_TEST_APIS;
+    vi.restoreAllMocks();
+  });
+
+  it("rejects unexpected extra props when not allowed", async () => {
+    const postMessage = await import("../../src/postMessage");
     const schema = { a: "number" as const };
-    expect(_validatePayloadWithExtras({ a: 1, b: 2 }, schema, false).valid).toBe(false);
-    expect(_validatePayloadWithExtras({ a: 1, b: 2 }, schema, true).valid).toBe(true);
+    expect(postMessage._validatePayloadWithExtras({ a: 1, b: 2 }, schema, false).valid).toBe(false);
+    expect(postMessage._validatePayloadWithExtras({ a: 1, b: 2 }, schema, true).valid).toBe(true);
   });
 });

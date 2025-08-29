@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { withAdvancedDateNow } from '../helpers/advanceDateNow';
 import { NonceStore } from '../../server/nonce-store';
 import { InvalidParameterError } from '../../src/errors';
 
@@ -24,30 +25,22 @@ describe('NonceStore (sync test wrapper)', () => {
     store.store(kid, nonce, 50); // 50ms
     expect(store.has(kid, nonce)).toBe(true);
     // advance system time so Date.now() reflects expiry (NonceStore uses Date.now())
-    vi.useFakeTimers();
-    try {
-      const now = Date.now();
-      vi.setSystemTime(now + 1000);
-      expect(store.has(kid, nonce)).toBe(false); // while fake timers are active, Date.now() reflects advanced time
-    } finally {
-      vi.useRealTimers();
-    }
+    const now = Date.now();
+    await withAdvancedDateNow(now + 1000, async () => {
+      expect(store.has(kid, nonce)).toBe(false);
+    });
   });
 
   it('cleanup removes expired entries and size reports correctly', async () => {
     store.store('k1', 'AA==', 10);
     store.store('k2', 'AQ==', 1000);
     expect(store.size).toBe(2);
-    // after some time first expires — advance system time instead of timers
+    // after some time first expires — advance system time without mocking timers
     const realNow = Date.now();
-    vi.useFakeTimers();
-    try {
-  vi.setSystemTime(realNow + 50);
+    await withAdvancedDateNow(realNow + 50, async () => {
       store.cleanup();
       expect(store.size).toBe(1);
-    } finally {
-      vi.useRealTimers();
-    }
+    });
   });
 });
 

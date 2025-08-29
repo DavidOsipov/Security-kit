@@ -31,7 +31,11 @@ describe("dom.ts coverage targets", () => {
 
   it("promiseWithTimeout rejects on timeout", async () => {
   const mod: any = await import("../../src/dom");
-  const slow = new Promise((res) => setTimeout(() => res("ok"), 50));
+  // Create a promise that resolves after fake timer delay instead of real setTimeout
+  const slow = new Promise((res) => {
+    vi.useFakeTimers();
+    setTimeout(() => res("ok"), 50);
+  });
   const p = mod.__test_promiseWithTimeout(slow as Promise<unknown>, 10, "boom");
   // Attach a noop catch immediately to avoid unhandled rejection warnings
   // when the timeout fires before the test attaches assertions.

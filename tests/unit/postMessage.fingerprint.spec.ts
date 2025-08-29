@@ -1,18 +1,22 @@
-import * as postMessage from '../../src/postMessage';
-import * as state from '../../src/state';
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 
 describe('postMessage fingerprinting (subtle and fallback)', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
+    // Reset module cache before each test to ensure clean state
+    vi.resetModules();
+    // Allow test APIs in runtime by setting global flag
     (globalThis as any).__SECURITY_KIT_ALLOW_TEST_APIS = true;
-    postMessage.__test_resetForUnitTests();
   });
-  afterEach(() => {
+  afterEach(async () => {
     delete (globalThis as any).__SECURITY_KIT_ALLOW_TEST_APIS;
-    postMessage.__test_resetForUnitTests();
     vi.restoreAllMocks();
   });
 
-  test('getPayloadFingerprint uses subtle.digest when available', async () => {
+  it('getPayloadFingerprint uses subtle.digest when available', async () => {
+    // Use dynamic imports for clean module isolation
+    const postMessage = await import('../../src/postMessage');
+    const state = await import('../../src/state');
+
     // Fake crypto with subtle.digest that returns a deterministic ArrayBuffer
     const fakeDigest = async (_alg: string, _buf: ArrayBuffer) => {
       // return 32-byte zero buffer
@@ -33,7 +37,11 @@ describe('postMessage fingerprinting (subtle and fallback)', () => {
     expect(fp.length).toBeGreaterThan(0);
   });
 
-  test('ensureFingerprintSalt fallback when ensureCrypto rejects', async () => {
+  it('ensureFingerprintSalt fallback when ensureCrypto rejects', async () => {
+    // Use dynamic imports for clean module isolation
+    const postMessage = await import('../../src/postMessage');
+    const state = await import('../../src/state');
+
     const spy = vi.spyOn(state, 'ensureCrypto').mockRejectedValue(new Error('no crypto'));
     // calling ensureFingerprintSalt should not throw in dev and should produce a Uint8Array
     const salt = await postMessage.__test_ensureFingerprintSalt();

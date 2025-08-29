@@ -206,6 +206,125 @@ Every rule below is mandatory. Each test file should include a comment referenci
     });
     ```
 *   **CI Check:** The `security` test suite **MUST** pass.
+  
+
+### RULE: Strict Module State Isolation (MUST)
+
+-   **Statement:** Every test that evaluates a module with file-level state **MUST** ensure that the module is re-imported in a clean state for that test. State from one test **MUST NOT** leak into another.
+-   **Rationale:** Prevents flaky, order-dependent tests caused by shared module-level caches, variables, or initialization logic. Guarantees that each test runs in a predictable and isolated environment, which is critical for verifying the behavior of security-critical code.
+-   **Mandated Implementation (`Vitest`):**
+    1.  A `beforeEach(() => { vi.resetModules() })` hook **MUST** be used to clear the module cache before every test in the suite.
+    2.  The module-under-test **MUST** be imported dynamically within each test case (e.g., `const myModule = await import('./myModule.ts')`). Top-level static imports of stateful modules being tested are forbidden in test files that require isolation.
+-   **Test Implementation Example:**
+    ```javascript
+    // tests/stateful-module.test.ts
+    // RULE-ID: module-state-isolation
+    import { beforeEach, test, expect, vi } from 'vitest';
+
+    // No top-level import of './data-store'
+
+    beforeEach(() => {
+      vi.resetModules();
+    });
+
+    test('module starts with default state', async () => {
+      // Dynamic import gets a fresh instance
+      const { getState } = await import('./data-store');
+      expect(getState()).toEqual({ value: 'default' });
+    });
+
+    test('state change in one test does not affect another', async () => {
+      // This dynamic import gets another, completely fresh instance
+      const { setState, getState } = await import('./data-store');
+      setState({ value: 'modified' });
+      expect(getState()).toEqual({ value: 'modified' });
+    });
+    ```
+-   **CI Check:** Code reviews **MUST** verify that tests for stateful modules adhere to this isolation pattern.
+
+### RULE: Deterministic Asynchronous Tests (MUST)
+
+-   **Statement:** Tests that verify asynchronous behavior involving timers (`setTimeout`, `setInterval`, `Date`) **MUST NOT** rely on arbitrary real-time waits. They **MUST** use the test runner's fake timer capabilities to create deterministic, reliable, and fast tests.
+-   **Rationale:** Eliminates a primary source of test flakiness and unreliable coverage reports caused by race conditions between the test runner and the code's async operations. This ensures the test suite is 100% repeatable and trustworthy.
+-   **Mandated Implementation (`Vitest`):**
+    1.  The `describe` block or test file containing timer-dependent tests **MUST** enable fake timers using a `beforeEach(() => { vi.useFakeTimers() })` hook.
+    2.  A corresponding `afterEach(() => { vi.useRealTimers() })` hook **MUST** be used to clean up the environment and prevent side effects in other tests.
+    3.  Asynchronous progression **MUST** be controlled via explicit calls to timer advancement functions (e.g., `await vi.runAllTimersAsync()`, `await vi.advanceTimersByTimeAsync(...)`).
+-   **Test Implementation Example:**
+    ```javascript
+    // tests/async/scheduler.test.ts
+    // RULE-ID: deterministic-async
+    import { beforeEach, afterEach, test, expect, vi } from 'vitest';
+    import { scheduleTask } from './scheduler';
+
+    describe('Scheduler', () => {
+      beforeEach(() => {
+        vi.useFakeTimers();
+      });
+
+      afterEach(() => {
+        vi.useRealTimers();
+      });
+
+      test('should execute a task after 100ms', async () => {
+        const task = vi.fn();
+        scheduleTask(task, 100);
+
+        // Assert task has not run yet
+        expect(task).not.toHaveBeenCalled();
+
+        // Advance time deterministically
+        await vi.advanceTimersByTimeAsync(100);
+
+        // Assert task has now run exactly once
+        expect(task).toHaveBeenCalledTimes(1);
+      });
+    });
+    ```
+-   **CI Check:** The presence of `new Promise(r => setTimeout(r, ...))` in test files is considered a code smell and **MUST** be justified during code review. Failure of any async test blocks the PR.
+
+### RULE: Controlled Realm Testing (SHOULD)
+
+-   **Statement:** Code designed to be resilient against different JavaScript realms (e.g., `window` vs. `iframe`, Web Worker contexts) **SHOULD** have a small, dedicated suite of tests that verify this resilience using a true realm-isolating technology.
+-   **Rationale:** While most tests benefit from running in a single, integrated environment, certain security-sensitive checks (like robust `instanceof` alternatives or protection against global object pollution) can only be proven with true realm separation.
+-   **Mandated Implementation:** Use of a tool like `node:vm` or a browser-based E2E test with iframes is appropriate for these specific tests. These tests **MUST** be clearly separated from standard unit/integration tests.
+-   **Test Implementation Example (Conceptual):**
+    ```javascript
+    // tests/security/realm.spec.ts
+    // RULE-ID: controlled-realm-testing
+    import { test, expect } from 'vitest';
+    import loadModuleInVm from './helpers/vmHelper'; // A helper like vmPostMessageHelper
+
+    test('safeCtorName should correctly identify object types from another realm', () => {
+  const { safeCtorName, __runInVmJson } = loadModuleInVm();
+
+  // Create a Uint8Array inside the VM's realm and return a serializable result
+  const objectFromVm = __runInVmJson('return Array.from(new Uint8Array(8));');
+
+      // Run the function from the module (also in the VM) against the object
+      const name = safeCtorName(objectFromVm);
+      
+      // Assert that our realm-safe check works correctly
+      expect(name).toBe('Uint8Array');
+    });
+    ```
+-   **CI Check:** The `realm` or `security` test suite **MUST** pass. The use of VM-based testing should be limited and justified for its specific purpose.
+
+#### RULE: Controlled Realm Runner Usage (SHOULD)
+
+- **Statement:** When writing controlled-realm tests (e.g., using `node:vm`) prefer running realm-sensitive assertions inside the VM and returning JSON-serializable results to the host test runner. Use the project helper's `__runInVmJson(code: string)` API for this purpose.
+- **Rationale:** Passing rich VM objects (with prototypes/constructors) directly into the host test environment is brittle and error-prone. Many cross-realm checks (constructor-name, ArrayBuffer.isView, structured cloning) are safer and more deterministic when executed in the VM and marshalled as primitives or simple objects to the host.
+- **Mandated Implementation (Recommended):** The VM helper should expose a function such as `__runInVmJson` that executes the provided code in the VM, JSON-stringifies the result in the VM, and returns a parsed value to the host test. Tests should assert on the returned primitives instead of attempting `instanceof` or prototype inspection on VM-created host objects.
+- **Example:**
+```javascript
+// In test file
+const pm = loadPostMessageInternals();
+// Ask VM to create a typed array and return its serializable contents
+const arr = pm.__runInVmJson('return Array.from(new Uint8Array([1,2,3]))');
+expect(arr).toEqual([1,2,3]);
+```
+- **CI Check:** Tests that rely on cross-realm behavior **SHOULD** use this pattern. Exceptions must be justified in code review.
+
 
 ### RULE: SEO: Structured Data Graph Integrity (MUST)
 

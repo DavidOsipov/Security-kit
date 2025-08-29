@@ -6,6 +6,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { withAdvancedDateNow } from '../../tests/helpers/advanceDateNow';
 import { SecureApiSigner } from '../../src/secure-api-signer';
 import { 
   verifyApiRequestSignature, 
@@ -80,7 +81,12 @@ class ExtendedMockWorker {
       const delay = typeof this.opts.delayMs === 'number' ? this.opts.delayMs : 5;
       const port = transfer && transfer.length === 1 ? transfer[0] as MessagePort : null;
 
-      // Helper to deliver a message either via microtask (fast) or setTimeout (delayed)
+      // Helper to deliver a message either via microtask (fast) or setTimeout (delayed).
+      // Tests rely on microtask-scheduled quick responses for deterministic behavior
+      // (Promise.resolve().then(...)). Using vitest fake timers interferes with
+      // microtask scheduling and can cause flaky timeouts; therefore tests that
+      // rely on microtask responses should avoid fake timers or use the
+      // `withAdvancedDateNow` helper to control Date.now without mocking timers.
       const schedule = (fn: () => void) => {
         if (delay <= 1) Promise.resolve().then(fn);
         else setTimeout(fn, delay);
@@ -346,15 +352,9 @@ describe('SecureApiSigner - Extended Canonical Format & Security Features', () =
   // Advance relative to the signer's last failure time to ensure we surpass
   // the internal circuit-breaker lastFailureTime deterministically.
   const lastFailure = signer.getCircuitBreakerStatus().lastFailureTime || Date.now();
-  // Instead of using fake timers (which interferes with microtask scheduling
-  // in our mock worker), temporarily monkey-patch Date.now to report an
-  // advanced time. This lets timers and microtasks operate normally while
-  // the signer observes the passed interval for circuit-breaker logic.
-  const origDateNow = Date.now;
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- test-only shim
-    (Date as any).now = () => lastFailure + 61000;
-
+  // Run the recovery attempt with Date.now patched to an advanced time while
+  // leaving timers and microtasks intact (use helper to centralize behavior).
+  await withAdvancedDateNow(lastFailure + 61000, async () => {
     // Ensure the worker will respond successfully for the half-open recovery attempt
     if (mockWorker && mockWorker.opts) {
       mockWorker.opts.failCount = 0;
@@ -373,11 +373,7 @@ describe('SecureApiSigner - Extended Canonical Format & Security Features', () =
 
     await signer.destroy();
     await signer.destroy();
-  } finally {
-    // Restore Date.now to its original implementation
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- restore
-    (Date as any).now = origDateNow;
-  }
+  });
       } finally {
         vi.useRealTimers();
       }

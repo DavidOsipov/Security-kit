@@ -108,7 +108,7 @@ export class Sanitizer {
 
     // Use optional chaining to detect availability of the Trusted Types API.
     if (typeof window.trustedTypes?.createPolicy !== "function") {
-      throw new Error(
+      throw new InvalidConfigurationError(
         "Trusted Types API is not available in this environment.",
       );
     }
@@ -135,10 +135,10 @@ export class Sanitizer {
         }) as TrustedHTML;
       },
       createScript: () => {
-        throw new TypeError("Dynamic scripts are not allowed");
+        throw new InvalidParameterError("Dynamic scripts are not allowed");
       },
       createScriptURL: () => {
-        throw new TypeError("Dynamic script URLs are not allowed");
+        throw new InvalidParameterError("Dynamic script URLs are not allowed");
       },
     });
 

@@ -12,9 +12,11 @@
 import {
   InvalidParameterError,
   InvalidConfigurationError,
+  CryptoUnavailableError,
   sanitizeErrorForLogs,
 } from "./errors";
 import { secureDevLog as secureDevelopmentLog, secureWipe } from "./utils";
+import { SHARED_ENCODER } from "./encoding";
 
 /*
 /* NOTE: This file intentionally performs a few runtime-type checks and
@@ -179,7 +181,7 @@ function promiseWithTimeout<T>(
  *  - All imported modules are validated by runtime shape checks; no unchecked `any` usage.
  */
 async function sha256Hex(input: string, timeoutMs = 1500): Promise<string> {
-  const enc = new TextEncoder();
+  const enc = SHARED_ENCODER;
 
   // Test hook: allow unit tests to override dynamic imports deterministically.
   // Tests may set __test_importOverride to a function that receives a module
@@ -350,7 +352,7 @@ async function sha256Hex(input: string, timeoutMs = 1500): Promise<string> {
     if (typeof out === "string") return out;
   }
 
-  throw new Error("No crypto available");
+  throw new CryptoUnavailableError("No crypto available");
 }
 
 /** Sanitize selector for logs: strip attribute values and quoted substrings; truncate. */

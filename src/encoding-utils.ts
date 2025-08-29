@@ -2,6 +2,8 @@
 // SPDX-FileCopyrightText: © 2025 David Osipov
 // Shared encoding and crypto helpers used by both main thread and worker.
 
+import { CryptoUnavailableError, EncodingError } from "./errors";
+
 const DEFAULT_CHUNK = 8192;
 
 // Normalize base64url to standard base64 and fix padding
@@ -36,7 +38,7 @@ export function bytesToBase64(
     return btoa(binary);
   }
 
-  throw new Error("No base64 encoder available in this environment");
+  throw new EncodingError("No base64 encoder available in this environment");
 }
 
 export function base64ToBytes(b64: string): Uint8Array {
@@ -65,7 +67,7 @@ export function base64ToBytes(b64: string): Uint8Array {
     // fallthrough
   }
 
-  throw new Error("No base64 decoder available in this environment");
+  throw new EncodingError("No base64 decoder available in this environment");
 }
 
 export function isLikelyBase64(s: string): boolean {
@@ -81,7 +83,9 @@ async function getSubtle(): Promise<SubtleCrypto> {
     return (globalThis.crypto as any).subtle as SubtleCrypto;
   }
   // Per instruction: ignore older Node fallback guidance. If subtle isn't available, throw.
-  throw new Error("SubtleCrypto not available in this environment");
+  throw new CryptoUnavailableError(
+    "SubtleCrypto not available in this environment",
+  );
 }
 
 export async function sha256Base64(input: BufferSource): Promise<string> {
@@ -97,4 +101,8 @@ export function secureWipeWrapper(view: Uint8Array): void {
   } catch {
     // ignore
   }
+}
+
+export function arrayBufferToBase64(buf: ArrayBuffer): string {
+  return bytesToBase64(new Uint8Array(buf));
 }
