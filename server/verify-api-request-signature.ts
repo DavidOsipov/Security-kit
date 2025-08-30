@@ -27,6 +27,7 @@ import {
 import { SHARED_ENCODER } from "../src/encoding.js";
 import { safeStableStringify } from "../src/canonical.js";
 import { base64ToBytes, bytesToBase64, isLikelyBase64 } from "../src/encoding-utils.js";
+import { getHandshakeConfig } from "../src/config.js";
 
 /** Input shape expected by verification with positive validation */
 export type VerifyExtendedInput = {
@@ -47,13 +48,10 @@ const NONCE_TTL_MS = 300_000; // 5 minutes — shorter replay window by default
 const DEFAULT_RESERVATION_TTL_MS = 10_000; // 10s provisional reservation to mitigate nonce-store DoS
 
 // Precompiled regex patterns for performance
-const NONCE_BASE64_RE = /^[A-Za-z0-9+/]+={0,2}$/;
 const METHOD_RE = /^[A-Z]+$/;
-const PATH_RE = /^\/[\w\/.%-]*$/;
 const KID_RE = /^[a-zA-Z0-9._-]+$/;
 
 // Security limits
-const MAX_NONCE_LENGTH = 256;
 const MAX_SIGNATURE_LENGTH = 512;
 const MAX_PATH_LENGTH = 2048;
 const MAX_METHOD_LENGTH = 20;
@@ -191,12 +189,28 @@ export class InMemoryNonceStore implements INonceStore {
     if (typeof kid !== 'string' || kid.length === 0 || kid.length > 128) {
       throw new InvalidParameterError('kid must be a non-empty string');
     }
-    if (typeof nonce !== 'string' || nonce.length === 0 || nonce.length > 256) {
+    if (typeof nonce !== 'string' || nonce.length === 0) {
       throw new InvalidParameterError('nonce must be a non-empty string');
     }
-    // Stricter base64 validation: padding only at end
-    if (!/^[A-Za-z0-9+/]+={0,2}$/.test(nonce)) {
-      throw new InvalidParameterError('nonce must be base64-encoded');
+
+    const cfg = getHandshakeConfig();
+    const maxLen = typeof cfg.handshakeMaxNonceLength === 'number' ? cfg.handshakeMaxNonceLength : 256;
+    const allowedFormats = Array.isArray(cfg.allowedNonceFormats) && cfg.allowedNonceFormats.length > 0
+      ? cfg.allowedNonceFormats
+      : ["base64", "base64url"];
+
+    if (nonce.length > maxLen) {
+      throw new InvalidParameterError('nonce must be a non-empty string');
+    }
+
+    const allowed = (() => {
+      if ((allowedFormats.includes('base64') || allowedFormats.includes('base64url')) && isLikelyBase64(nonce)) return true;
+      if (allowedFormats.includes('hex') && /^[0-9a-fA-F]+$/.test(nonce)) return true;
+      return false;
+    })();
+
+    if (!allowed) {
+      throw new InvalidParameterError('nonce must be in an allowed encoded format');
     }
   }
 }
@@ -228,15 +242,33 @@ function validateVerifyInput(input: VerifyExtendedInput): void {
     throw new InvalidParameterError("Secret must be string, ArrayBuffer, or Uint8Array");
   }
 
-  // Nonce validation (positive validation) - must be standard base64 (client produces this)
+  // Nonce validation (config-driven): consult centralized handshake policy
   if (typeof input.nonce !== "string" || input.nonce.length === 0) {
     throw new InvalidParameterError("nonce must be a non-empty string");
   }
-  if (input.nonce.length > MAX_NONCE_LENGTH) {
-    throw new InvalidParameterError("nonce too long");
-  }
-  if (!NONCE_BASE64_RE.test(input.nonce)) {
-    throw new InvalidParameterError("nonce must be standard base64");
+  try {
+    const cfg = getHandshakeConfig();
+    const maxLen = typeof cfg.handshakeMaxNonceLength === 'number' ? cfg.handshakeMaxNonceLength : 256;
+    const allowedFormats = Array.isArray(cfg.allowedNonceFormats) && cfg.allowedNonceFormats.length > 0
+      ? cfg.allowedNonceFormats
+      : ["base64", "base64url"];
+
+    if (input.nonce.length > maxLen) {
+      throw new InvalidParameterError("nonce too long");
+    }
+
+    const isAllowed = (() => {
+      if ((allowedFormats.includes('base64') || allowedFormats.includes('base64url')) && isLikelyBase64(input.nonce)) return true;
+      if (allowedFormats.includes('hex') && /^[0-9a-fA-F]+$/.test(input.nonce)) return true;
+      return false;
+    })();
+
+    if (!isAllowed) {
+      throw new InvalidParameterError("nonce is not in an allowed format");
+    }
+  } catch (err) {
+    if (err instanceof InvalidParameterError) throw err;
+    throw new InvalidParameterError('Invalid nonce');
   }
 
   // Timestamp validation
@@ -349,23 +381,7 @@ function timingSafeEqualBytes(a: Uint8Array, b: Uint8Array): boolean {
   return diff === 0;
 }
 
-// Robust bytes → base64 (browser or Node)
-function bytesToBase64(bytes: Uint8Array): string {
-  if (typeof btoa === "function") {
-    // Browser environment
-    let s = "";
-    for (let i = 0; i < bytes.length; i++) {
-      const code = bytes[i] as number;
-      s += String.fromCharCode(code);
-    }
-    return btoa(s);
-  }
-  // Node.js environment
-  if (typeof Buffer !== "undefined") {
-    return Buffer.from(bytes).toString("base64");
-  }
-  throw new Error("No base64 encoding available");
-}
+// Note: bytesToBase64 helper is provided by src/encoding-utils and imported above.
 
 // Compute HMAC-SHA256 (cross-platform, ESM-safe)
 async function computeHmacSha256(keyBytes: Uint8Array, messageBytes: Uint8Array): Promise<Uint8Array> {

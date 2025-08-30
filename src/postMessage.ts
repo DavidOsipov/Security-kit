@@ -29,9 +29,7 @@ import {
   sanitizeErrorForLogs,
 } from "./errors";
 import { ensureCrypto } from "./state";
-import {
-  secureDevLog as secureDevelopmentLog,
-} from "./utils";
+import { secureDevLog as secureDevelopmentLog } from "./utils";
 import { arrayBufferToBase64 } from "./encoding-utils";
 import { SHARED_ENCODER } from "./encoding";
 import { isForbiddenKey } from "./constants";
@@ -1368,7 +1366,9 @@ async function getPayloadFingerprint(data: unknown): Promise<string> {
   if (!stable.ok) {
     // If canonicalization fails, return an explicit error token in prod or a fallback in dev
     if (environment.isProduction)
-      throw new EncodingError("Fingerprinting failed due to resource constraints");
+      throw new EncodingError(
+        "Fingerprinting failed due to resource constraints",
+      );
     // dev/test fallback: use best-effort raw string truncated
 
     const s = JSON.stringify(sanitized).slice(0, POSTMESSAGE_MAX_PAYLOAD_BYTES);
@@ -1427,7 +1427,8 @@ async function computeFingerprintFromString(s: string): Promise<string> {
   try {
     saltBuf = await ensureFingerprintSalt();
   } catch {
-    if (environment.isProduction) throw new InvalidConfigurationError("Fingerprinting unavailable");
+    if (environment.isProduction)
+      throw new InvalidConfigurationError("Fingerprinting unavailable");
   }
 
   try {

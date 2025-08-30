@@ -1,13 +1,17 @@
-import { test } from 'vitest';
+import { test, expect } from "vitest";
 
-// Placeholder: signing-worker contains complex Worker runtime code that
-// is exercised in integration tests. Provide skipped unit tests as
-// reminders to expand into focused unit tests for pure helpers.
+// Enable test API guard for this module
+process.env.SECURITY_KIT_ALLOW_TEST_APIS = "true";
 
-test.skip('signing-worker: should validate sign parameters (TODO)', () => {
-  // TODO: extract pure helpers to a module and unit test them here.
+test("signing-worker: __test_validateHandshakeNonce accepts reasonable nonces", async () => {
+  const worker = await import("../../src/worker/signing-worker");
+  const ok = worker.__test_validateHandshakeNonce("short-nonce");
+  expect(ok).toBe(true);
 });
 
-test.skip('signing-worker: should handle handshake and sign flows (TODO)', () => {
-  // TODO: build a MessageChannel mock and test handleHandshakeRequest/handleSignRequest
+test("signing-worker: __test_validateHandshakeNonce rejects overly long nonces", async () => {
+  const worker = await import("../../src/worker/signing-worker");
+  const long = "a".repeat(2000);
+  const ok = worker.__test_validateHandshakeNonce(long);
+  expect(ok).toBe(false);
 });
