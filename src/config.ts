@@ -134,5 +134,37 @@ export function setHandshakeConfig(cfg: Partial<HandshakeConfig>): void {
       "Configuration is sealed and cannot be changed.",
     );
   }
+  // Validate handshakeMaxNonceLength if provided
+  if (
+    cfg.handshakeMaxNonceLength !== undefined &&
+    (!Number.isInteger(cfg.handshakeMaxNonceLength) ||
+      cfg.handshakeMaxNonceLength <= 0)
+  ) {
+    throw new InvalidParameterError(
+      `handshakeMaxNonceLength must be a positive integer, got: ${String(
+        cfg.handshakeMaxNonceLength,
+      )}`,
+    );
+  }
+
+  // Validate allowedNonceFormats if provided
+  if (cfg.allowedNonceFormats !== undefined) {
+    if (
+      !Array.isArray(cfg.allowedNonceFormats) ||
+      cfg.allowedNonceFormats.length === 0
+    ) {
+      throw new InvalidParameterError(
+        `allowedNonceFormats must be a non-empty array of NonceFormat values.`,
+      );
+    }
+    for (const f of cfg.allowedNonceFormats) {
+      if (typeof f !== "string" || f.length === 0) {
+        throw new InvalidParameterError(
+          `allowedNonceFormats must contain only non-empty strings. Found: ${String(f)}`,
+        );
+      }
+    }
+  }
+
   _handshakeConfig = { ..._handshakeConfig, ...cfg };
 }

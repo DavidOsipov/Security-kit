@@ -18,6 +18,13 @@
  * handled with narrowly-scoped disables where mutation is required.
  */
 /* eslint-disable unicorn/prevent-abbreviations */
+/*
+ * The helpers in this file intentionally perform a very small number of
+ * well-audited mutations (lifecycle flags, telemetry registration, and
+ * efficient buffer wiping). We prefer narrow, inline disables next to the
+ * actual mutation sites rather than blanket file-level disables. The file
+ * keeps minimal and behavior-preserving edits only.
+ */
 
 import {
   InvalidParameterError,
@@ -70,9 +77,8 @@ export type TelemetryHook = (
  */
 type UnregisterCallback = () => void;
 
-const telemetryState: { readonly hook: TelemetryHook | undefined } = {
-  hook: undefined,
-};
+/* eslint-disable-next-line functional/no-let -- telemetry hook must be mutable for register/unregister */
+let telemetryHook: TelemetryHook | undefined;
 
 /**
  * Sanitizes telemetry tags against an allowlist to prevent accidental leakage of sensitive data.
@@ -82,15 +88,17 @@ function sanitizeMetricTags(
   tags?: Readonly<Record<string, string>>,
 ): Record<string, string> | undefined {
   if (!tags) return undefined;
-  const out: Record<string, string> = {};
   const allow = new Set(["reason", "strict", "requireCrypto", "subtlePresent"]);
-  for (const [key, value] of Object.entries(tags)) {
-    if (allow.has(key)) {
-      // eslint-disable-next-line functional/immutable-data
-      out[key] = String(value).slice(0, 64);
-    }
-  }
-  return Object.keys(out).length > 0 ? out : undefined;
+
+  const obj = Object.entries(tags).reduce(
+    (acc, [key, value]) => {
+      if (!allow.has(key)) return acc;
+      return { ...acc, [key]: String(value).slice(0, 64) };
+    },
+    {} as Record<string, string>,
+  );
+
+  return Object.keys(obj).length > 0 ? obj : undefined;
 }
 
 /**
@@ -101,18 +109,16 @@ function sanitizeMetricTags(
  * @throws {InvalidParameterError} If the provided hook is not a function.
  */
 export function registerTelemetry(hook: TelemetryHook): UnregisterCallback {
-  if (telemetryState.hook) {
+  if (telemetryHook) {
     throw new IllegalStateError("Telemetry hook has already been registered.");
   }
   if (typeof hook !== "function") {
     throw new InvalidParameterError("Telemetry hook must be a function.");
   }
-  // eslint-disable-next-line functional/immutable-data
-  (telemetryState as { hook: TelemetryHook | undefined }).hook = hook;
+  telemetryHook = hook;
 
   return () => {
-    // eslint-disable-next-line functional/immutable-data
-    if (telemetryState.hook === hook) (telemetryState as { hook: TelemetryHook | undefined }).hook = undefined;
+    if (telemetryHook === hook) telemetryHook = undefined;
   };
 }
 
@@ -126,7 +132,7 @@ function safeEmitMetric(
   value?: number,
   tags?: Record<string, string>,
 ): void {
-  const { hook } = telemetryState;
+  const hook = telemetryHook;
   if (!hook) return;
   try {
     hook(name, value, sanitizeMetricTags(tags));
@@ -222,18 +228,20 @@ export function secureWipe(
   const forbidShared = options?.forbidShared !== false;
 
   // Cross-realm SAB detection
-  let isShared = false;
-  try {
-    const buf = typedArray.buffer as BufferLike;
-    const tag = Object.prototype.toString.call(buf);
-    const globalWithSAB = globalThis as GlobalWithSharedArrayBuffer;
-    isShared =
-      typeof globalWithSAB.SharedArrayBuffer !== "undefined" &&
-      (tag === "[object SharedArrayBuffer]" ||
-        buf.constructor?.name === "SharedArrayBuffer");
-  } catch {
-    // ignore detection errors
-  }
+  const isShared = (() => {
+    try {
+      const buf = typedArray.buffer as BufferLike;
+      const tag = Object.prototype.toString.call(buf);
+      const globalWithSAB = globalThis as GlobalWithSharedArrayBuffer;
+      return (
+        typeof globalWithSAB.SharedArrayBuffer !== "undefined" &&
+        (tag === "[object SharedArrayBuffer]" ||
+          buf.constructor?.name === "SharedArrayBuffer")
+      );
+    } catch {
+      return false;
+    }
+  })();
 
   if (forbidShared && isShared) {
     if (isDevelopment()) {
@@ -308,7 +316,9 @@ function tryDataViewWipe(typedArray: ArrayBufferView): boolean {
       typedArray.byteOffset,
       typedArray.byteLength,
     );
-    /* eslint-disable-next-line functional/no-let -- Mutable index required for performant chunked zeroing loop. */
+
+    // loop counter mutation is intentional for chunked DataView writes
+    // eslint-disable-next-line functional/no-let -- loop counter required for chunked wipe
     let i = 0;
     const n = view.byteLength;
     const STEP32 = 4;
@@ -318,7 +328,18 @@ function tryDataViewWipe(typedArray: ArrayBufferView): boolean {
     return true;
   } catch (_error) {
     // DataView creation or access failed, try next strategy
-    // eslint-disable-next-line sonarjs/no-ignored-exceptions -- Intentionally ignore DataView errors to try alternative wipe strategies
+    // Log sanitized error in development to aid debugging but don't expose raw error contents
+    if (isDevelopment()) {
+      secureDevLog(
+        "warn",
+        "secureWipe",
+        "DataView wipe failed, falling back to alternative wipe",
+        {
+          error: sanitizeErrorForLogs(_error),
+        },
+      );
+    }
+
     return false;
   }
 }
@@ -334,14 +355,18 @@ function tryBigIntWipe(typedArray: ArrayBufferView): boolean {
     (globalWithTypedArrays.BigUint64Array &&
       typedArray instanceof globalWithTypedArrays.BigUint64Array)
   ) {
+    // Model the typed array as readonly for safety in types, but perform an
+    // intentional in-place wipe below. Place a narrow eslint-disable directly
+    // on the assignment to avoid broad/unused disables elsewhere in the file.
     const ta = typedArray as unknown as {
       readonly length: number;
-      readonly [i: number]: bigint;
+      readonly [index: number]: bigint;
     };
-    /* eslint-disable-next-line functional/no-let -- Mutable index required for performant BigInt array zeroing loop. */
+
+    // eslint-disable-next-line functional/no-let -- loop counter required for BigInt wipe
     for (let i = 0; i < ta.length; i++) {
-      // eslint-disable-next-line functional/immutable-data
-      (ta as unknown as { [i: number]: bigint })[i] = 0n;
+      // eslint-disable-next-line functional/immutable-data,functional/prefer-readonly-type -- intentional in-place wipe of BigInt typed array for security
+      (ta as unknown as { [index: number]: bigint })[i] = 0n;
     }
     safeEmitMetric("secureWipe.ok", 1, { strategy: "bigint" });
     return true;
@@ -371,7 +396,8 @@ function tryByteWiseWipe(typedArray: ArrayBufferView): boolean {
     typedArray.byteOffset,
     typedArray.byteLength,
   );
-  /* eslint-disable-next-line functional/no-let -- Mutable index required for performant byte-wise zeroing loop. */
+
+  // eslint-disable-next-line functional/no-let, functional/immutable-data -- loop counter and in-place wipe required for secure zeroing
   for (let i = 0; i < u8.length; i++) u8[i] = 0;
   safeEmitMetric("secureWipe.ok", 1, { strategy: "u8-loop" });
   return true;
@@ -411,7 +437,8 @@ export function createSecureZeroingBuffer(length: number): {
 } {
   validateNumericParam(length, "length", 1, 4096);
   const view = new Uint8Array(length);
-  /* eslint-disable-next-line functional/no-let -- Required for the stateful closure pattern. */
+
+  // eslint-disable-next-line functional/no-let -- mutable lifecycle flag for secure buffer
   let freed = false;
   return {
     get() {
@@ -496,9 +523,10 @@ export function secureCompare(
     safeEmitMetric("secureCompare.nearLimit", 1, { reason: "near-limit" });
   }
 
-  /* eslint-disable-next-line functional/no-let -- A mutable accumulator is required for a performant, constant-time comparison loop. */
+  // eslint-disable-next-line functional/no-let -- accumulator for constant-time compare
   let diff = 0;
-  /* eslint-disable-next-line functional/no-let -- A mutable index is standard and performant for a fixed-iteration for-loop. */
+
+  // eslint-disable-next-line functional/no-let -- loop counter for fixed-length compare
   for (let index = 0; index < MAX_COMPARISON_LENGTH; index++) {
     const ca = sa.charCodeAt(index) || 0;
     const cb = sb.charCodeAt(index) || 0;
@@ -542,9 +570,11 @@ async function checkCryptoAvailability(options?: {
  */
 function compareUint8Arrays(ua: Uint8Array, ub: Uint8Array): boolean {
   // Constant-time compare on fixed digest size
-  /* eslint-disable-next-line functional/no-let -- A mutable accumulator is required for a performant, constant-time comparison loop. */
+
+  // eslint-disable-next-line functional/no-let -- accumulator for constant-time array compare
   let diff = 0;
   const len = Math.max(ua.length, ub.length, 32);
+  // eslint-disable-next-line functional/no-let -- loop counter for array comparison
   for (let i = 0; i < len; i++) {
     const ca = ua[i] ?? 0;
     const cb = ub[i] ?? 0;
@@ -581,9 +611,10 @@ export async function secureCompareAsync(
   try {
     const { subtle } = await checkCryptoAvailability(options);
 
-    /* eslint-disable-next-line functional/no-let -- Mutable variables are needed to hold buffer references that must be wiped in a finally block. */
+    // eslint-disable-next-line functional/no-let -- temporary buffers created and wiped in finally
     let ua: Uint8Array | undefined;
-    /* eslint-disable-next-line functional/no-let -- Mutable variables are needed to hold buffer references that must be wiped in a finally block. */
+
+    // eslint-disable-next-line functional/no-let -- temporary buffers created and wiped in finally
     let ub: Uint8Array | undefined;
 
     try {
@@ -715,41 +746,38 @@ function _redactObject(
   object: Record<string, unknown>,
   depth: number,
 ): unknown {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Object.create(null) returns any, but we need dynamic property assignment for logging
-  const out = Object.create(null) as Record<string, unknown>;
-  for (const [key, rawValue] of Object.entries(object)) {
-    if (key === "__proto__" || key === "prototype" || key === "constructor") {
-      continue; // avoid prototype pollution in logs
-    }
-    if (isSensitiveKey(key)) {
-      // eslint-disable-next-line functional/immutable-data
-      out[key] = REDACTED_VALUE;
-      continue;
-    }
-    if (!SAFE_KEY_REGEX.test(key)) {
-      // keep but mark unsafe key
-      // eslint-disable-next-line functional/immutable-data
-      out[`__unsafe_key__`] = true;
-    }
-    if (typeof rawValue === "string") {
-      // eslint-disable-next-line functional/immutable-data
-      out[key] = _redactPrimitive(rawValue);
-    } else if (rawValue && typeof rawValue === "object") {
-      // eslint-disable-next-line functional/immutable-data
-      out[key] = _redact(rawValue, depth + 1);
-    } else {
-      // eslint-disable-next-line functional/immutable-data
-      out[key] = rawValue;
-    }
-  }
-  return out;
+  const entriesSource = Object.entries(object).filter(
+    ([key]) =>
+      key !== "__proto__" && key !== "prototype" && key !== "constructor",
+  );
+
+  const unsafeKeySeen = entriesSource.some(
+    ([key]) => !SAFE_KEY_REGEX.test(key),
+  );
+
+  const result = entriesSource.reduce(
+    (acc, [key, rawValue]) => {
+      if (isSensitiveKey(key)) return { ...acc, [key]: REDACTED_VALUE };
+      const v: unknown = (() => {
+        if (typeof rawValue === "string") return _redactPrimitive(rawValue);
+        if (rawValue && typeof rawValue === "object")
+          return _redact(rawValue, depth + 1);
+        return rawValue;
+      })();
+
+      return { ...acc, [key]: v };
+    },
+    Object.create(null) as Record<string, unknown>,
+  );
+
+  return unsafeKeySeen ? { ...result, __unsafe_key__: true } : result;
 }
 
 function _cloneAndNormalizeForLogging(
   data: unknown,
   depth: number,
-  /* eslint-disable-next-line functional/prefer-readonly-type -- Mutable Set required for cycle detection algorithm */
-  visited: Set<unknown>,
+
+  visited: ReadonlySet<unknown>,
 ): unknown {
   if (depth >= MAX_REDACT_DEPTH) {
     return { __redacted: true, reason: "max-depth" };
@@ -762,12 +790,9 @@ function _cloneAndNormalizeForLogging(
     return { __redacted: true, reason: "circular-reference" };
   }
 
-  visited.add(data);
-  try {
-    return handleSpecialObjectTypes(data, depth, visited);
-  } finally {
-    visited.delete(data);
-  }
+  // Create a new Set for this recursion branch without mutating the caller's set
+  const branchVisited = new Set([...visited, data]);
+  return handleSpecialObjectTypes(data, depth, branchVisited);
 }
 
 /**
@@ -776,8 +801,8 @@ function _cloneAndNormalizeForLogging(
 function handleSpecialObjectTypes(
   data: object,
   depth: number,
-  /* eslint-disable-next-line functional/prefer-readonly-type -- Mutable Set required for cycle detection algorithm */
-  visited: Set<unknown>,
+
+  visited: ReadonlySet<unknown>,
 ): unknown {
   if (data instanceof Error) {
     return sanitizeErrorForLogs(data);
@@ -816,15 +841,12 @@ function handleTypedArray(data: ArrayBufferView): unknown {
 function handleArray(
   data: readonly unknown[],
   depth: number,
-  /* eslint-disable-next-line functional/prefer-readonly-type -- Mutable Set required for cycle detection algorithm */
-  visited: Set<unknown>,
+
+  visited: ReadonlySet<unknown>,
 ): unknown {
-  const result = [];
-  for (const item of data) {
-    // eslint-disable-next-line functional/immutable-data
-    result.push(_cloneAndNormalizeForLogging(item, depth + 1, visited));
-  }
-  return result;
+  return data.map((item) =>
+    _cloneAndNormalizeForLogging(item, depth + 1, visited),
+  );
 }
 
 /**
@@ -833,28 +855,29 @@ function handleArray(
 function handlePlainObject(
   data: object,
   depth: number,
-  /* eslint-disable-next-line functional/prefer-readonly-type -- Mutable Set required for cycle detection algorithm */
-  visited: Set<unknown>,
+
+  visited: ReadonlySet<unknown>,
 ): unknown {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Object.create(null) returns any, but we need dynamic property assignment for logging
-  const result = Object.create(null) as Record<string, unknown>;
-  for (const key of Object.keys(data)) {
-    if (key === "__proto__" || key === "prototype" || key === "constructor") {
-      continue; // avoid prototype pollution in logs
-    }
-    try {
-      // eslint-disable-next-line functional/immutable-data
-      result[key] = _cloneAndNormalizeForLogging(
-        (data as Record<string, unknown>)[key],
-        depth + 1,
-        visited,
-      );
-    } catch {
-      // eslint-disable-next-line sonarjs/no-ignored-exceptions -- Intentionally ignore getter errors during logging to prevent log failures
-      // eslint-disable-next-line functional/immutable-data
-      result[key] = { __redacted: true, reason: "getter-threw" };
-    }
-  }
+  const keys = Object.keys(data).filter(
+    (k) => k !== "__proto__" && k !== "prototype" && k !== "constructor",
+  );
+
+  const result = keys.reduce(
+    (acc, key) => {
+      try {
+        const v = _cloneAndNormalizeForLogging(
+          (data as Record<string, unknown>)[key],
+          depth + 1,
+          visited,
+        );
+        return { ...acc, [key]: v };
+      } catch {
+        return { ...acc, [key]: { __redacted: true, reason: "getter-threw" } };
+      }
+    },
+    Object.create(null) as Record<string, unknown>,
+  );
+
   return result;
 }
 
@@ -888,21 +911,36 @@ export function _devConsole(
   safeContext: unknown,
 ): void {
   if (environment.isProduction) return;
+  // Serialize a string-safe representation of the context to avoid leaking structured data
+  const ctxString = ((): string => {
+    try {
+      function replacer(_k: string, v: unknown): unknown {
+        return typeof v === "string" && v.length > 1024
+          ? `${v.slice(0, 1024)}...[TRUNC]`
+          : v;
+      }
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- JSON replacer signature requires `any`-compatible type
+      return JSON.stringify(safeContext, replacer as any);
+    } catch {
+      return String(safeContext);
+    }
+  })();
+  const out = ctxString ? `${message} | context=${ctxString}` : message;
   switch (level) {
     case "debug":
-      console.debug(message, safeContext);
+      console.debug(out);
       break;
     case "info":
-      console.info(message, safeContext);
+      console.info(out);
       break;
     case "warn":
-      console.warn(message, safeContext);
+      console.warn(out);
       break;
     case "error":
-      console.error(message, safeContext);
+      console.error(out);
       break;
     default:
-      console.info(message, safeContext);
+      console.info(out);
   }
 }
 
