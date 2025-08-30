@@ -16,7 +16,6 @@
  * for replay protection. The example InMemoryNonceStore is NOT for production.
  */
 
-import { secureCompareAsync } from "../src/utils.js"; // timing-safe compare (reuse)
 import { 
   InvalidParameterError, 
   TimestampError, 
@@ -26,7 +25,7 @@ import {
 } from "../src/errors.js";
 import { SHARED_ENCODER } from "../src/encoding.js";
 import { safeStableStringify } from "../src/canonical.js";
-import { base64ToBytes, bytesToBase64, isLikelyBase64 } from "../src/encoding-utils.js";
+import { base64ToBytes, isLikelyBase64 } from "../src/encoding-utils.js";
 import { getHandshakeConfig } from "../src/config.js";
 
 /** Input shape expected by verification with positive validation */
