@@ -36,6 +36,7 @@ import { ensureCrypto } from "./state";
 import { environment, isDevelopment } from "./environment";
 import { SHARED_ENCODER } from "./encoding";
 import { setDevLogger } from "./dev-logger";
+import { getLoggingConfig } from "./config";
 
 // Type definitions for cross-platform compatibility
 interface GlobalWithBuffer {
@@ -753,14 +754,54 @@ function _redactObject(
     ([key]) =>
       key !== "__proto__" && key !== "prototype" && key !== "constructor",
   );
-
-  const unsafeKeySeen = entriesSource.some(
-    ([key]) => !SAFE_KEY_REGEX.test(key),
-  );
-
+  // Filter and process keys while avoiding inclusion of unsafe key names.
+  // Keys that don't match SAFE_KEY_REGEX are counted and not included in
+  // the resulting object to prevent accidental leakage of internal or
+  // sensitive key identifiers. We still redact values for known sensitive
+  // keys when the name is safe.
+  let unsafeCount = 0;
+  const loggingCfg = getLoggingConfig();
+  const includeHashes =
+    !environment.isProduction && loggingCfg.allowUnsafeKeyNamesInDev &&
+    loggingCfg.includeUnsafeKeyHashesInDev;
+  const unsafeHashes: string[] = [];
   const result = entriesSource.reduce(
     (acc, [key, rawValue]) => {
+      if (!SAFE_KEY_REGEX.test(key)) {
+        unsafeCount += 1;
+        if (includeHashes) {
+          try {
+            // Non-blocking best-effort: compute a SHA-256 hex digest of
+            // the key + optional salt. Use the synchronous JS-only hasher
+            // as a fallback to avoid introducing runtime crypto failures.
+            const salt = loggingCfg.unsafeKeyHashSalt ?? "";
+            const input = `${salt}:${key}`;
+            // Use builtin subtle if available; otherwise fallback to a
+            // simple JS-based hash (not cryptographically strong) to
+            // maintain deterministic debug output in development.
+            // Compute a deterministic, synchronous, non-crypto hash (DJB2)
+            // for development-only debugging. This avoids any possibility
+            // of emitting raw key names or relying on async subtle.digest
+            // inside a sync code path.
+            // eslint-disable-next-line functional/no-let -- intentional local loop counter for DJB2
+            let h = 5381;
+            // eslint-disable-next-line functional/no-let -- loop counter
+            for (let i = 0; i < input.length; i++) {
+              /* intentional bitwise ops for DJB2 */
+                h = ((h << 5) + h) ^ input.charCodeAt(i);
+            }
+            // Normalize to hex string; intentionally mutate local dev-only array
+            // eslint-disable-next-line functional/immutable-data -- local dev-only collection
+            unsafeHashes.push((h >>> 0).toString(16));
+          } catch {
+            /* ignore hashing failures in dev */
+          }
+        }
+        return acc;
+      }
+
       if (isSensitiveKey(key)) return { ...acc, [key]: REDACTED_VALUE };
+
       const v: unknown = (() => {
         if (typeof rawValue === "string") return _redactPrimitive(rawValue);
         if (rawValue && typeof rawValue === "object")
@@ -773,7 +814,18 @@ function _redactObject(
     Object.create(null) as Record<string, unknown>,
   );
 
-  return unsafeKeySeen ? { ...result, __unsafe_key__: true } : result;
+  if (unsafeCount > 0) {
+    // Include a count rather than the actual unsafe keys to avoid key-name leakage.
+    const baseOut: Record<string, unknown> = {
+      ...result,
+      __unsafe_key_count__: unsafeCount,
+    };
+    return unsafeHashes.length > 0
+      ? { ...baseOut, ["__unsafe_key_hashes__"]: unsafeHashes.slice(0, 32) }
+      : baseOut;
+  }
+
+  return result;
 }
 
 function _cloneAndNormalizeForLogging(

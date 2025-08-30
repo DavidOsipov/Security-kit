@@ -127,14 +127,24 @@ export function reportProdError(error: Error, context: unknown = {}) {
         error_: Error,
         context_: Record<string, unknown>,
       ) => void;
-      hook(
-        new Error(`${sanitized.name}: ${sanitized.message}`),
-        // Include the stackHash in the redacted context for correlation.
-        _redact({
-          ...(context as object),
-          stackHash: (sanitized as { readonly stackHash?: string }).stackHash,
-        }) as Record<string, unknown>,
-      );
+      // Redact the user-provided context first to avoid spreading raw objects
+      // (which may have side-effectful getters) and to guarantee a sanitized
+      // payload is passed to the production hook. Freeze the final object so
+      // downstream reporters cannot mutate it.
+      const redactedContext =
+        (_redact(context) || {}) as Record<string, unknown>;
+      const finalContext = Object.freeze({
+        ...redactedContext,
+        stackHash: (sanitized as { readonly stackHash?: string }).stackHash,
+      });
+      try {
+        hook(
+          new Error(`${sanitized.name}: ${sanitized.message}`),
+          finalContext,
+        );
+      } catch {
+        // Swallow errors from the hook - reporting must never throw.
+      }
     } catch {
       // Swallow errors from the hook - reporting must never throw.
     }
