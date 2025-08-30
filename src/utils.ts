@@ -633,12 +633,15 @@ export async function secureCompareAsync(
     }
   } catch (error) {
     // Handle crypto unavailability by falling back to non-crypto comparison
+    const strict = options?.requireCrypto === true || isSecurityStrict();
     if (error instanceof CryptoUnavailableError) {
+      if (strict) {
+        throw error;
+      }
       return secureCompare(sa, sb);
     }
 
     // Re-throw other crypto errors in strict mode
-    const strict = options?.requireCrypto === true || isSecurityStrict();
     if (strict) {
       if (!(error instanceof CryptoUnavailableError)) {
         // normalize to crypto unavailable if it was another crypto failure

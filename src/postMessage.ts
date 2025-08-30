@@ -72,7 +72,7 @@ export type CreateSecurePostMessageListenerOptions = {
   readonly allowTransferables?: boolean; // default false: disallow transferables like MessagePort/ArrayBuffer
   readonly allowTypedArrays?: boolean; // default false: disallow TypedArray/DataView/ArrayBuffer without opt-in
 };
-export { validateTransferables, TransferableNotAllowedError };
+export { validateTransferables };
 
 // --- Constants ---
 
@@ -1152,6 +1152,7 @@ export function createSecurePostMessageListener(
       });
       throw new InvalidParameterError("Payload exceeds maximum allowed size.");
     }
+    // eslint-disable-next-line functional/no-let -- Local parsed variable; scoped to function
     let parsed: unknown;
     try {
       parsed = JSON.parse(event.data);
@@ -1377,7 +1378,7 @@ async function getPayloadFingerprint(data: unknown): Promise<string> {
   // Encode as UTF-8 bytes and truncate by bytes to avoid splitting multi-byte chars
   const fullBytes = SHARED_ENCODER.encode(stable.s);
   const payloadBytes = fullBytes.slice(0, POSTMESSAGE_MAX_PAYLOAD_BYTES);
-  /* eslint-disable-next-line functional/no-let -- Local salt buffer variable; scoped to function */
+  // eslint-disable-next-line functional/no-let -- Local salt buffer variable; scoped to function
   let saltBuf: Uint8Array | undefined;
   try {
     saltBuf = await ensureFingerprintSalt();
@@ -1405,7 +1406,7 @@ async function getPayloadFingerprint(data: unknown): Promise<string> {
   // Fallback: salted non-crypto rolling hash (development/test only)
   if (!saltBuf) return "FINGERPRINT_ERR";
   const sb = saltBuf;
-  /* eslint-disable-next-line functional/no-let -- Local accumulator for hash computation; scoped to function */
+  // eslint-disable-next-line functional/no-let -- Local accumulator for hash computation; scoped to function
   let accumulator = 2166136261 >>> 0; // FNV-1a init
   for (const byte of sb) {
     accumulator = ((accumulator ^ byte) * 16777619) >>> 0;
@@ -1422,7 +1423,7 @@ async function computeFingerprintFromString(s: string): Promise<string> {
   const fullBytes = SHARED_ENCODER.encode(s);
   const payloadBytes = fullBytes.slice(0, POSTMESSAGE_MAX_PAYLOAD_BYTES);
 
-  /* eslint-disable-next-line functional/no-let -- Local salt buffer variable; scoped to function */
+  // eslint-disable-next-line functional/no-let -- Local salt buffer variable; scoped to function
   let saltBuf: Uint8Array | undefined;
   try {
     saltBuf = await ensureFingerprintSalt();
@@ -1449,7 +1450,7 @@ async function computeFingerprintFromString(s: string): Promise<string> {
 
   if (!saltBuf) return "FINGERPRINT_ERR";
   const sb = saltBuf;
-  /* eslint-disable-next-line functional/no-let -- Local accumulator for hash computation; scoped to function */
+  // eslint-disable-next-line functional/no-let -- Local accumulator for hash computation; scoped to function
   let accumulator = 2166136261 >>> 0; // FNV-1a init
   for (const byte of sb) {
     accumulator = ((accumulator ^ byte) * 16777619) >>> 0;
