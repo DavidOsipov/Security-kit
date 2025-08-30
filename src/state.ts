@@ -260,6 +260,22 @@ export const __test_resetCryptoStateForUnitTests: undefined | (() => void) =
       })()
     : undefined;
 
+// Additional test helper: make reset available when running under NODE_ENV=test.
+// This is intentionally guarded so it only works in test runs. It helps test
+// harnesses that don't set __TEST__ at compile-time to reset global state.
+export function __resetCryptoStateForTests(): void {
+  if (process.env['NODE_ENV'] !== "test") {
+    throw new Error("__resetCryptoStateForTests is test-only and cannot be used outside tests.");
+  }
+  _cachedCrypto = undefined;
+  _cryptoPromise = undefined;
+  _cryptoState = CryptoState.Unconfigured;
+  _cryptoInitGeneration = 0;
+  try {
+    environment.clearCache();
+  } catch {}
+}
+
 export function getInternalTestUtils():
   | {
       readonly _getCryptoGenerationForTest: () => number;

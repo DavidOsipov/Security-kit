@@ -220,3 +220,14 @@ Usage recommendations
 ---
 
 If you need this document converted into a stricter machine-readable format (JSON Schema or markdown front-matter with types), tell me which format you prefer and I will generate it.
+
+## Note: build required for worker-based isolation tests
+
+Some tests under `tests/security/` use a worker that imports the compiled ESM entrypoint (`dist/index.mjs`) to get a fresh module realm. Because those tests import compiled artifacts, you must build the project before running them:
+
+- Locally: run `npm run build` (this runs `tsup` and writes `dist/index.mjs`).
+- CI: ensure your pipeline runs the project's build step before running tests (for example, `npm ci && npm run build && npm test`).
+
+Failing to build first will cause runtime errors in the worker such as "Cannot find module ... imported from ..." or "Must use import to load ES Module", because the worker cannot import TypeScript sources directly in a separate Node ESM realm.
+
+Using the compiled `dist` artifacts for worker-based isolation tests keeps the test environment close to what runs in production and avoids ESM/loader mismatches.

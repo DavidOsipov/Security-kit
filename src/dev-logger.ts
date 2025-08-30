@@ -15,6 +15,6 @@ export type DevLogger = (
 
 export let devLog: DevLogger = () => {};
 
-export function setDevLogger(fn: DevLogger): void {
-  devLog = fn;
+export function setDevLogger(function_: DevLogger): void {
+  devLog = function_;
 }

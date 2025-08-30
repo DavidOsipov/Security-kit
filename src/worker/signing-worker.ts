@@ -4,8 +4,9 @@
 
 import { SHARED_ENCODER } from "../encoding";
 import type { InitMessage, SignRequest } from "../protocol";
-import { bytesToBase64, secureWipeWrapper } from "../encoding-utils";
-import { secureDevLog } from "../utils";
+import { bytesToBase64, secureWipeWrapper, isLikelyBase64 } from "../encoding-utils";
+import { getHandshakeConfig } from "../config";
+import { secureDevLog as secureDevelopmentLog } from "../utils";
 import { sanitizeErrorForLogs } from "../errors";
 
 // --- State Management ---
@@ -38,6 +39,9 @@ const createInitialState = (): WorkerState => ({
   maxCanonicalLength: 2_000_000,
   maxConcurrentSigning: 5,
 });
+
+// Maximum allowed nonce length for handshake messages to prevent resource abuse
+const HANDSHAKE_MAX_NONCE_LENGTH = 1024;
 
 /**
  * Creates a simple, encapsulated state manager using a closure.
@@ -119,6 +123,36 @@ async function handleHandshakeRequest(
   if (!isHandshakeMessage(messageData) || !replyPort) {
     postMessage({ type: "error", reason: "invalid-handshake" });
     return;
+  }
+
+  // Validate nonce length and format using runtime-configured policies
+  try {
+    if (typeof messageData.nonce === "string") {
+      const cfg = getHandshakeConfig();
+      if (messageData.nonce.length > cfg.handshakeMaxNonceLength) {
+        replyPort.postMessage({ type: "error", reason: "nonce-too-large" });
+        return;
+      }
+
+      // Validate allowed formats
+      const allowed = cfg.allowedNonceFormats;
+      let okFormat = false;
+      if (allowed.includes("base64")) {
+        okFormat = okFormat || isLikelyBase64(messageData.nonce);
+      }
+      if (allowed.includes("base64url")) {
+        okFormat = okFormat || isLikelyBase64(messageData.nonce);
+      }
+      if (allowed.includes("hex")) {
+        okFormat = okFormat || /^[0-9a-fA-F]+$/.test(messageData.nonce);
+      }
+      if (!okFormat) {
+        replyPort.postMessage({ type: "error", reason: "nonce-format-invalid" });
+        return;
+      }
+    }
+  } catch (error) {
+    // ignore and proceed to normal validation path
   }
 
   const { hmacKey } = getCurrent();
@@ -209,7 +243,7 @@ function enforceRateLimit(requestId: number, replyPort?: MessagePort): boolean {
 
   if (total >= rateLimitPerMinute) {
     if (developmentLogging) {
-      secureDevLog("warn", "signing-worker", "rate limit exceeded", {
+      secureDevelopmentLog("warn", "signing-worker", "rate limit exceeded", {
         total,
         rateLimitPerMinute,
       });
@@ -237,7 +271,7 @@ function checkOverload(requestId: number, replyPort?: MessagePort): boolean {
     getCurrent();
   if (pendingCount >= maxConcurrentSigning) {
     if (developmentLogging) {
-      secureDevLog("warn", "signing-worker", "worker overloaded", {
+      secureDevelopmentLog("warn", "signing-worker", "worker overloaded", {
         pendingCount,
         maxConcurrentSigning,
       });
@@ -260,7 +294,7 @@ async function executeSign(
     await doSign(requestId, canonical, replyPort);
   } catch (signError) {
     if (getCurrent().developmentLogging) {
-      secureDevLog("error", "signing-worker", "sign operation failed", {
+      secureDevelopmentLog("error", "signing-worker", "sign operation failed", {
         error: sanitizeErrorForLogs(signError),
         requestId,
       });
@@ -367,6 +401,38 @@ function isHandshakeMessage(data: unknown): data is { readonly nonce: string } {
   );
 }
 
+// Runtime guard for exposing test-only helpers
+function _assertTestApiAllowedInlineWorker(): void {
+  try {
+    // allow in non-production or when explicit allow flag is set
+    const environmentAllow =
+      typeof process !== "undefined" &&
+      process?.env?.["SECURITY_KIT_ALLOW_TEST_APIS"] === "true";
+    const globalAllow = !!(globalThis as unknown as Record<string, unknown>)[
+      "__SECURITY_KIT_ALLOW_TEST_APIS"
+    ];
+    // If either allow is set, permit; otherwise throw when environment seems production
+    if (environmentAllow || globalAllow) return;
+    // If there's no indication of test allow, try to be permissive in non-Node envs
+    if (typeof process === "undefined") return;
+    // If process exists and no allow flag, restrict access
+    throw new Error(
+      "Test-only APIs are disabled. Set SECURITY_KIT_ALLOW_TEST_APIS=true to enable.",
+    );
+  } catch {
+    throw new Error(
+      "Test-only APIs are disabled. Set SECURITY_KIT_ALLOW_TEST_APIS=true to enable.",
+    );
+  }
+}
+
+export function __test_validateHandshakeNonce(nonce: string): boolean {
+  _assertTestApiAllowedInlineWorker();
+  return (
+    typeof nonce === "string" && nonce.length <= HANDSHAKE_MAX_NONCE_LENGTH
+  );
+}
+
 // --- Main Event Listener ---
 
 self.addEventListener("message", async (event: MessageEvent) => {
@@ -409,18 +475,18 @@ self.addEventListener("message", async (event: MessageEvent) => {
           reason: "unknown-message-type",
         });
     }
-  } catch (e) {
+  } catch (error) {
     postMessage({
       type: "error",
       requestId: undefined,
       reason: "worker-exception",
     });
     if (getCurrent().developmentLogging) {
-      secureDevLog(
+      secureDevelopmentLog(
         "error",
         "signing-worker",
         "Unhandled exception in worker event listener",
-        { error: sanitizeErrorForLogs(e) },
+        { error: sanitizeErrorForLogs(error) },
       );
     }
   }

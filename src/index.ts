@@ -16,6 +16,7 @@ export * from "./errors";
 export {
   setCrypto,
   sealSecurityKit,
+  freezeConfig,
   setAppEnvironment,
   setProductionErrorHandler,
   configureErrorReporter,

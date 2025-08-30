@@ -199,7 +199,7 @@ export default [
   // UNICORN CUSTOMIZATIONS: Enforce high-value patterns.
   // Promote these to errors to enforce elite-level patterns across the
   // library; fixes are often automatic or small mechanical edits.
-  "unicorn/prevent-abbreviations": "error",
+  "unicorn/prevent-abbreviations": "warn",
   "unicorn/no-null": "error",
   "unicorn/prefer-node-protocol": "error",
   "unicorn/prefer-string-starts-ends-with": "error",

@@ -3,6 +3,7 @@
 ![NPM Version](https://img.shields.io/npm/v/@david-osipov/security-kit?style=for-the-badge)
 ![License](https://img.shields.io/npm/l/@david-osipov/security-kit?style=for-the-badge)
 ![Build Status](https://img.shields.io/github/actions/workflow/status/david-osipov/Security-Kit/ci.yml?branch=main&style=for-the-badge)
+![Security Tests](https://img.shields.io/github/actions/workflow/status/david-osipov/Security-Kit/ci.yml?branch=main&style=for-the-badge&label=security-tests)
 ![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?style=for-the-badge&logo=typescript&logoColor=white)
 
 **Security-Kit is not just a collection of utilities; it's a security philosophy you can install.**
@@ -40,25 +41,29 @@ Preventing regressions:
 
 ## Table of Contents
 
-- [Core Philosophy](#core-philosophy)
-- [Installation](#installation)
-- [Quick Start](#quick-start)
-- [Key Features](#key-features)
-- [Detailed API Examples](#detailed-api-examples)
-  - [Secure ID & UUID Generation](#secure-id--uuid-generation)
-  - [Timing-Safe Comparison](#timing-safe-comparison)
-  - [Secure URL Construction](#secure-url-construction)
-  - [Secure `postMessage` Handling](#secure-postmessage-handling)
-  - [Redacted Development Logging](#redacted-development-logging)
-- [The Constitutions & Methodology](#the-constitutions--methodology)
-- [Advanced Topics](#advanced-topics)
-  - [Sealing the Kit for Maximum Security](#sealing-the-kit-for-maximum-security)
-  - [Bundler Configuration (Vite)](#bundler-configuration-vite)
-  - [Production Error Reporting](#production-error-reporting)
-  - [Sanitization & DOM Utilities](#sanitization--dom-utilities)
-- [Testing](#testing)
-- [Contributing](#contributing)
-- [Author and License](#author-and-license)
+- [Security-Kit](#security-kit)
+  - [Secret length policy](#secret-length-policy)
+  - [Table of Contents](#table-of-contents)
+  - [Core Philosophy](#core-philosophy)
+  - [Installation](#installation)
+  - [Quick Start](#quick-start)
+  - [Key Features](#key-features)
+  - [Detailed API Examples](#detailed-api-examples)
+    - [Secure ID \& UUID Generation](#secure-id--uuid-generation)
+    - [Timing-Safe Comparison](#timing-safe-comparison)
+    - [Secure URL Construction](#secure-url-construction)
+    - [Secure `postMessage` Handling](#secure-postmessage-handling)
+    - [Redacted Development Logging](#redacted-development-logging)
+  - [The Constitutions \& Methodology](#the-constitutions--methodology)
+  - [Advanced Topics](#advanced-topics)
+    - [Sealing the Kit for Maximum Security](#sealing-the-kit-for-maximum-security)
+    - [Bundler Configuration (Vite)](#bundler-configuration-vite)
+    - [Optional Dependencies \& Bundle Size](#optional-dependencies--bundle-size)
+    - [Production Error Reporting](#production-error-reporting)
+    - [Sanitization \& DOM Utilities](#sanitization--dom-utilities)
+  - [Testing](#testing)
+  - [Contributing](#contributing)
+  - [Author and License](#author-and-license)
 
 ---
 
@@ -234,6 +239,9 @@ import { sealSecurityKit, setAppEnvironment } from "@david-osipov/security-kit";
 setAppEnvironment("production");
 
 // 2. Seal the kit.
+// You can also call the alias `freezeConfig()` which calls `sealSecurityKit()`
+// (use whichever name better matches your team's terminology).
+// freezeConfig();
 sealSecurityKit();
 
 // 3. Any further attempts to configure the library will now throw an error.
