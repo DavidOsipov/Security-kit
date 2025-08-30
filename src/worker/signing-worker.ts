@@ -4,7 +4,11 @@
 
 import { SHARED_ENCODER } from "../encoding";
 import type { InitMessage, SignRequest } from "../protocol";
-import { bytesToBase64, secureWipeWrapper, isLikelyBase64 } from "../encoding-utils";
+import {
+  bytesToBase64,
+  secureWipeWrapper,
+  isLikelyBase64,
+} from "../encoding-utils";
 import { getHandshakeConfig } from "../config";
 import { secureDevLog as secureDevelopmentLog } from "../utils";
 import { sanitizeErrorForLogs } from "../errors";
@@ -47,6 +51,7 @@ const HANDSHAKE_MAX_NONCE_LENGTH = 1024;
  * Creates a simple, encapsulated state manager using a closure.
  */
 const createStateManager = (initialState: WorkerState) => {
+  // eslint-disable-next-line functional/no-let -- intentional mutable state in closure for state management
   let state = initialState;
   return {
     getCurrent: (): WorkerState => state,
@@ -56,6 +61,8 @@ const createStateManager = (initialState: WorkerState) => {
   };
 };
 
+// Keep createStateManager closure result immutable (const). The manager
+// itself holds internal mutable state via closure which is intentional.
 const { getCurrent, update: updateState } =
   createStateManager(createInitialState());
 
@@ -136,23 +143,25 @@ async function handleHandshakeRequest(
 
       // Validate allowed formats
       const allowed = cfg.allowedNonceFormats;
-      let okFormat = false;
-      if (allowed.includes("base64")) {
-        okFormat = okFormat || isLikelyBase64(messageData.nonce);
-      }
-      if (allowed.includes("base64url")) {
-        okFormat = okFormat || isLikelyBase64(messageData.nonce);
-      }
-      if (allowed.includes("hex")) {
-        okFormat = okFormat || /^[0-9a-fA-F]+$/.test(messageData.nonce);
-      }
+      // Prefer const and boolean expressions instead of mutable let.
+      const okFormatBase64 =
+        allowed.includes("base64") && isLikelyBase64(messageData.nonce);
+      const okFormatBase64Url =
+        allowed.includes("base64url") && isLikelyBase64(messageData.nonce);
+      const okFormatHex =
+        allowed.includes("hex") && /^[0-9a-f]+$/i.test(messageData.nonce);
+      const okFormat = okFormatBase64 || okFormatBase64Url || okFormatHex;
       if (!okFormat) {
-        replyPort.postMessage({ type: "error", reason: "nonce-format-invalid" });
+        replyPort.postMessage({
+          type: "error",
+          reason: "nonce-format-invalid",
+        });
         return;
       }
     }
-  } catch (error) {
-    // ignore and proceed to normal validation path
+  } catch {
+    // Deliberately ignore parse/validation exceptions here and continue.
+    // We don't expose internal error details to the caller.
   }
 
   const { hmacKey } = getCurrent();
@@ -358,10 +367,11 @@ async function importKey(raw: ArrayBuffer): Promise<void> {
     );
     updateState({ hmacKey: key });
   } finally {
+    // wipe secret in a best-effort manner; intentionally ignore wipe errors
     try {
       secureWipeWrapper(new Uint8Array(raw));
     } catch {
-      // best-effort only
+      /* best-effort only */
     }
   }
 }
@@ -435,6 +445,7 @@ export function __test_validateHandshakeNonce(nonce: string): boolean {
 
 // --- Main Event Listener ---
 
+// eslint-disable-next-line sonarjs/post-message -- dedicated worker spawned by same origin; origin verification not applicable
 self.addEventListener("message", async (event: MessageEvent) => {
   if (event.data === undefined || typeof event.data !== "object") {
     postMessage({ type: "error", reason: "invalid-message-format" });

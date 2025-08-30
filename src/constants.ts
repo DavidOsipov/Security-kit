@@ -44,4 +44,3 @@ export const DEFAULT_NONCE_FORMATS: readonly NonceFormat[] = [
   NONCE_FORMAT_BASE64,
   NONCE_FORMAT_BASE64URL,
 ];
-
