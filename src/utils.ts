@@ -991,4 +991,9 @@ export function secureDevLog(
 // Set the logger for the dev-logger facade
 setDevLogger(secureDevLog);
 
+// Provide descriptive compatibility aliases for consumers that prefer
+// more explicit names. These are simple re-exports and preserve behavior.
+export const secureDevelopmentLog = secureDevLog;
+export const setDevelopmentLogger = setDevLogger;
+
 // --- Internal Utilities ---
