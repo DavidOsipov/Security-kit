@@ -763,13 +763,16 @@ function _redactObject(
   // the resulting object to prevent accidental leakage of internal or
   // sensitive key identifiers. We still redact values for known sensitive
   // keys when the name is safe.
+  // eslint-disable-next-line functional/no-let -- intentional mutable counter for unsafe key count
   let unsafeCount = 0;
   const loggingCfg = getLoggingConfig();
   const includeHashes =
     !environment.isProduction &&
     loggingCfg.allowUnsafeKeyNamesInDev &&
     loggingCfg.includeUnsafeKeyHashesInDev;
-  const unsafeHashes: readonly string[] = [];
+  // mutable on-purpose for collecting dev-only hashes
+  // eslint-disable-next-line functional/no-let -- collecting dev-only hashes in a local mutable
+  let unsafeHashes: readonly string[] = [];
   const result = entriesSource.reduce(
     (acc, [key, rawValue]) => {
       if (!SAFE_KEY_REGEX.test(key)) {
@@ -795,9 +798,9 @@ function _redactObject(
               /* intentional bitwise ops for DJB2 */
               h = ((h << 5) + h) ^ input.charCodeAt(i);
             }
-            // Normalize to hex string; intentionally mutate local dev-only array
-
-            unsafeHashes.push((h >>> 0).toString(16));
+            // Normalize to hex string; append immutably to avoid mutating shared
+            // arrays while still keeping this local, development-only collection.
+            unsafeHashes = [...unsafeHashes, (h >>> 0).toString(16)];
           } catch {
             /* ignore hashing failures in dev */
           }
@@ -931,6 +934,7 @@ function handleArray(
   /* eslint-disable functional/prefer-readonly-type -- mutable array for building result */
   const out: unknown[] = [];
   /* eslint-enable functional/prefer-readonly-type */
+  // eslint-disable-next-line functional/no-let -- intentional loop counter for array breadth processing
   for (let i = 0; i < limit; i++) {
     /* eslint-disable functional/immutable-data -- intentional push to build array */
     out.push(_cloneAndNormalizeForLogging(data[i], depth + 1, visited));
@@ -1041,6 +1045,14 @@ function devLogAllow(): boolean {
   const loggingCfg = getLoggingConfig();
   const tokensPerMinute = loggingCfg.rateLimitTokensPerMinute ?? DEV_LOG_TOKENS;
 
+  // If the configured tokens-per-minute is lower than the current bucket,
+  // clamp the bucket immediately so tests or runtime config changes take
+  // effect without waiting for the next refill window.
+  // This keeps the behaviour simple and auditable.
+  if (devLogBucket > Math.max(0, Math.trunc(tokensPerMinute))) {
+    devLogBucket = Math.max(0, Math.trunc(tokensPerMinute));
+  }
+
   // Refill bucket once per minute using configured tokens
   if (now - devLogLastRefill >= 60_000) {
     devLogBucket = Math.max(1, Math.trunc(tokensPerMinute));
@@ -1095,13 +1107,21 @@ export function _devConsole(
   // Serialize a string-safe representation of the context to avoid leaking structured data
   const ctxString = ((): string => {
     try {
+      // Use an untyped JS replacer to avoid explicit `any` annotations while
+      // keeping a simple length truncation for string values. This local
+      // function is intentionally narrow and used only for serializing
+      // dev-only log context.
+      /**
+       * JSON replacer used only for dev logging string truncation.
+       * @param _k The key (ignored).
+       * @param v The value to process.
+       */
       function replacer(_k: string, v: unknown): unknown {
         return typeof v === "string" && v.length > 1024
           ? `${v.slice(0, 1024)}...[TRUNC]`
           : v;
       }
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- JSON replacer signature requires `any`-compatible type
-      return JSON.stringify(safeContext, replacer as any);
+      return JSON.stringify(safeContext, replacer);
     } catch {
       return String(safeContext);
     }

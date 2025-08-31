@@ -77,53 +77,99 @@ export function setLoggingConfig(cfg: Partial<LoggingConfig>): void {
     );
   }
 
-  // Prevent enabling development-only unsafe key visibility in production.
-  if (environment.isProduction) {
-    if (
-      cfg.allowUnsafeKeyNamesInDev === true ||
-      cfg.includeUnsafeKeyHashesInDev === true
-    ) {
+  // Defensive extractor: read only own data properties and avoid invoking getters.
+  type PropertyName = keyof LoggingConfig;
+  function extractOwnDataProperty<T>(
+    object: object,
+    property: PropertyName,
+  ): { readonly present: boolean; readonly value?: T } {
+    if (!Object.prototype.hasOwnProperty.call(object, property)) {
+      return { present: false };
+    }
+    const desc = Object.getOwnPropertyDescriptor(object, property);
+    // If descriptor is missing or is an accessor, treat as invalid input to avoid invoking side effects.
+    if (!desc) {
+      return { present: false };
+    }
+    if ("get" in desc || "set" in desc) {
       throw new InvalidParameterError(
-        "Dev-only logging features cannot be enabled in production.",
+        `Configuration property "${String(
+          property,
+        )}" must be a plain data property (no getters/setters).`,
       );
     }
+    return { present: true, value: desc.value as T };
   }
 
-  if (cfg.allowUnsafeKeyNamesInDev !== undefined) {
-    if (typeof cfg.allowUnsafeKeyNamesInDev !== "boolean") {
-      throw new InvalidParameterError(
-        "allowUnsafeKeyNamesInDev must be a boolean.",
-      );
-    }
+  // Extract and validate each potentially-provided property exactly once.
+  const allowExtract = extractOwnDataProperty<boolean>(
+    cfg as object,
+    "allowUnsafeKeyNamesInDev",
+  );
+  const includeExtract = extractOwnDataProperty<boolean>(
+    cfg as object,
+    "includeUnsafeKeyHashesInDev",
+  );
+  const saltExtract = extractOwnDataProperty<string | undefined>(
+    cfg as object,
+    "unsafeKeyHashSalt",
+  );
+  const rateExtract = extractOwnDataProperty<number | undefined>(
+    cfg as object,
+    "rateLimitTokensPerMinute",
+  );
+
+  // Validate types (deterministic, single access).
+  if (allowExtract.present && typeof allowExtract.value !== "boolean") {
+    throw new InvalidParameterError(
+      "allowUnsafeKeyNamesInDev must be a boolean.",
+    );
   }
 
-  if (cfg.includeUnsafeKeyHashesInDev !== undefined) {
-    if (typeof cfg.includeUnsafeKeyHashesInDev !== "boolean") {
-      throw new InvalidParameterError(
-        "includeUnsafeKeyHashesInDev must be a boolean.",
-      );
-    }
+  if (includeExtract.present && typeof includeExtract.value !== "boolean") {
+    throw new InvalidParameterError(
+      "includeUnsafeKeyHashesInDev must be a boolean.",
+    );
   }
 
-  if (
-    cfg.unsafeKeyHashSalt !== undefined &&
-    typeof cfg.unsafeKeyHashSalt !== "string"
-  ) {
+  if (saltExtract.present && typeof saltExtract.value !== "string") {
     throw new InvalidParameterError("unsafeKeyHashSalt must be a string.");
   }
 
-  if (cfg.rateLimitTokensPerMinute !== undefined) {
-    if (
-      !Number.isInteger(cfg.rateLimitTokensPerMinute) ||
-      cfg.rateLimitTokensPerMinute <= 0
-    ) {
+  if (rateExtract.present) {
+    const v = rateExtract.value;
+    if (!Number.isInteger(v) || (typeof v === "number" && v <= 0)) {
       throw new InvalidParameterError(
         "rateLimitTokensPerMinute must be a positive integer.",
       );
     }
   }
 
-  _loggingConfig = { ..._loggingConfig, ...cfg } as LoggingConfig;
+  // Now that the inputs are validated and safely extracted, enforce production-only constraints.
+  if (
+    environment.isProduction &&
+    ((allowExtract.present && allowExtract.value === true) ||
+      (includeExtract.present && includeExtract.value === true))
+  ) {
+    throw new InvalidParameterError(
+      "Dev-only logging features cannot be enabled in production.",
+    );
+  }
+
+  // Merge validated values into a fresh config object without re-accessing `cfg`.
+  const merged = {
+    ...(allowExtract.present
+      ? { allowUnsafeKeyNamesInDev: allowExtract.value as boolean }
+      : {}),
+    ...(includeExtract.present
+      ? { includeUnsafeKeyHashesInDev: includeExtract.value as boolean }
+      : {}),
+    ...(saltExtract.present ? { unsafeKeyHashSalt: saltExtract.value } : {}),
+    ...(rateExtract.present
+      ? { rateLimitTokensPerMinute: rateExtract.value as number }
+      : {}),
+  } as Partial<LoggingConfig>;
+  _loggingConfig = { ..._loggingConfig, ...merged } as LoggingConfig;
 }
 
 /**

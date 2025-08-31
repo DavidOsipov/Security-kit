@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { secureDevLog, _redact } from "../../src/utils";
+import { secureDevLog, _redact, registerTelemetry } from "../../src/utils";
 import { environment } from "../../src/environment";
 import { setLoggingConfig } from "../../src/config";
 
@@ -12,8 +12,8 @@ describe("secureDevLog rate limiting", () => {
   });
 
   it("drops logs when rate exceeded and emits telemetry", () => {
-    const metric = vi.fn();
-    const unregister = require("../../src/utils").registerTelemetry(metric);
+  const metric = vi.fn();
+  const unregister = registerTelemetry(metric);
 
     // produce more than 10 logs quickly
     for (let i = 0; i < 15; i++) {
