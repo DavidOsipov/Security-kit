@@ -49,6 +49,8 @@ export {
   secureCompare,
   secureCompareAsync,
   secureDevLog,
+  withSecureBuffer,
+  secureCompareBytes,
 } from "./utils";
 
 // Logger (optional ergonomic wrapper)

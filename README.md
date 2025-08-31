@@ -102,6 +102,17 @@ async function main() {
 main();
 ```
 
+## Choosing the right API (security vs convenience)
+
+- Highest assurance (wipeable): use `generateSecureIdBytesSync(byteLength)` / `generateSecureBytesAsync(byteLength)`, then `secureWipe()` promptly.
+- Convenience (not wipeable): `generateSecureId(length)`, `generateSecureUUID()`. Do not use for secrets in memory-constrained/high-assurance contexts.
+- Feature detection: call `getCryptoCapabilities()` or `hasRandomUUIDSync()`.
+
+## Supported runtimes
+
+- Node.js: >= 18 (recommended >= 20). WebCrypto is required; SubtleCrypto for SRI.
+- Browsers: modern evergreen. Use `getCryptoCapabilities()` to branch code paths politely.
+
 ## Key Features
 
 - **Modern Cryptography:**

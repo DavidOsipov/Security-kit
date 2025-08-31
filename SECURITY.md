@@ -8,6 +8,31 @@ This policy outlines the process for reporting security vulnerabilities and what
 
 ---
 
+## Secret Material Handling (ASVS V7, V9)
+
+JavaScript strings are immutable and cannot be reliably wiped. Do not store secrets in strings.
+
+- Prefer Uint8Array/ArrayBuffer for any secret material (keys, nonces, tokens).
+- Immediately call `secureWipe(view)` when finished with a buffer.
+- Be aware that JS engines and the OS may create copies outside your control; `secureWipe` is best-effort on the memory you can access.
+- Convenience functions that return strings (e.g., `generateSecureId`, `generateSecureUUID`) are not suitable for high-assurance secret handling. Prefer wipeable APIs:
+  - `generateSecureIdBytesSync(byteLength)`
+  - `generateSecureBytesAsync(byteLength)`
+
+Abort semantics: synchronous APIs are cooperative and only check `AbortSignal.aborted` at defined points.
+
+Supported runtimes:
+- Node: LTS (>= 18) with WebCrypto enabled (globalThis.crypto), recommended Node >= 20.
+- Browsers: modern evergreen with `crypto.getRandomValues`; `randomUUID` and BigUint64Array are optional. Use `getCryptoCapabilities()` for feature detection.
+
+Limits (exported as constants):
+- `MAX_RANDOM_BYTES_SYNC` = 4096
+- `MAX_ID_STRING_LENGTH` = 256
+- `MAX_ID_BYTES_LENGTH` = 256
+- `RANDOM_INT_ITERATION_CAP` = 5000
+
+---
+
 ## Supported Versions
 
 Only the latest version of the scripts available in the `main` branch of this repository is actively supported. Vulnerabilities will be addressed in the most current version.

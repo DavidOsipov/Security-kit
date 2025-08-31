@@ -43,6 +43,7 @@ import type {
   WorkerMessage,
   SignedResponse,
 } from "./protocol";
+import { getLoggingConfig } from "./config";
 
 /*
  * NOTE: This file is security-critical and targets a pragmatic balance between
@@ -95,6 +96,14 @@ export type SecureApiSignerInit = {
    * immutable, fingerprinted worker assets with HTTPS and origin integrity controls in place.
    */
   readonly allowComputeIntegrityInProduction?: boolean;
+
+  // NEW: explicit rate limiting knobs for the worker
+  readonly rateLimitPerMinute?: number;
+  readonly maxConcurrentSigning?: number;
+
+  // NEW: optional handshake policy overrides to prevent config drift
+  readonly handshakeMaxNonceLength?: number;
+  readonly allowedNonceFormats?: readonly import("./constants").NonceFormat[];
 };
 
 export type SignedPayload = {
@@ -249,6 +258,13 @@ export class SecureApiSigner {
   readonly #requestTimeoutMs: number;
   readonly #maxPendingRequests: number;
   readonly #kid: string | undefined;
+  readonly #handshakeTimeoutMs: number;
+  readonly #destroyAckTimeoutMs: number;
+  readonly #computedWorkerHash: string | undefined;
+
+  // NEW: Store rate limiting configuration for observability
+  readonly #rateLimitPerMinute: number;
+  readonly #maxConcurrentSigning: number;
 
   // eslint-disable-next-line functional/prefer-readonly-type -- These fields are intentionally mutable for state management
   #state: SignerState = {
@@ -264,8 +280,7 @@ export class SecureApiSigner {
   // Reservation tokens to synchronously reserve pending slots before async work
   // eslint-disable-next-line functional/prefer-readonly-type -- These fields are intentionally mutable for state management
   #pendingReservations = 0;
-  // eslint-disable-next-line functional/prefer-readonly-type -- These fields are intentionally mutable for state management
-  #reservationTokens = new Set<number>();
+  readonly #reservationTokens = new Set<number>();
   // eslint-disable-next-line functional/prefer-readonly-type -- These fields are intentionally mutable for state management
   #nextReservationId = 1;
   // #pendingReservations provides synchronous slot reservation to prevent races under concurrent sign() calls.
@@ -274,10 +289,6 @@ export class SecureApiSigner {
   #resolveReady!: () => void;
   // eslint-disable-next-line functional/prefer-readonly-type -- These fields are intentionally mutable for state management
   #rejectReady!: (reason: unknown) => void;
-  readonly #destroyAckTimeoutMs: number;
-
-  // store computedRuntimeWorkerHash when integrity === 'compute' for telemetry/debug
-  readonly #computedWorkerHash: string | undefined;
 
   private constructor(
     worker: Worker,
@@ -286,6 +297,8 @@ export class SecureApiSigner {
   ) {
     this.#worker = worker;
     this.#kid = options.kid;
+
+    // Initialize basic configuration first
     this.#requestTimeoutMs =
       options.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
     this.#maxPendingRequests =
@@ -293,10 +306,23 @@ export class SecureApiSigner {
     this.#destroyAckTimeoutMs =
       options.destroyAckTimeoutMs ?? DEFAULT_DESTROY_ACK_TIMEOUT_MS;
     this.#computedWorkerHash = computedHash;
+    this.#handshakeTimeoutMs =
+      options.requestHandshakeTimeoutMs ?? HANDSHAKE_TIMEOUT_MS;
+
+    // Compute and store rate limiting configuration
+    const cfg = getLoggingConfig();
+    this.#rateLimitPerMinute =
+      typeof options.rateLimitPerMinute === "number"
+        ? Math.max(0, Math.floor(options.rateLimitPerMinute))
+        : Math.max(0, Math.floor(cfg.rateLimitTokensPerMinute ?? 0));
+
+    this.#maxConcurrentSigning =
+      typeof options.maxConcurrentSigning === "number"
+        ? Math.min(Math.max(1, Math.floor(options.maxConcurrentSigning)), 1000)
+        : Math.min(this.#maxPendingRequests, 1000);
 
     this.#ready = new Promise<void>((resolve, reject) => {
       this.#resolveReady = resolve;
-
       this.#rejectReady = reject;
     });
 
@@ -563,11 +589,9 @@ export class SecureApiSigner {
   }
 
   async #transferSecretAndHandshake(init: SecureApiSignerInit): Promise<void> {
-    const handshakeTimeoutMs =
-      init.requestHandshakeTimeoutMs ?? HANDSHAKE_TIMEOUT_MS;
     const handshakeTimer = setTimeout(() => {
       this.#rejectReady(new WorkerError("Worker initialization timed out."));
-    }, handshakeTimeoutMs);
+    }, this.#handshakeTimeoutMs);
     void this.#ready.finally(() => clearTimeout(handshakeTimer));
 
     try {
@@ -581,13 +605,32 @@ export class SecureApiSigner {
       }
       const wipeProvided = init.wipeProvidedSecret !== false;
       const transferBuffer = prepareTransferBuffer(init.secret, wipeProvided);
+
+      // Build worker options object with proper typing
+      const baseWorkerOptions = {
+        rateLimitPerMinute: this.#rateLimitPerMinute,
+        maxConcurrentSigning: this.#maxConcurrentSigning,
+        dev: environment.isDevelopment,
+      };
+
+      // Add handshake overrides if provided to prevent config drift
+      const workerOptions = {
+        ...baseWorkerOptions,
+        ...(init.handshakeMaxNonceLength !== undefined && {
+          handshakeMaxNonceLength: Math.max(
+            1,
+            Math.floor(init.handshakeMaxNonceLength),
+          ),
+        }),
+        ...(init.allowedNonceFormats !== undefined && {
+          allowedNonceFormats: init.allowedNonceFormats,
+        }),
+      };
+
       const initMessage: InitMessage = {
         type: "init",
         secretBuffer: transferBuffer,
-        workerOptions: {
-          dev: environment.isDevelopment,
-          maxConcurrentSigning: Math.min(this.#maxPendingRequests, 1000),
-        },
+        workerOptions,
         ...(init.kid && { kid: init.kid }),
       };
       this.#worker.postMessage(initMessage, [transferBuffer]);
@@ -620,7 +663,7 @@ export class SecureApiSigner {
     const channel = new MessageChannel();
     const { port1: localPort, port2: workerPort } = channel;
 
-    const timerMs = HANDSHAKE_TIMEOUT_MS;
+    const timerMs = this.#handshakeTimeoutMs;
     const nonceBuf = getSecureRandomBytesSync(HANDSHAKE_NONCE_BYTES);
     const nonceB64 = bytesToBase64(nonceBuf);
 
@@ -793,8 +836,9 @@ export class SecureApiSigner {
     nonce: string,
   ): Promise<string> {
     const payloadString = safeStableStringify(payload);
+    const hasBody = context?.body !== undefined;
     const bodyString = safeStableStringify(context?.body ?? undefined);
-    const bodyHash = context?.body
+    const bodyHash = hasBody
       ? await sha256Base64(SHARED_ENCODER.encode(bodyString))
       : "";
     return [
@@ -919,47 +963,40 @@ export class SecureApiSigner {
     }
     // eslint-disable-next-line functional/immutable-data -- controlled reservation counter
     const id = this.#nextReservationId++;
-    const newReservationTokens = new Set([...this.#reservationTokens, id]);
-    const newPendingReservations = this.#pendingReservations + 1;
     // eslint-disable-next-line functional/immutable-data -- controlled reservation state update
-    this.#reservationTokens = newReservationTokens;
+    this.#pendingReservations++;
     // eslint-disable-next-line functional/immutable-data -- controlled reservation state update
-    this.#pendingReservations = newPendingReservations;
+    this.#reservationTokens.add(id);
     return id;
   }
 
   // Consume one reservation if available. Returns true if consumed.
   #consumeReservationIfAvailable(): boolean {
-    if (this.#pendingReservations <= 0) return false;
-    // consume an arbitrary token
-    const it = this.#reservationTokens.values();
-    const first = it.next();
+    if (this.#pendingReservations <= 0 || this.#reservationTokens.size === 0) {
+      return false;
+    }
+    // consume the first available token
+    const iterator = this.#reservationTokens.values();
+    const first = iterator.next();
     if (first.done) return false;
+
     const id = first.value;
-    const newReservationTokens = new Set(this.#reservationTokens);
     // eslint-disable-next-line functional/immutable-data -- controlled token removal
-    newReservationTokens.delete(id);
-    const newPendingReservations = Math.max(0, this.#pendingReservations - 1);
+    this.#reservationTokens.delete(id);
     // eslint-disable-next-line functional/immutable-data -- controlled reservation state update
-    this.#reservationTokens = newReservationTokens;
-    // eslint-disable-next-line functional/immutable-data -- controlled reservation state update
-    this.#pendingReservations = newPendingReservations;
+    this.#pendingReservations = Math.max(0, this.#pendingReservations - 1);
     return true;
   }
 
   // Release a reservation if it exists (called when sign() fails before conversion)
   #releaseReservationIfPresent(id: number | undefined): void {
-    if (id === undefined) return;
-    if (this.#reservationTokens.has(id)) {
-      const newReservationTokens = new Set(this.#reservationTokens);
-      // eslint-disable-next-line functional/immutable-data -- controlled token removal
-      newReservationTokens.delete(id);
-      const newPendingReservations = Math.max(0, this.#pendingReservations - 1);
-      // eslint-disable-next-line functional/immutable-data -- controlled reservation state update
-      this.#reservationTokens = newReservationTokens;
-      // eslint-disable-next-line functional/immutable-data -- controlled reservation state update
-      this.#pendingReservations = newPendingReservations;
+    if (id === undefined || !this.#reservationTokens.has(id)) {
+      return;
     }
+    // eslint-disable-next-line functional/immutable-data -- controlled token removal
+    this.#reservationTokens.delete(id);
+    // eslint-disable-next-line functional/immutable-data -- controlled reservation state update
+    this.#pendingReservations = Math.max(0, this.#pendingReservations - 1);
   }
 
   readonly #removeActivePort = (port: MessagePort): void => {
@@ -1089,6 +1126,16 @@ export class SecureApiSigner {
   /** If integrity === 'compute', consumers can read this (useful for telemetry / debugging). */
   public getComputedWorkerHash(): string | undefined {
     return this.#computedWorkerHash;
+  }
+  /** Get the configured rate limiting parameters for observability and debugging. */
+  public getRateLimitConfig(): {
+    readonly rateLimitPerMinute: number;
+    readonly maxConcurrentSigning: number;
+  } {
+    return {
+      rateLimitPerMinute: this.#rateLimitPerMinute,
+      maxConcurrentSigning: this.#maxConcurrentSigning,
+    };
   }
 }
 

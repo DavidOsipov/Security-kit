@@ -8,10 +8,17 @@ import {
   bytesToBase64,
   secureWipeWrapper,
   isLikelyBase64,
+  isLikelyBase64Url,
 } from "../encoding-utils";
-import { getHandshakeConfig } from "../config";
+import { getHandshakeConfig, setHandshakeConfig } from "../config";
 import { secureDevLog as secureDevelopmentLog } from "../utils";
 import { sanitizeErrorForLogs } from "../errors";
+import {
+  createSecurePostMessageListener,
+  computeInitialAllowedOrigin,
+  isEventAllowedWithLock,
+} from "../postMessage";
+import type { NonceFormat } from "../constants";
 
 // --- State Management ---
 
@@ -29,6 +36,10 @@ interface WorkerState {
   readonly windowStart: number;
   readonly maxCanonicalLength: number;
   readonly maxConcurrentSigning: number;
+  // NEW: token bucket state
+  readonly tokens: number;
+  readonly burst: number;
+  readonly lastRefillSec: number;
 }
 
 const createInitialState = (): WorkerState => ({
@@ -42,10 +53,13 @@ const createInitialState = (): WorkerState => ({
   windowStart: Math.floor(Date.now() / 1000),
   maxCanonicalLength: 2_000_000,
   maxConcurrentSigning: 5,
+  tokens: 0,
+  burst: 0,
+  lastRefillSec: Math.floor(Date.now() / 1000),
 });
 
 // Maximum allowed nonce length for handshake messages to prevent resource abuse
-const HANDSHAKE_MAX_NONCE_LENGTH = 1024;
+// NOTE: Now uses getHandshakeConfig().handshakeMaxNonceLength instead of hardcoded value
 
 /**
  * Creates a simple, encapsulated state manager using a closure.
@@ -66,12 +80,110 @@ const createStateManager = (initialState: WorkerState) => {
 const { getCurrent, update: updateState } =
   createStateManager(createInitialState());
 
+// Track the single origin which is permitted to send control messages to
+// this dedicated worker. It is established by the initial "init" message
+// and defaults to the creating document's origin if not explicitly set.
+// Using a single origin keeps the policy simple and auditable.
+let _allowedInboundOrigin: string | undefined = undefined;
+
+/**
+ * Verifies whether a MessageEvent originates from the allowed inbound origin.
+ * Returns true if the event should be accepted, false otherwise.
+ */
+// ...existing code... (origin handling moved into postMessage helpers)
+
 // --- Message Handlers ---
+
+/**
+ * Applies handshake configuration overrides from init message.
+ */
+function applyHandshakeOverrides(options: InitMessage["workerOptions"]): void {
+  if (
+    typeof options?.handshakeMaxNonceLength === "number" ||
+    Array.isArray(options?.allowedNonceFormats)
+  ) {
+    const current = getHandshakeConfig();
+    setHandshakeConfig({
+      handshakeMaxNonceLength:
+        typeof options.handshakeMaxNonceLength === "number"
+          ? Math.max(1, Math.floor(options.handshakeMaxNonceLength))
+          : current.handshakeMaxNonceLength,
+      allowedNonceFormats:
+        Array.isArray(options.allowedNonceFormats) &&
+        options.allowedNonceFormats.length > 0
+          ? (options.allowedNonceFormats as readonly NonceFormat[])
+          : current.allowedNonceFormats,
+    });
+  }
+}
+
+/**
+ * Applies rate limiting configuration from init message.
+ */
+function applyRateLimitConfig(options: InitMessage["workerOptions"]): void {
+  if (typeof options?.rateLimitPerMinute === "number") {
+    const rateLimit = Math.max(0, Math.floor(options.rateLimitPerMinute));
+    const burst = Math.max(
+      rateLimit,
+      Math.floor(options.rateLimitBurst ?? rateLimit),
+    );
+    updateState({
+      rateLimitPerMinute: rateLimit,
+      tokens: burst, // start full
+      burst,
+      lastRefillSec: Math.floor(Date.now() / 1000),
+    });
+  }
+}
+
+/**
+ * Applies development and logging configuration from init message.
+ */
+function applyDevelopmentConfig(options: InitMessage["workerOptions"]): void {
+  if (typeof options?.dev === "boolean") {
+    updateState({ developmentLogging: options.dev });
+  }
+}
+
+/**
+ * Applies concurrency configuration from init message.
+ */
+function applyConcurrencyConfig(options: InitMessage["workerOptions"]): void {
+  if (
+    typeof options?.maxConcurrentSigning === "number" &&
+    Number.isFinite(options.maxConcurrentSigning) &&
+    options.maxConcurrentSigning > 0 &&
+    options.maxConcurrentSigning <= 1000
+  ) {
+    updateState({
+      maxConcurrentSigning: Math.floor(options.maxConcurrentSigning),
+    });
+  }
+}
+
+/**
+ * Applies canonical length configuration from init message.
+ */
+function applyCanonicalConfig(options: InitMessage["workerOptions"]): void {
+  if (
+    typeof options?.maxCanonicalLength === "number" &&
+    Number.isFinite(options.maxCanonicalLength) &&
+    options.maxCanonicalLength > 0 &&
+    options.maxCanonicalLength <= 10_000_000
+  ) {
+    updateState({
+      maxCanonicalLength: Math.floor(options.maxCanonicalLength),
+    });
+  }
+}
 
 /**
  * Handles the initial "init" message to configure the worker and import the secret key.
  */
-async function handleInitMessage(message: InitMessage): Promise<void> {
+async function handleInitMessage(
+  message: InitMessage,
+  event?: MessageEvent,
+): Promise<void> {
   if (getCurrent().initialized) {
     postMessage({ type: "error", reason: "already-initialized" });
     return;
@@ -79,39 +191,43 @@ async function handleInitMessage(message: InitMessage): Promise<void> {
 
   const options = message.workerOptions;
   if (options && typeof options === "object") {
-    if (typeof options.rateLimitPerMinute === "number") {
-      updateState({
-        rateLimitPerMinute: Math.max(0, Math.floor(options.rateLimitPerMinute)),
-      });
-    }
-    if (typeof options.dev === "boolean") {
-      updateState({ developmentLogging: options.dev });
-    }
-    if (
-      typeof options.maxConcurrentSigning === "number" &&
-      Number.isFinite(options.maxConcurrentSigning) &&
-      options.maxConcurrentSigning > 0 &&
-      options.maxConcurrentSigning <= 1000
-    ) {
-      updateState({
-        maxConcurrentSigning: Math.floor(options.maxConcurrentSigning),
-      });
-    }
-    if (
-      typeof options.maxCanonicalLength === "number" &&
-      Number.isFinite(options.maxCanonicalLength) &&
-      options.maxCanonicalLength > 0 &&
-      options.maxCanonicalLength <= 10_000_000
-    ) {
-      updateState({
-        maxCanonicalLength: Math.floor(options.maxCanonicalLength),
-      });
-    }
+    applyHandshakeOverrides(options);
+    applyRateLimitConfig(options);
+    applyDevelopmentConfig(options);
+    applyConcurrencyConfig(options);
+    applyCanonicalConfig(options);
   }
 
   if (!message.secretBuffer || !(message.secretBuffer instanceof ArrayBuffer)) {
     postMessage({ type: "error", reason: "missing-secret" });
     return;
+  }
+
+  // Establish and lock the inbound origin on first successful init.
+  // If an `event` is supplied, prefer its `origin` value. This prevents
+  // attackers from later posting fake control messages from other origins.
+  try {
+    if (typeof _allowedInboundOrigin === "undefined") {
+      const origin =
+        event && typeof event.origin === "string" ? event.origin : "";
+      // Default to location.origin when origin is empty (e.g. some non-browser
+      // environments). We intentionally reject empty-origins unless they match
+      // location.origin to avoid a permissive default.
+      _allowedInboundOrigin =
+        origin || (typeof location !== "undefined" ? location.origin : "");
+    }
+  } catch (error) {
+    // Non-fatal: don't block initialization on inability to determine origin
+    // but prefer to record nothing in that case (will fall back to strict
+    // runtime checks below).
+    if (getCurrent().developmentLogging) {
+      secureDevelopmentLog(
+        "warn",
+        "signing-worker",
+        "failed-to-establish-allowed-origin",
+        { error: sanitizeErrorForLogs(error) },
+      );
+    }
   }
 
   await importKey(message.secretBuffer);
@@ -141,17 +257,22 @@ async function handleHandshakeRequest(
         return;
       }
 
-      // Validate allowed formats
+      // Validate allowed formats - short-circuit on first valid format for performance
       const allowed = cfg.allowedNonceFormats;
-      // Prefer const and boolean expressions instead of mutable let.
-      const okFormatBase64 =
-        allowed.includes("base64") && isLikelyBase64(messageData.nonce);
-      const okFormatBase64Url =
-        allowed.includes("base64url") && isLikelyBase64(messageData.nonce);
-      const okFormatHex =
-        allowed.includes("hex") && /^[0-9a-f]+$/i.test(messageData.nonce);
-      const okFormat = okFormatBase64 || okFormatBase64Url || okFormatHex;
-      if (!okFormat) {
+      const isValidFormat = allowed.some((format) => {
+        switch (format) {
+          case "base64":
+            return isLikelyBase64(messageData.nonce);
+          case "base64url":
+            return isLikelyBase64Url(messageData.nonce);
+          case "hex":
+            return /^[0-9a-f]+$/i.test(messageData.nonce);
+          default:
+            return false;
+        }
+      });
+
+      if (!isValidFormat) {
         replyPort.postMessage({
           type: "error",
           reason: "nonce-format-invalid",
@@ -205,8 +326,10 @@ async function handleSignRequest(
   }
 
   if (!validateSignParameters(requestId, canonical, replyPort)) return;
-  if (!enforceRateLimit(requestId, replyPort)) return;
+  // Enforce concurrency BEFORE consuming rate-limit tokens to avoid wasting capacity on jobs
+  // we are going to reject due to overload.
   if (checkOverload(requestId, replyPort)) return;
+  if (!enforceRateLimit(requestId, replyPort)) return;
 
   await executeSign(requestId, canonical, replyPort);
 }
@@ -242,37 +365,65 @@ function validateSignParameters(
 }
 
 function enforceRateLimit(requestId: number, replyPort?: MessagePort): boolean {
-  const { rateLimitPerMinute, windowCounts, windowStart, developmentLogging } =
-    getCurrent();
+  const { rateLimitPerMinute, developmentLogging } = getCurrent();
   if (rateLimitPerMinute <= 0) return true;
 
-  const nowSec = Math.floor(Date.now() / 1000);
-  const advanced = advanceWindow(windowCounts, windowStart, nowSec);
-  const total = totalWindow(advanced.counts);
+  // Refill tokens before attempting to consume
+  refillTokens();
 
-  if (total >= rateLimitPerMinute) {
-    if (developmentLogging) {
-      secureDevelopmentLog("warn", "signing-worker", "rate limit exceeded", {
-        total,
-        rateLimitPerMinute,
-      });
-    }
-    const message = {
-      type: "error",
-      requestId,
-      reason: "rate-limit-exceeded",
-    } as const;
-    if (replyPort) replyPort.postMessage(message);
-    else postMessage(message);
-    return false;
+  const available = getCurrent().tokens;
+  if (available > 0) {
+    updateState({ tokens: available - 1 });
+    return true;
   }
 
-  const head = (advanced.counts[0] ?? 0) + 1;
-  const rest = advanced.counts.slice(1);
-  const newCounts = [head, ...rest] as readonly number[];
+  if (developmentLogging) {
+    secureDevelopmentLog("warn", "signing-worker", "rate limit exceeded", {
+      availableTokens: available,
+      rateLimitPerMinute,
+    });
+  }
+  const message = {
+    type: "error",
+    requestId,
+    reason: "rate-limit-exceeded",
+  } as const;
+  if (replyPort) replyPort.postMessage(message);
+  else postMessage(message);
+  return false;
+}
 
-  updateState({ windowCounts: newCounts, windowStart: advanced.start });
-  return true;
+// --- Token bucket helpers (integer arithmetic for precision) ---
+function refillTokens(): void {
+  const nowSec = Math.floor(Date.now() / 1000);
+  const { rateLimitPerMinute, tokens, burst, lastRefillSec } = getCurrent();
+
+  if (rateLimitPerMinute <= 0) return;
+
+  const last = lastRefillSec ?? nowSec;
+  if (nowSec <= last) return;
+
+  // Prevent overflow: cap delta to reasonable maximum (1 hour)
+  const deltaSec = Math.min(nowSec - last, 3600);
+
+  // Use higher precision for accurate token calculation
+  // 60000ms per minute ensures exact timing for any rate limit
+  const precision = 60000;
+  const perMs = Math.floor((rateLimitPerMinute * precision) / 60000);
+  const deltaMs = deltaSec * 1000; // convert to milliseconds
+
+  const currentTokens = Math.floor(tokens * precision);
+  const capacity = Math.floor(burst * precision);
+
+  // Prevent overflow: ensure tokensToAdd doesn't exceed remaining capacity
+  const remainingCapacity = Math.max(0, capacity - currentTokens);
+  const tokensToAdd = Math.min(remainingCapacity, perMs * deltaMs);
+  const nextTokens = currentTokens + tokensToAdd;
+
+  updateState({
+    tokens: Math.floor(nextTokens / precision),
+    lastRefillSec: nowSec,
+  });
 }
 
 function checkOverload(requestId: number, replyPort?: MessagePort): boolean {
@@ -376,23 +527,6 @@ async function importKey(raw: ArrayBuffer): Promise<void> {
   }
 }
 
-function advanceWindow(
-  currentCounts: readonly number[],
-  oldStart: number,
-  nowSec: number,
-): { readonly counts: readonly number[]; readonly start: number } {
-  const elapsed = Math.max(0, nowSec - oldStart);
-  if (elapsed === 0) return { counts: currentCounts, start: oldStart };
-  const capped = Math.min(elapsed, 60);
-  const zeros = Array.from({ length: capped }, () => 0);
-  const newCounts = [...zeros, ...currentCounts];
-  return { counts: newCounts.slice(0, 60), start: nowSec };
-}
-
-function totalWindow(counts: readonly number[]): number {
-  return counts.reduce((a, b) => a + b, 0);
-}
-
 function isMessageWithType(data: unknown): data is { readonly type: string } {
   return (
     typeof data === "object" &&
@@ -421,11 +555,8 @@ function _assertTestApiAllowedInlineWorker(): void {
     const globalAllow = !!(globalThis as unknown as Record<string, unknown>)[
       "__SECURITY_KIT_ALLOW_TEST_APIS"
     ];
-    // If either allow is set, permit; otherwise throw when environment seems production
+    // If either allow is set, permit; otherwise restrict access
     if (environmentAllow || globalAllow) return;
-    // If there's no indication of test allow, try to be permissive in non-Node envs
-    if (typeof process === "undefined") return;
-    // If process exists and no allow flag, restrict access
     throw new Error(
       "Test-only APIs are disabled. Set SECURITY_KIT_ALLOW_TEST_APIS=true to enable.",
     );
@@ -436,69 +567,195 @@ function _assertTestApiAllowedInlineWorker(): void {
   }
 }
 
-export function __test_validateHandshakeNonce(nonce: string): boolean {
-  _assertTestApiAllowedInlineWorker();
-  return (
-    typeof nonce === "string" && nonce.length <= HANDSHAKE_MAX_NONCE_LENGTH
-  );
-}
+// Export a test helper that is gated at runtime via environment flags to avoid relying on
+// build-time macros in raw TS test runs. In production, calling this without explicit allow
+// will throw; tests set SECURITY_KIT_ALLOW_TEST_APIS=true.
+export const __test_validateHandshakeNonce:
+  | ((nonce: string) => boolean)
+  | undefined = (() => {
+  try {
+    const isTestEnvironment =
+      typeof process !== "undefined" &&
+      (process?.env?.["NODE_ENV"] === "test" ||
+        process?.env?.["SECURITY_KIT_ALLOW_TEST_APIS"] === "true");
+    const isGlobalTestFlag = !!(
+      globalThis as unknown as Record<string, unknown>
+    )["__SECURITY_KIT_ALLOW_TEST_APIS"];
+
+    return isTestEnvironment || isGlobalTestFlag
+      ? (nonce: string): boolean => {
+          try {
+            _assertTestApiAllowedInlineWorker();
+            const cfg = getHandshakeConfig();
+            if (typeof nonce !== "string") return false;
+            if (nonce.length > cfg.handshakeMaxNonceLength) return false;
+
+            const allowed = cfg.allowedNonceFormats;
+            return allowed.some((format) => {
+              switch (format) {
+                case "base64":
+                  return isLikelyBase64(nonce);
+                case "base64url":
+                  return isLikelyBase64Url(nonce);
+                case "hex":
+                  return /^[0-9a-f]+$/i.test(nonce);
+                default:
+                  return false;
+              }
+            });
+          } catch {
+            return false;
+          }
+        }
+      : undefined;
+  } catch {
+    return undefined;
+  }
+})();
 
 // --- Main Event Listener ---
 
-// eslint-disable-next-line sonarjs/post-message -- dedicated worker spawned by same origin; origin verification not applicable
-self.addEventListener("message", async (event: MessageEvent) => {
-  if (event.data === undefined || typeof event.data !== "object") {
-    postMessage({ type: "error", reason: "invalid-message-format" });
-    return;
-  }
+// Use the project's centralized postMessage listener to enforce origin checks,
+// sanitization, and validation. This keeps the worker consistent with the rest
+// of the codebase and ensures diagnostic behavior is centralized.
 
+// Precise runtime validator for the worker's message union. Using a function
+// validator lets us express a union of different message shapes (init,
+// handshake, sign, destroy) and ensures positive validation in production.
+function workerMessageValidator(data: unknown): boolean {
+  if (!isMessageWithType(data)) return false;
+  const t = (data as { readonly type: string }).type;
   try {
-    if (!isMessageWithType(event.data)) {
-      postMessage({ type: "error", reason: "invalid-message-format" });
-      return;
-    }
-
-    const messageData = event.data;
-
-    switch (messageData.type) {
-      case "init":
-        await handleInitMessage(messageData as InitMessage);
-        break;
-      case "handshake":
-        await handleHandshakeRequest(messageData, event);
-        break;
-      case "sign":
-        await handleSignRequest(messageData as SignRequest, event);
-        break;
+    switch (t) {
+      case "init": {
+        // init must include a secretBuffer ArrayBuffer or ArrayBufferView and optional workerOptions
+        const d = data as { readonly secretBuffer?: unknown } & Record<
+          string,
+          unknown
+        >;
+        const hasArrayBuffer =
+          typeof ArrayBuffer !== "undefined" &&
+          d.secretBuffer instanceof ArrayBuffer;
+        const hasArrayBufferView =
+          typeof ArrayBuffer !== "undefined" &&
+          typeof ArrayBuffer.isView === "function" &&
+          ArrayBuffer.isView(d.secretBuffer as unknown as ArrayBufferView);
+        return (
+          typeof d.type === "string" && (hasArrayBuffer || hasArrayBufferView)
+        );
+      }
+      case "handshake": {
+        const d = data as { readonly nonce?: unknown } & Record<
+          string,
+          unknown
+        >;
+        return typeof d.nonce === "string" && d.nonce.length > 0;
+      }
+      case "sign": {
+        const d = data as {
+          readonly requestId?: unknown;
+          readonly canonical?: unknown;
+        } & Record<string, unknown>;
+        return (
+          typeof d.requestId === "number" && typeof d.canonical === "string"
+        );
+      }
       case "destroy":
-        updateState({ shuttingDown: true });
-        // If no operations are pending, we can close immediately.
-        if (getCurrent().pendingCount === 0) {
-          postMessage({ type: "destroyed" });
-          self.close();
-        }
-        // Otherwise, the last running `executeSign` will handle the shutdown.
-        break;
+        return true;
       default:
-        postMessage({
-          type: "error",
-          requestId: undefined,
-          reason: "unknown-message-type",
-        });
+        return false;
     }
-  } catch (error) {
-    postMessage({
-      type: "error",
-      requestId: undefined,
-      reason: "worker-exception",
-    });
-    if (getCurrent().developmentLogging) {
-      secureDevelopmentLog(
-        "error",
-        "signing-worker",
-        "Unhandled exception in worker event listener",
-        { error: sanitizeErrorForLogs(error) },
-      );
-    }
+  } catch {
+    return false;
   }
+}
+
+createSecurePostMessageListener({
+  allowedOrigins: [typeof location !== "undefined" ? location.origin : ""],
+  validate: workerMessageValidator,
+  onMessage: async (data: unknown, context) => {
+    try {
+      // Basic shape check
+      if (!isMessageWithType(data)) {
+        postMessage({ type: "error", reason: "invalid-message-format" });
+        return;
+      }
+
+      // Respect established allowed origin: the central listener already
+      // enforces the allowedOrigins, but we preserve worker-level locking
+      // behavior by capturing the origin during init.
+      const event = context?.event as MessageEvent | undefined;
+
+      // If the worker has no locked inbound origin, allow init to set it when
+      // provided via the original event context.
+      const messageType = (data as { readonly type: string })["type"];
+      if (messageType === "init") {
+        await handleInitMessage(data as InitMessage, event);
+        return;
+      }
+
+      // For other message types, enforce that the event origin matches the
+      // stored allowed origin or fallback policies.
+      if (event && !isEventAllowedWithLock(event, _allowedInboundOrigin)) {
+        if (getCurrent().developmentLogging) {
+          secureDevelopmentLog(
+            "warn",
+            "signing-worker",
+            "rejected-message-origin",
+            {
+              origin: event?.origin ?? undefined,
+              ports: (event?.ports || []).length,
+            },
+          );
+        }
+        return;
+      }
+
+      const messageData = data as { readonly type: string } & Record<
+        string,
+        unknown
+      >;
+      switch (messageData.type) {
+        case "handshake":
+          // prefer the original MessageEvent for reply ports
+          await handleHandshakeRequest(messageData, event as MessageEvent);
+          break;
+        case "sign":
+          await handleSignRequest(
+            messageData as SignRequest,
+            event as MessageEvent,
+          );
+          break;
+        case "destroy":
+          updateState({ shuttingDown: true });
+          if (getCurrent().pendingCount === 0) {
+            postMessage({ type: "destroyed" });
+            self.close();
+          }
+          break;
+        default:
+          postMessage({
+            type: "error",
+            requestId: undefined,
+            reason: "unknown-message-type",
+          });
+      }
+    } catch (error) {
+      postMessage({
+        type: "error",
+        requestId: undefined,
+        reason: "worker-exception",
+      });
+      if (getCurrent().developmentLogging) {
+        secureDevelopmentLog(
+          "error",
+          "signing-worker",
+          "Unhandled exception in worker event listener",
+          {
+            error: sanitizeErrorForLogs(error),
+          },
+        );
+      }
+    }
+  },
 });

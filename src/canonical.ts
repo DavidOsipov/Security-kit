@@ -1,46 +1,33 @@
-// SPDX-License-Identifier: MIT
-// SPDX-FileCopyrightText: © 2025 David Osipov
-/**
- * Shared canonicalization utilities for secure API signing.
- *
- * This module provides deterministic, security-hardened JSON serialization
- * that prevents common attack vectors while ensuring consistent output
- * between client and server implementations.
- *
- * SECURITY FEATURES:
- * - Deterministic key ordering (lexicographic sort)
- * - Prototype pollution prevention (filters forbidden keys)
- * - BigInt/Symbol/Function normalization
- * - Consistent null/undefined handling
- * - Side-effect free (pure functions, tree-shakable)
- *
- * Used by SecureApiSigner (client) and verifyApiRequestSignature (server)
- * to ensure identical canonical representations for signature verification.
- */
-
 import { InvalidParameterError } from "./errors.js";
+import { isForbiddenKey } from "./constants.js";
 
 /**
  * Converts any value to a canonical representation suitable for deterministic JSON serialization.
  *
- * TRANSFORMATION RULES:
- * - null/undefined → undefined
+ * TRANSFORMATION RULES (project uses undefined for elision):
+ * - null → null (preserved distinctly from undefined)
+ * - undefined → undefined (elided when inside objects/arrays as appropriate)
  * - Finite numbers → unchanged
- * - Non-finite numbers (NaN, Infinity) → null
+ * - Non-finite numbers (NaN, Infinity) → undefined
  * - Strings/booleans → unchanged
  * - BigInt → throws InvalidParameterError (not JSON-serializable)
  * - Dates → ISO string
  * - Arrays → recursively canonicalized, order preserved
  * - Objects → recursively canonicalized with sorted keys, forbidden keys filtered
- * - Functions/Symbols → null
+ * - Functions/Symbols → undefined
  * - Other types → String(value)
  *
  * @param value - The value to canonicalize
  * @returns Canonical representation safe for JSON.stringify
  * @throws InvalidParameterError for BigInt values (not JSON-serializable)
  */
-export function toCanonicalValue(value: unknown): unknown {
-  if (value === undefined || value === null) return undefined;
+/**
+ * Handles canonicalization of primitive values.
+ */
+function canonicalizePrimitive(value: unknown): unknown {
+  if (value === undefined) return undefined;
+  // eslint-disable-next-line unicorn/no-null
+  if (value === null) return null; // Security: preserve null distinctly from undefined
 
   const t = typeof value;
 
@@ -58,39 +45,100 @@ export function toCanonicalValue(value: unknown): unknown {
 
   if (t === "symbol" || t === "function") return undefined;
 
+  return value; // fallback for other types
+}
+
+/**
+ * Handles canonicalization of arrays.
+ */
+function canonicalizeArray(
+  value: readonly unknown[],
+  visited: WeakSet<object>,
+): unknown {
+  return value.map((element) => toCanonicalValueInternal(element, visited));
+}
+
+/**
+ * Handles canonicalization of objects.
+ */
+function canonicalizeObject(
+  value: Record<string, unknown>,
+  visited: WeakSet<object>,
+): unknown {
+  if (visited.has(value)) {
+    return { __circular: true };
+  }
+  visited.add(value);
+
+  const keys = Object.keys(value).sort((a, b) => a.localeCompare(b));
+
+  // Allocate result object once and assign properties to avoid O(n²) spread operations
+  const result: Record<string, unknown> = {};
+  for (const k of keys) {
+    // Use centralized forbidden key check instead of hardcoded list
+    if (isForbiddenKey(k)) continue;
+
+    const v = value[k];
+    if (v === undefined || typeof v === "function" || typeof v === "symbol") {
+      continue;
+    }
+
+    const canonicalV = toCanonicalValueInternal(v, visited);
+    if (canonicalV === undefined) continue;
+
+    // eslint-disable-next-line functional/immutable-data
+    result[k] = canonicalV;
+  }
+  visited.delete(value);
+  return result;
+}
+
+/**
+ * Internal canonicalizer that carries a visited set for cycle detection.
+ */
+function toCanonicalValueInternal(
+  value: unknown,
+  visited: WeakSet<object>,
+): unknown {
+  // Handle special cases first
   if (value instanceof Date) return value.toISOString();
 
   if (Array.isArray(value)) {
-    return value.map((element) => toCanonicalValue(element));
+    return canonicalizeArray(value, visited);
   }
 
-  if (t === "object") {
-    const object = value as Record<string, unknown>;
-    const keys = Object.keys(object).sort((a, b) => a.localeCompare(b));
-
-    // Build a new object immutably to avoid in-place mutations
-    const result = keys.reduce<Record<string, unknown>>((accumulator, k) => {
-      // Filter out forbidden keys that could lead to prototype pollution
-      if (k === "__proto__" || k === "constructor" || k === "prototype") {
-        return accumulator;
-      }
-
-      const v = object[k];
-      if (v === undefined || typeof v === "function" || typeof v === "symbol") {
-        return accumulator;
-      }
-
-      const canonicalV = toCanonicalValue(v);
-      if (canonicalV === undefined) return accumulator;
-
-      // Return a new object with the property added (immutable)
-      return { ...accumulator, [k]: canonicalV };
-    }, {});
-
-    return result;
+  if (value !== null && typeof value === "object") {
+    return canonicalizeObject(value as Record<string, unknown>, visited);
   }
 
-  return String(value);
+  // Handle primitives and other types
+  const primitiveResult = canonicalizePrimitive(value);
+  if (primitiveResult !== undefined) return primitiveResult;
+
+  return undefined;
+}
+
+/**
+ * Converts any value to a canonical representation suitable for deterministic JSON serialization.
+ *
+ * TRANSFORMATION RULES:
+ * - null → null (preserved distinctly from undefined)
+ * - undefined → undefined
+ * - Finite numbers → unchanged
+ * - Non-finite numbers (NaN, Infinity) → undefined
+ * - Strings/booleans → unchanged
+ * - BigInt → throws InvalidParameterError (not JSON-serializable)
+ * - Dates → ISO string
+ * - Arrays → recursively canonicalized, order preserved
+ * - Objects → recursively canonicalized with sorted keys, forbidden keys filtered
+ * - Functions/Symbols → undefined
+ *
+ * @param value - The value to canonicalize
+ * @returns Canonical representation safe for JSON.stringify
+ * @throws InvalidParameterError for BigInt values (not JSON-serializable)
+ */
+export function toCanonicalValue(value: unknown): unknown {
+  return toCanonicalValueInternal(value, new WeakSet());
 }
 
 /**

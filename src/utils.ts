@@ -78,6 +78,17 @@ export type TelemetryHook = (
  */
 type UnregisterCallback = () => void;
 
+// --- Module-level constants (performance, clarity, auditability) ---
+const METRIC_TAG_ALLOW = new Set([
+  "reason",
+  "strict",
+  "requireCrypto",
+  "subtlePresent",
+]);
+
+/** Minimum number of bytes to always compare to avoid trivial short-circuits. */
+const MIN_COMPARE_BYTES = 32;
+
 /* eslint-disable-next-line functional/no-let -- telemetry hook must be mutable for register/unregister */
 let telemetryHook: TelemetryHook | undefined;
 
@@ -89,16 +100,13 @@ function sanitizeMetricTags(
   tags?: Readonly<Record<string, string>>,
 ): Record<string, string> | undefined {
   if (!tags) return undefined;
-  const allow = new Set(["reason", "strict", "requireCrypto", "subtlePresent"]);
-
   const obj = Object.entries(tags).reduce(
-    (acc, [key, value]) => {
-      if (!allow.has(key)) return acc;
-      return { ...acc, [key]: String(value).slice(0, 64) };
+    (acc, [k, v]) => {
+      if (!METRIC_TAG_ALLOW.has(k)) return acc;
+      return { ...acc, [k]: String(v).slice(0, 64) };
     },
     {} as Record<string, string>,
   );
-
   return Object.keys(obj).length > 0 ? obj : undefined;
 }
 
@@ -135,15 +143,19 @@ function safeEmitMetric(
 ): void {
   const hook = telemetryHook;
   if (!hook) return;
-  try {
-    hook(name, value, sanitizeMetricTags(tags));
-  } catch (error) {
-    secureDevLog(
-      "error",
-      "telemetry-wrapper",
-      "User-provided telemetry hook threw an error.",
-      { error },
-    );
+  // Offload user hook to a microtask to avoid blocking hot paths.
+  const payloadTags = sanitizeMetricTags(tags);
+  const call = (): void => {
+    try {
+      hook(name, value, payloadTags);
+    } catch {
+      /* swallow user hook errors */
+    }
+  };
+  if (typeof queueMicrotask === "function") {
+    queueMicrotask(call);
+  } else {
+    void Promise.resolve().then(call);
   }
 }
 
@@ -292,12 +304,22 @@ export function secureWipe(
  * Attempts to wipe using Node.js Buffer.fill(0).
  */
 function tryNodeBufferWipe(typedArray: ArrayBufferView): boolean {
+  function looksLikeNodeBuffer(
+    obj: unknown,
+  ): obj is { readonly fill?: (v: number) => unknown } {
+    try {
+      const g = globalThis as GlobalWithBuffer;
+      return (
+        typeof g.Buffer !== "undefined" &&
+        typeof g.Buffer.isBuffer === "function" &&
+        (g.Buffer.isBuffer as (o: unknown) => boolean)(obj)
+      );
+    } catch {
+      return false;
+    }
+  }
   const maybeBuffer = typedArray as unknown as TypedArrayWithFill;
-  const globalWithBuffer = globalThis as GlobalWithBuffer;
-  const isNodeBuffer =
-    typeof globalWithBuffer.Buffer !== "undefined" &&
-    typeof globalWithBuffer.Buffer.isBuffer === "function" &&
-    globalWithBuffer.Buffer.isBuffer(typedArray);
+  const isNodeBuffer = looksLikeNodeBuffer(typedArray);
 
   if (isNodeBuffer && typeof maybeBuffer.fill === "function") {
     maybeBuffer.fill(0);
@@ -412,6 +434,32 @@ function tryByteWiseWipe(typedArray: ArrayBufferView): boolean {
 export function createSecureZeroingArray(length: number): Uint8Array {
   validateNumericParam(length, "length", 1, 4096);
   return new Uint8Array(length);
+}
+
+/**
+ * Execute a callback with a transient secure buffer that is wiped on return.
+ * Recommended for short-lived secrets to enforce a safe lifecycle.
+ *
+ * Example:
+ * const result = withSecureBuffer(32, (buf) => {
+ *   // use buf; it will be wiped on return, including on throw
+ * });
+ */
+export function withSecureBuffer<T>(
+  length: number,
+  fn: (buf: Uint8Array) => T,
+): T {
+  validateNumericParam(length, "length", 1, 4096);
+  const buf = new Uint8Array(length);
+  try {
+    return fn(buf);
+  } finally {
+    try {
+      secureWipe(buf);
+    } catch {
+      /* best-effort wipe */
+    }
+  }
 }
 
 /**
@@ -571,10 +619,9 @@ async function checkCryptoAvailability(options?: {
  */
 function compareUint8Arrays(ua: Uint8Array, ub: Uint8Array): boolean {
   // Constant-time compare on fixed digest size
-
   // eslint-disable-next-line functional/no-let -- accumulator for constant-time array compare
   let diff = 0;
-  const len = Math.max(ua.length, ub.length, 32);
+  const len = Math.max(ua.length, ub.length, MIN_COMPARE_BYTES);
   // eslint-disable-next-line functional/no-let -- loop counter for array comparison
   for (let i = 0; i < len; i++) {
     const ca = ua[i] ?? 0;
@@ -582,6 +629,15 @@ function compareUint8Arrays(ua: Uint8Array, ub: Uint8Array): boolean {
     diff |= ca ^ cb;
   }
   return diff === 0 && ua.length === ub.length;
+}
+
+/**
+ * Performs a constant-time comparison of two byte arrays.
+ * This is the recommended function when you already operate on bytes (UTF-8, binary keys).
+ * It runs in time proportional to max(len(a), len(b), MIN_COMPARE_BYTES).
+ */
+export function secureCompareBytes(a: Uint8Array, b: Uint8Array): boolean {
+  return compareUint8Arrays(a, b);
 }
 
 /**
@@ -1025,19 +1081,67 @@ export function _redact(data: unknown, depth = 0): unknown {
   return _redactObject(data as Record<string, unknown>, depth);
 }
 
+// ADD: Central sanitizer for log message strings using the same primitives as context redaction.
+export function sanitizeLogMessage(message: unknown): string {
+  try {
+    // Normalize to string early
+    const asString = typeof message === "string" ? message : String(message);
+
+    // Replace sensitive patterns with [REDACTED] while preserving the rest of the message
+    // 1) Remove JWT-like tokens using a pre-audited safe pattern
+    // 2) Redact common key=value secrets with a linear-time, anchored pattern (no nested quantifiers)
+    // 3) Redact Authorization header or bearer tokens conservatively
+    const sanitized = asString
+      // JWT-like structures
+      .replace(JWT_LIKE_REGEX, REDACTED_VALUE)
+      // key=value pairs such as password=..., token:..., secret=...
+      .replace(
+        /\b(password|pass|token|secret|jwt|authorization)\s*[:=]\s*[^\s,;&]{1,2048}/gi,
+        "$1=[REDACTED]",
+      )
+      // Authorization headers or bearer tokens anywhere in the string
+      .replace(/\b(authorization)\s*[:=]\s*[^\r\n]{1,2048}/gi, "$1=[REDACTED]")
+      .replace(/\b(bearer)\s+[\w.~+/-]{1,2048}=*/gi, "$1 [REDACTED]");
+
+    // Enforce max length
+    return _truncateIfLong(sanitized);
+  } catch {
+    // Fail-closed on sanitizer errors
+    return REDACTED_VALUE;
+  }
+}
+
+// ADD: Guard component names to a safe subset to prevent accidental leakage.
+export function sanitizeComponentName(name: unknown): string {
+  try {
+    // Only accept strings, reject other types
+    if (typeof name !== "string") {
+      return "unsafe-component-name";
+    }
+    return SAFE_KEY_REGEX.test(name) ? name : "unsafe-component-name";
+  } catch {
+    return "unsafe-component-name";
+  }
+}
+
 // --- Dev log rate limiting (development only) ---
 // Keep this small and auditable to satisfy Hardened Simplicity.
-/* eslint-disable functional/no-let -- audited mutable state for rate limiting */
 const DEV_LOG_TOKENS = 200; // Max logs per minute in dev
 
-let devLogBucket = DEV_LOG_TOKENS;
-
-let devLogLastRefill = Date.now();
-
-let devLogDroppedCount = 0;
-
-let devLogLastDropReport = 0;
-/* eslint-enable functional/no-let */
+// Use a single const state object to avoid `let`; mutations are localized and audited.
+/* eslint-disable functional/prefer-readonly-type -- audited mutable state for rate limiting */
+const devLogState: {
+  bucket: number;
+  lastRefill: number;
+  dropped: number;
+  lastDropReport: number;
+} = {
+  bucket: DEV_LOG_TOKENS,
+  lastRefill: Date.now(),
+  dropped: 0,
+  lastDropReport: 0,
+};
+/* eslint-enable functional/prefer-readonly-type */
 
 function devLogAllow(): boolean {
   if (environment.isProduction) return false;
@@ -1049,42 +1153,49 @@ function devLogAllow(): boolean {
   // clamp the bucket immediately so tests or runtime config changes take
   // effect without waiting for the next refill window.
   // This keeps the behaviour simple and auditable.
-  if (devLogBucket > Math.max(0, Math.trunc(tokensPerMinute))) {
-    devLogBucket = Math.max(0, Math.trunc(tokensPerMinute));
+  if (devLogState.bucket > Math.max(0, Math.trunc(tokensPerMinute))) {
+    // eslint-disable-next-line functional/immutable-data -- audited mutation of local state
+    devLogState.bucket = Math.max(0, Math.trunc(tokensPerMinute));
   }
 
   // Refill bucket once per minute using configured tokens
-  if (now - devLogLastRefill >= 60_000) {
-    devLogBucket = Math.max(1, Math.trunc(tokensPerMinute));
-    devLogLastRefill = now;
+  if (now - devLogState.lastRefill >= 60_000) {
+    // eslint-disable-next-line functional/immutable-data -- audited mutation of local state
+    devLogState.bucket = Math.max(1, Math.trunc(tokensPerMinute));
+    // eslint-disable-next-line functional/immutable-data -- audited mutation of local state
+    devLogState.lastRefill = now;
   }
-  if (devLogBucket > 0) {
-    devLogBucket--;
+  if (devLogState.bucket > 0) {
+    // eslint-disable-next-line functional/immutable-data -- audited mutation of local state
+    devLogState.bucket--;
     return true;
   }
 
   // Track dropped and occasionally emit a summary (no recursion into our logger)
-  devLogDroppedCount++;
-  if (now - devLogLastDropReport > 5_000) {
-    devLogLastDropReport = now;
+  // eslint-disable-next-line functional/immutable-data -- audited mutation of local state
+  devLogState.dropped++;
+  if (now - devLogState.lastDropReport > 5_000) {
+    // eslint-disable-next-line functional/immutable-data -- audited mutation of local state
+    devLogState.lastDropReport = now;
     try {
       // Do NOT call secureDevLog here; go straight to console
       // Avoid including user context; share only counts
 
       console.warn(
         "[security-kit] dev log rate-limit: dropping",
-        devLogDroppedCount,
+        devLogState.dropped,
         "messages in the last 5s window",
       );
       // Emit telemetry for rate hits
       try {
-        safeEmitMetric("logRateLimit.hit", devLogDroppedCount, {
+        safeEmitMetric("logRateLimit.hit", devLogState.dropped, {
           reason: "dev",
         });
       } catch {
         /* ignore telemetry failures */
       }
-      devLogDroppedCount = 0;
+      // eslint-disable-next-line functional/immutable-data -- audited mutation of local state
+      devLogState.dropped = 0;
     } catch {
       // ignore console errors in exotic environments
     }
@@ -1126,7 +1237,10 @@ export function _devConsole(
       return String(safeContext);
     }
   })();
-  const out = ctxString ? `${message} | context=${ctxString}` : message;
+  // DEFENSE-IN-DEPTH: sanitize message at the sink, even if caller already sanitized.
+  const safeMessage = sanitizeLogMessage(message);
+
+  const out = ctxString ? `${safeMessage} | context=${ctxString}` : safeMessage;
   switch (level) {
     case "debug":
       console.debug(out);
@@ -1164,12 +1278,16 @@ export function secureDevLog(
   // Apply rate limit before any work (redaction, event dispatch, stringify)
   if (!devLogAllow()) return;
 
+  // NEW: enforce safe component and sanitize the message string
+  const safeComponent = sanitizeComponentName(component);
+  const safeMessage = sanitizeLogMessage(message);
+
   const safeContext = _redact(context);
   const logEntry = {
     timestamp: new Date().toISOString(),
     level: level.toUpperCase(),
-    component,
-    message,
+    component: safeComponent,
+    message: safeMessage,
     context: safeContext,
   };
 
@@ -1188,7 +1306,7 @@ export function secureDevLog(
     }
   }
 
-  const message_ = `[${logEntry.level}] (${component}) ${message}`;
+  const message_ = `[${logEntry.level}] (${safeComponent}) ${safeMessage}`;
   _devConsole(level, message_, safeContext);
 }
 

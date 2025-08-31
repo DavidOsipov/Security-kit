@@ -12,6 +12,11 @@ export type InitMessage = {
     readonly maxConcurrentSigning?: number;
     /** Optional: maximum allowed canonical string length */
     readonly maxCanonicalLength?: number;
+    /** Optional: token bucket capacity (defaults to rateLimitPerMinute) */
+    readonly rateLimitBurst?: number;
+    /** Optional: handshake policy overrides to prevent config drift */
+    readonly handshakeMaxNonceLength?: number;
+    readonly allowedNonceFormats?: readonly import("./constants").NonceFormat[];
   };
   readonly kid?: string;
 };
@@ -36,6 +41,10 @@ export type SignedResponse = {
 export type ErrorReason =
   | "invalid-handshake"
   | "not-initialized"
+  | "already-initialized"
+  | "nonce-too-large"
+  | "nonce-format-invalid"
+  | "worker-shutting-down"
   | "handshake-failed"
   | "invalid-params"
   | "canonical-too-large"

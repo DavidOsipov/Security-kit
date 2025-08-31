@@ -7,3 +7,5 @@ java
 codeql-custom-queries-javascript
 tmp-*-*
 coverage
+.codeql
+.codeql/**

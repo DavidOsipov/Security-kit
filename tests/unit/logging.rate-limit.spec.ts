@@ -11,7 +11,7 @@ describe("secureDevLog rate limiting", () => {
     setLoggingConfig({ rateLimitTokensPerMinute: 10 });
   });
 
-  it("drops logs when rate exceeded and emits telemetry", () => {
+  it("drops logs when rate exceeded and emits telemetry", async () => {
   const metric = vi.fn();
   const unregister = registerTelemetry(metric);
 
@@ -20,7 +20,9 @@ describe("secureDevLog rate limiting", () => {
       secureDevLog("info", "test", "msg", { i });
     }
 
-    // allow some time for possible telemetry emission (synchronous in this impl)
+    // Wait for microtask to complete
+    await new Promise(resolve => setTimeout(resolve, 0));
+
     // The telemetry hook should have been called for rate hits (name contains 'logRateLimit.hit')
     const called = metric.mock.calls.some((c: any[]) => c[0] === "logRateLimit.hit");
     expect(called).toBe(true);

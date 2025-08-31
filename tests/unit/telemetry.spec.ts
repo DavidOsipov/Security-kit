@@ -69,6 +69,8 @@ describe("telemetry registration", () => {
       // Import here to avoid circular module initialization issues in test runner
       const { secureCompare } = await import("../../src/utils");
       expect(secureCompare(long, long)).toBe(true);
+      // Wait for microtask to complete
+      await new Promise(resolve => setTimeout(resolve, 0));
       expect(throwingHook).toHaveBeenCalled();
     } finally {
       unregister();
@@ -83,10 +85,12 @@ describe("telemetry registration", () => {
     };
     const unregister = registerTelemetry(hook as any);
     try {
-  // Trigger emission via secureCompare path as in previous test
+// Trigger emission via secureCompare path as in previous test
   const { secureCompare } = await import('../../src/utils');
       const long = 'x'.repeat(4096 - 63);
       expect(secureCompare(long, long)).toBe(true);
+      // Wait for microtask
+      await new Promise(resolve => setTimeout(resolve, 0));
       // Expect at least one telemetry call recorded
       expect(received.length).toBeGreaterThan(0);
       for (const call of received) {
@@ -97,6 +101,27 @@ describe("telemetry registration", () => {
           }
         }
       }
+    } finally {
+      unregister();
+    }
+  });
+
+  it("telemetry hook is called asynchronously (non-blocking)", async () => {
+    let called = false;
+    const hook = vi.fn(() => {
+      called = true;
+    });
+    const unregister = registerTelemetry(hook as any);
+    try {
+      // Trigger emission
+      const { secureCompare } = await import("../../src/utils");
+      const long = "x".repeat(4096 - 63);
+      secureCompare(long, long);
+      // Should not be called synchronously
+      expect(called).toBe(false);
+      // Wait for microtask
+      await new Promise(resolve => setTimeout(resolve, 0));
+      expect(hook).toHaveBeenCalled();
     } finally {
       unregister();
     }

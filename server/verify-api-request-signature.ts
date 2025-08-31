@@ -27,6 +27,7 @@ import { SHARED_ENCODER } from "../src/encoding.js";
 import { safeStableStringify } from "../src/canonical.js";
 import { base64ToBytes, isLikelyBase64 } from "../src/encoding-utils.js";
 import { getHandshakeConfig } from "../src/config.js";
+import { secureCompareBytes } from "../src/utils.js";
 
 /** Input shape expected by verification with positive validation */
 export type VerifyExtendedInput = {
@@ -368,17 +369,8 @@ function normalizeSecret(secret: ArrayBuffer | Uint8Array | string): Uint8Array 
   throw new InvalidParameterError("Unsupported secret type");
 }
 
-// Constant-time compare for bytes (length-influenced but avoids early return)
-function timingSafeEqualBytes(a: Uint8Array, b: Uint8Array): boolean {
-  const len = Math.max(a.length, b.length);
-  let diff = a.length ^ b.length;
-  for (let i = 0; i < len; i++) {
-    const av = a[i] ?? 0;
-    const bv = b[i] ?? 0;
-    diff |= av ^ bv;
-  }
-  return diff === 0;
-}
+// Use shared constant-time compare for bytes from core utils.
+// This provides a unified implementation with a minimum timing floor.
 
 // Note: bytesToBase64 helper is provided by src/encoding-utils and imported above.
 
@@ -503,7 +495,7 @@ export async function verifyApiRequestSignature(
   // Compute HMAC and compare in constant time (bytes)
   const mac = await computeHmacSha256(keyBytes, messageBytes);
   const sigBytes = base64ToBytes(signatureBase64);
-  const equal = timingSafeEqualBytes(mac, sigBytes);
+  const equal = secureCompareBytes(mac, sigBytes);
   if (!equal) {
     // Best-effort cleanup: keep reservation by default to throttle repeated bad attempts.
     // Optionally delete if your operational policy prefers allowing immediate retry.

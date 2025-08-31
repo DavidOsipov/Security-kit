@@ -7,7 +7,27 @@
  *
  * Notes about linting & immutability:
  * - This file intentionally allows a *very small* number of local mutations
- *   for performance and for explicit, timely zeroing of sensitive memory via
+ *   for performance and for explicit, timely zeroing of sen  if (typeof BigUint64Array !== "undefined") {
+    const v = await tryUint64();
+    if (v !== undefined) return v;
+  } else {
+    throw new InvalidParameterError("Range too large for this platform.");
+  }
+
+  if (isDevelopment()) {
+    secureDevelopmentLog(
+      "warn",
+      "security-kit",
+      "getSecureRandomInt hit iteration cap (%d) without acceptance. min=%d max=%d",
+      RANDOM_INT_ITERATION_CAP,
+      min,
+      max,
+    );
+  }
+
+  throw new RandomGenerationError(
+    "Failed to generate unbiased random integer within safety limits.",
+  );ory via
  *   `secureWipe`. Those mutation sites are narrowly scoped and documented.
  *
  */
@@ -58,6 +78,11 @@ export interface RandomOptions {
 /* -------------------------------------------------------------------------- */
 /* Helpers & environment detection                                             */
 /* -------------------------------------------------------------------------- */
+
+/**
+ * Optional: export a Node-friendly type to avoid leaking DOM types to consumers.
+ */
+export type AbortSignalLike = Pick<AbortSignal, "aborted">;
 
 /**
  * Create a cross-runtime AbortError-compatible object.
@@ -127,6 +152,48 @@ export async function hasRandomUUID(): Promise<boolean> {
   }
 }
 
+/**
+ * Synchronous helper for immediate feature detection (review finding #13)
+ */
+export function hasRandomUUIDSync(): boolean {
+  const maybe = (globalThis as { readonly crypto?: Crypto }).crypto as
+    | (Crypto & { readonly randomUUID?: () => string })
+    | undefined;
+  return Boolean(maybe?.randomUUID && typeof maybe.randomUUID === "function");
+}
+
+/**
+ * Export a capability matrix for consumers and diagnostics (review finding #2).
+ */
+export function getCryptoCapabilities(): Readonly<{
+  readonly hasSyncCrypto: boolean;
+  readonly hasSubtle: boolean;
+  readonly hasDigest: boolean;
+  readonly hasRandomUUIDSync: boolean;
+  readonly hasRandomUUIDAsyncLikely: boolean; // true if subtle/crypto likely available
+  readonly hasBigUint64: boolean;
+}> {
+  const c = (
+    globalThis as {
+      readonly crypto?: Crypto & {
+        readonly randomUUID?: () => string;
+        readonly subtle?: SubtleCrypto;
+      };
+    }
+  ).crypto;
+
+  return Object.freeze({
+    hasSyncCrypto: Boolean(c && typeof c.getRandomValues === "function"),
+    hasSubtle: Boolean(c?.subtle),
+    hasDigest: Boolean(c?.subtle && typeof c.subtle.digest === "function"),
+    hasRandomUUIDSync: Boolean(
+      c?.randomUUID && typeof c.randomUUID === "function",
+    ),
+    hasRandomUUIDAsyncLikely: Boolean(c),
+    hasBigUint64: typeof BigUint64Array !== "undefined",
+  });
+}
+
 /* -------------------------------------------------------------------------- */
 /* Alphabet parameter computation (audit-friendly)                             */
 /* -------------------------------------------------------------------------- */
@@ -139,7 +206,7 @@ function computeAlphabetParameters(
   readonly mask: number;
   readonly step: number;
 } {
-  validateNumericParameter(size, "size", 1, 1024);
+  validateNumericParameter(size, "size", 1, MAX_SECURE_STRING_SIZE);
 
   const isValidAlphabetInput =
     typeof alphabet === "string" &&
@@ -166,16 +233,15 @@ function computeAlphabetParameters(
   const acceptanceRatio = length / (mask + 1);
 
   // Keep the heuristic explicit: if acceptance ratio < 1/30 we consider it inefficient
-  const MIN_ACCEPTANCE_RATIO = 1 / 30;
   if (acceptanceRatio > 0 && acceptanceRatio < MIN_ACCEPTANCE_RATIO) {
     throw new InvalidParameterError(
-      `Alphabet size ${length} is inefficient for sampling.`,
+      `Alphabet size ${length} is inefficient for sampling (ratio ${acceptanceRatio.toFixed(4)}).`,
     );
   }
 
-  const rawStep = Math.ceil((1.6 * mask * size) / length);
-  const step = Math.min(rawStep, 4096);
-  if (rawStep > 4096) {
+  const rawStep = Math.ceil((REJECTION_STEP_FACTOR * mask * size) / length);
+  const step = Math.min(rawStep, MAX_RANDOM_BYTES_SYNC);
+  if (rawStep > MAX_RANDOM_BYTES_SYNC) {
     throw new InvalidParameterError(
       "Combination of alphabet/size requires too many random bytes.",
     );
@@ -187,6 +253,15 @@ function computeAlphabetParameters(
 /* -------------------------------------------------------------------------- */
 /* Constants                                                                   */
 /* -------------------------------------------------------------------------- */
+
+// Publicly documented limits for discoverability and consistent error messages.
+export const MAX_RANDOM_BYTES_SYNC = 4096 as const;
+export const MAX_ID_STRING_LENGTH = 256 as const;
+export const MAX_ID_BYTES_LENGTH = 256 as const;
+export const MAX_SECURE_STRING_SIZE = 1024 as const; // conservative upper bound
+export const RANDOM_INT_ITERATION_CAP = 5000 as const; // unbiased int generation cap
+export const REJECTION_STEP_FACTOR = 1.6 as const; // heuristic factor for step sizing
+export const MIN_ACCEPTANCE_RATIO = 1 / 30; // audit-able threshold
 
 export const URL_ALPHABET =
   "useandom-26T198340PX75pxJACKVERYMINDBUSHWOLF_GQZbfghjklqvwyzrict";
@@ -202,7 +277,7 @@ const _HEX_LOOKUP: readonly string[] = Object.freeze(
 function bytesToHex(bytes: Uint8Array): string {
   // Functional mapping avoids in-place mutation and satisfies immutable-data
   // lint rules while remaining allocation-efficient for small arrays.
-  return Array.from(bytes, (b) => _HEX_LOOKUP[b as number]!).join("");
+  return Array.from(bytes, (b) => _HEX_LOOKUP[b]!).join("");
 }
 
 /* -------------------------------------------------------------------------- */
@@ -223,7 +298,7 @@ export function assertCryptoAvailableSync(): Crypto {
 }
 
 export function getSecureRandomBytesSync(length = 1): Uint8Array {
-  validateNumericParameter(length, "length", 1, 4096);
+  validateNumericParameter(length, "length", 1, MAX_RANDOM_BYTES_SYNC);
   const crypto = assertCryptoAvailableSync();
   const out = new Uint8Array(length);
   crypto.getRandomValues(out);
@@ -267,7 +342,7 @@ export async function getSecureRandomAsync(
   }
 
   const buffer = new Uint32Array(1);
-  (crypto as Crypto).getRandomValues(buffer);
+  crypto.getRandomValues(buffer);
   checkAbortOrHidden(options?.signal, options?.enforceVisibility ?? true);
   return (buffer[0] ?? 0) / (0xffffffff + 1);
 }
@@ -297,7 +372,7 @@ export async function getSecureRandomInt(
 
   const crypto = await ensureCrypto();
   const rangeBig = BigInt(max) - BigInt(min) + BigInt(1);
-  const RANDOM_ITERATION_CAP = 5000;
+  const RANDOM_ITERATION_CAP = RANDOM_INT_ITERATION_CAP;
 
   /* eslint-disable functional/no-let -- Controlled local
     loop counters are necessary here for performance in the rejection-sampling
@@ -310,7 +385,7 @@ export async function getSecureRandomInt(
       for (let index = 0; index < RANDOM_ITERATION_CAP; index++) {
         if (options?.signal?.aborted) throw makeAbortError();
         checkAbortOrHidden(options?.signal, options?.enforceVisibility ?? true);
-        (crypto as Crypto).getRandomValues(array);
+        crypto.getRandomValues(array);
         const r = (array[0] ?? 0) >>> 0;
         if (r < threshold) return min + (r % range);
         if (index % 128 === 127) await Promise.resolve();
@@ -334,7 +409,7 @@ export async function getSecureRandomInt(
       for (let index = 0; index < RANDOM_ITERATION_CAP; index++) {
         if (options?.signal?.aborted) throw makeAbortError();
         checkAbortOrHidden(options?.signal, options?.enforceVisibility ?? true);
-        (crypto as Crypto).getRandomValues(array64);
+        crypto.getRandomValues(array64);
         const r = array64[0];
         if (r !== undefined && r < threshold64)
           return min + Number(r % rangeBig);
@@ -413,7 +488,7 @@ async function generateSecureStringInternalAsync(
 
     for (let iter = 0; iter < MAX_ITER && pos < size; iter++) {
       checkAbortOrHidden(options?.signal, options?.enforceVisibility ?? true);
-      (crypto as Crypto).getRandomValues(bytes);
+      crypto.getRandomValues(bytes);
       for (let index = 0; index < step && pos < size; index++) {
         const charIndex = (bytes[index] as number) & mask;
         if (charIndex < len) {
@@ -549,7 +624,7 @@ export async function generateSecureBytesAsync(
   // Use the returned crypto instance directly to avoid assumptions about
   // globalThis.crypto wiring in different runtimes.
   const out = new Uint8Array(byteLength);
-  (crypto as Crypto).getRandomValues(out);
+  crypto.getRandomValues(out);
   return out;
 }
 
@@ -569,7 +644,7 @@ export async function generateSecureUUID(): Promise<string> {
   }
   const bytes = new Uint8Array(16);
   try {
-    (crypto as Crypto).getRandomValues(bytes);
+    crypto.getRandomValues(bytes);
     if (bytes.length !== 16)
       throw new CryptoUnavailableError(
         "Failed to generate sufficient bytes for UUID.",
@@ -659,7 +734,7 @@ export async function createOneTimeCryptoKey(
 
   const keyData = new Uint8Array(bitLength / 8);
   try {
-    (crypto as Crypto).getRandomValues(keyData);
+    crypto.getRandomValues(keyData);
     /* eslint-disable functional/prefer-readonly-type -- WebCrypto expects a mutable KeyUsage[]; usages is a readonly input so we create a fresh array. */
     const usagesArray = Array.from(usages) as KeyUsage[];
     /* eslint-enable functional/prefer-readonly-type */
@@ -735,6 +810,14 @@ export async function generateSRI(
 
   try {
     if (typeof input === "string") {
+      // Developer education signal: strings are not wipeable.
+      if (isDevelopment()) {
+        secureDevelopmentLog(
+          "warn",
+          "security-kit",
+          "generateSRI received a string input. Strings are immutable and cannot be wiped. Prefer Uint8Array/ArrayBuffer for sensitive material.",
+        );
+      }
       internalView = SHARED_ENCODER.encode(input);
     } else {
       const buf = input;
@@ -775,6 +858,8 @@ export const SIMPLE_API = Object.freeze({
   secureCompareAsync,
   hasSyncCrypto,
   hasRandomUUID,
+  hasRandomUUIDSync,
+  getCryptoCapabilities,
 });
 
 /* -------------------------------------------------------------------------- */

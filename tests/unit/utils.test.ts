@@ -5,6 +5,8 @@ import {
   secureCompare,
   secureCompareAsync,
   _redact,
+  withSecureBuffer,
+  secureCompareBytes,
 } from "../../src/utils";
 import { arrayBufferToBase64 } from "../../src/encoding-utils";
 import { encodeComponentRFC3986, strictDecodeURIComponent } from "../../src/url";
@@ -37,6 +39,37 @@ describe("utils module", () => {
     // Run without requireCrypto to allow fallback
     const res = await secureCompareAsync("x", "x");
     expect(res).toBe(true);
+  });
+
+  it("withSecureBuffer provides a buffer and wipes it on return", () => {
+    let captured: Uint8Array | null = null;
+    const result = withSecureBuffer(16, (buf) => {
+      captured = buf;
+      buf[0] = 42;
+      return "done";
+    });
+    expect(result).toBe("done");
+    expect(captured![0]).toBe(0); // should be wiped
+  });
+
+  it("withSecureBuffer wipes buffer even if callback throws", () => {
+    let captured: Uint8Array | null = null;
+    expect(() => {
+      withSecureBuffer(16, (buf) => {
+        captured = buf;
+        buf[0] = 99;
+        throw new Error("test error");
+      });
+    }).toThrow("test error");
+    expect(captured![0]).toBe(0); // should be wiped despite throw
+  });
+
+  it("secureCompareBytes compares byte arrays correctly", () => {
+    const a = new Uint8Array([1, 2, 3]);
+    const b = new Uint8Array([1, 2, 3]);
+    const c = new Uint8Array([1, 2, 4]);
+    expect(secureCompareBytes(a, b)).toBe(true);
+    expect(secureCompareBytes(a, c)).toBe(false);
   });
 
   it("_redact redacts secrets and jwt-like and truncates long strings", () => {

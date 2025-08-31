@@ -54,9 +54,16 @@ export interface SecurePostMessageListener {
 
 export type SchemaValue = "string" | "number" | "boolean" | "object" | "array";
 
+export type MessageListenerContext = {
+  readonly origin: string;
+  readonly source?: unknown;
+  readonly ports?: readonly MessagePort[] | undefined;
+  readonly event?: MessageEvent;
+};
+
 export type CreateSecurePostMessageListenerOptions = {
   readonly allowedOrigins: readonly string[];
-  readonly onMessage: (data: unknown) => void;
+  readonly onMessage: (data: unknown, context?: MessageListenerContext) => void;
   readonly validate?: ((d: unknown) => boolean) | Record<string, SchemaValue>;
   // New hardening options
   readonly allowOpaqueOrigin?: boolean; // default false
@@ -160,16 +167,26 @@ function checkCryptoAvailabilityForSecurityFeature(
 // Helper: call consumer and centralize async rejection/sync throw handling so
 // the main `handler` function stays small and easier to lint/verify.
 function invokeConsumerSafely(
-  consumer: (d: unknown) => void,
+  consumer: (d: unknown, c?: MessageListenerContext) => void,
   data: unknown,
-  origin: string,
+  contextOrOrigin: string | MessageListenerContext,
 ): void {
+  // Normalize origin for logging regardless of whether a raw origin string
+  // or the richer MessageListenerContext was provided.
+  const originForLogs =
+    typeof contextOrOrigin === "string"
+      ? contextOrOrigin
+      : contextOrOrigin?.origin;
+
   try {
-    const result = consumer(data);
+    const result = consumer(
+      data,
+      typeof contextOrOrigin === "string" ? undefined : contextOrOrigin,
+    );
     Promise.resolve(result).catch((asyncError) => {
       try {
         secureDevelopmentLog("error", "postMessage", "Listener handler error", {
-          origin,
+          origin: originForLogs,
           error: sanitizeErrorForLogs(asyncError),
         });
       } catch {
@@ -179,7 +196,7 @@ function invokeConsumerSafely(
   } catch (error: unknown) {
     try {
       secureDevelopmentLog("error", "postMessage", "Listener handler error", {
-        origin,
+        origin: originForLogs,
         error: sanitizeErrorForLogs(error),
       });
     } catch {
@@ -783,6 +800,7 @@ export function createSecurePostMessageListener(
   const wireFormatLocal = finalOptions.wireFormat ?? "json";
   const allowTransferablesLocal = !!finalOptions.allowTransferables;
   const allowTypedArraysLocal = !!finalOptions.allowTypedArrays;
+  const allowOpaqueOriginLocal = !!finalOptions.allowOpaqueOrigin;
   /* deepFreezeNodeBudgetLocal intentionally unused here; use finalOptions.deepFreezeNodeBudget where needed */
 
   // Normalize origins to canonical form to avoid mismatches like :443 vs default
@@ -947,8 +965,21 @@ export function createSecurePostMessageListener(
       // Freeze payload by default (immutable) with an identity cache to avoid
       // repeated work. Consumers can opt out with freezePayload: false.
       if (freezePayloadLocal) freezePayloadIfNeeded(data);
+      // Build a small context object to give consumers access to event-level
+      // details such as origin, source and ports. This keeps the onMessage
+      // signature backwards-compatible (second param optional).
+      const context: MessageListenerContext = {
+        origin: event.origin,
+        source: event.source,
+        ports: event.ports as unknown as readonly MessagePort[] | undefined,
+        event,
+      };
       // Call the consumer in a small helper so this handler stays simple.
-      invokeConsumerSafely(onMessage, data, event.origin);
+      invokeConsumerSafely(
+        onMessage as (d: unknown, c?: unknown) => void,
+        data,
+        context,
+      );
     } catch (error: unknown) {
       secureDevelopmentLog("error", "postMessage", "Listener handler error", {
         origin: event?.origin,
@@ -958,26 +989,38 @@ export function createSecurePostMessageListener(
   };
 
   function isEventOriginAllowlisted(event: MessageEvent): boolean {
-    // Opaque origin handling
-    if (event.origin === "null") {
-      secureDevelopmentLog(
-        "warn",
-        "postMessage",
-        "Dropped message from opaque origin 'null'",
-        {
-          origin: event.origin,
-        },
-      );
-      return false;
+    // Treat empty string and 'null' as opaque origin markers. By default we
+    // reject opaque origins because they are hard to reason about. If the
+    // listener explicitly opted into `allowOpaqueOrigin`, accept them and
+    // skip canonical normalization checks.
+    const incoming = typeof event.origin === "string" ? event.origin : "";
+    const isOpaque = incoming === "" || incoming === "null";
+    if (isOpaque) {
+      if (!allowOpaqueOriginLocal) {
+        secureDevelopmentLog(
+          "warn",
+          "postMessage",
+          "Dropped message due to invalid origin format",
+          {
+            origin: incoming,
+          },
+        );
+        return false;
+      }
+      // If opaque origins are allowed, skip normalization and allow the message
+      // to proceed to other checks (e.g., expectedSource). This keeps the
+      // explicit opt-in behavior while allowing reply-port based scenarios.
+      return true;
     }
+
     try {
-      if (!allowedOriginSet.has(normalizeOrigin(event.origin))) {
+      if (!allowedOriginSet.has(normalizeOrigin(incoming))) {
         secureDevelopmentLog(
           "warn",
           "postMessage",
           "Dropped message from non-allowlisted origin",
           {
-            origin: event.origin,
+            origin: incoming,
           },
         );
         return false;
@@ -988,7 +1031,7 @@ export function createSecurePostMessageListener(
         "postMessage",
         "Dropped message due to invalid origin format",
         {
-          origin: event.origin,
+          origin: incoming,
           error: sanitizeErrorForLogs(error),
         },
       );
@@ -1193,9 +1236,35 @@ export function createSecurePostMessageListener(
     return toNullProto(parsed, 0, POSTMESSAGE_MAX_PAYLOAD_DEPTH);
   }
 
-  window.addEventListener("message", handler, {
-    signal: abortController.signal,
-  });
+  // Use globalThis.addEventListener so the listener works both on the main
+  // thread (window) and in worker contexts (self/globalThis). Cast to any to
+  // avoid TypeScript errors in non-DOM environments.
+  // Prefer `window.addEventListener` when available (tests often stub `window`).
+  const globalTarget: { addEventListener?: unknown } =
+    typeof window !== "undefined" &&
+    (window as unknown as { addEventListener?: unknown }).addEventListener
+      ? (window as unknown as { addEventListener?: unknown })
+      : (globalThis as unknown as { addEventListener?: unknown });
+  try {
+    (
+      globalTarget as unknown as {
+        addEventListener: (
+          type: string,
+          listener: EventListenerOrEventListenerObject,
+          options?: AddEventListenerOptions,
+        ) => void;
+      }
+    ).addEventListener(
+      "message",
+      handler as EventListenerOrEventListenerObject,
+      { signal: abortController.signal } as AddEventListenerOptions,
+    );
+  } catch (e) {
+    // If addEventListener is not available on the selected target, surface a clear error.
+    throw new InvalidConfigurationError(
+      "Global event target does not support addEventListener",
+    );
+  }
   return { destroy: () => abortController.abort() };
 }
 
@@ -1367,6 +1436,60 @@ async function ensureFingerprintSalt(): Promise<Uint8Array> {
     // clear promise so subsequent calls go fast (salt is cached)
 
     _payloadFingerprintSaltPromise = undefined;
+  }
+}
+
+// Helper: compute an initial allowed origin from an incoming MessageEvent.
+// This mirrors the small, well-audited logic used by workers to lock the
+// inbound origin at initialization time. We expose it so callers can reuse
+// identical semantics instead of re-implementing them.
+export function computeInitialAllowedOrigin(
+  event?: MessageEvent,
+): string | undefined {
+  try {
+    const origin =
+      event && typeof event.origin === "string" ? event.origin : "";
+    if (origin) return origin;
+    if (
+      typeof location !== "undefined" &&
+      location &&
+      typeof location.origin === "string"
+    )
+      return location.origin;
+    return undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+// Helper: check whether an incoming MessageEvent should be accepted given a
+// locked origin (if any). This implements the conservative fallback behavior
+// used by workers: if a locked origin exists, require a match; otherwise
+// fall back to matching location.origin when possible; if origin information
+// is unavailable, require the presence of a reply MessagePort to avoid
+// accepting anonymous posts.
+export function isEventAllowedWithLock(
+  event: MessageEvent,
+  lockedOrigin?: string,
+): boolean {
+  try {
+    const incomingOrigin = typeof event.origin === "string" ? event.origin : "";
+
+    if (typeof lockedOrigin === "string" && lockedOrigin !== "") {
+      return incomingOrigin === lockedOrigin;
+    }
+
+    const fallbackOrigin =
+      typeof location !== "undefined" ? location.origin : "";
+    if (incomingOrigin !== "" && fallbackOrigin !== "") {
+      return incomingOrigin === fallbackOrigin;
+    }
+
+    // If we can't establish any origin information, only accept messages that
+    // include a reply port — this avoids processing anonymous posts.
+    return !!(event?.ports && event.ports.length > 0);
+  } catch {
+    return false;
   }
 }
 
