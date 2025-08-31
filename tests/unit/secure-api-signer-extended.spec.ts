@@ -460,7 +460,7 @@ describe('Server-side verification - Security Constitution Compliance', () => {
     it('validates nonce format', async () => {
       const invalidInput = { ...validInput, nonce: 'invalid-nonce!' };
       await expect(verifyApiRequestSignature(invalidInput, nonceStore))
-        .rejects.toThrow('[security-kit] nonce must be standard base64');
+        .rejects.toThrow('[security-kit] nonce is not in an allowed format');
     });
 
     it('validates signature format', async () => {

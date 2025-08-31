@@ -6,19 +6,23 @@ beforeEach(() => {
 });
 
 afterEach(() => vi.useRealTimers());
-import * as state from '../../src/state';
-import { environment } from '../../src/environment';
+
+// Avoid top-level imports from src to prevent shared initialization state.
+// Use dynamic imports inside each test after calling vi.resetModules().
 
 test('scheduleDiagnostic handles ensureCrypto rejection in development', async () => {
   (globalThis as any).__SECURITY_KIT_ALLOW_TEST_APIS = true;
+  // Import stateful modules after resetModules to ensure isolation
+  const state = await import('../../src/state');
+  const { environment } = await import('../../src/environment');
   const prev = (environment as any).__explicitEnv;
   try {
     environment.setExplicitEnv('development');
 
     const spy = vi.spyOn(state as any, 'ensureCrypto').mockRejectedValueOnce(new Error('no crypto'));
 
-  const postMessage = await import('../../src/postMessage');
-  const listener = postMessage.createSecurePostMessageListener(
+    const postMessage = await import('../../src/postMessage');
+    const listener = postMessage.createSecurePostMessageListener(
       {
         allowedOrigins: [location.origin],
         onMessage: () => {},
@@ -31,8 +35,8 @@ test('scheduleDiagnostic handles ensureCrypto rejection in development', async (
     const ev = new MessageEvent('message', { data: JSON.stringify({ x: 1 }), origin: location.origin, source: window as any });
     window.dispatchEvent(ev);
 
-  // wait for async computeAndLog to run
-  await vi.runAllTimersAsync();
+    // wait for async computeAndLog to run
+    await vi.runAllTimersAsync();
 
     listener.destroy();
     spy.mockRestore();
@@ -44,6 +48,9 @@ test('scheduleDiagnostic handles ensureCrypto rejection in development', async (
 
 test('scheduleDiagnostic sets diagnostics disabled flag when ensureCrypto rejects in production', async () => {
   (globalThis as any).__SECURITY_KIT_ALLOW_TEST_APIS = true;
+  // Import environment and state after resetModules
+  const { environment } = await import('../../src/environment');
+  const state = await import('../../src/state');
   const prev = (environment as any).__explicitEnv;
   try {
     environment.setExplicitEnv('production');
@@ -61,8 +68,8 @@ test('scheduleDiagnostic sets diagnostics disabled flag when ensureCrypto reject
     }
 
     const spy = vi.spyOn(state as any, 'ensureCrypto').mockRejectedValueOnce(new Error('no crypto'));
-  const postMessage = await import('../../src/postMessage');
-  const listener = postMessage.createSecurePostMessageListener(
+    const postMessage = await import('../../src/postMessage');
+    const listener = postMessage.createSecurePostMessageListener(
       {
         allowedOrigins: [location.origin],
         onMessage: () => {},
@@ -74,7 +81,7 @@ test('scheduleDiagnostic sets diagnostics disabled flag when ensureCrypto reject
     const ev = new MessageEvent('message', { data: JSON.stringify({ x: 2 }), origin: location.origin, source: window as any });
     window.dispatchEvent(ev);
 
-  await vi.runAllTimersAsync();
+    await vi.runAllTimersAsync();
 
     listener.destroy();
     spy.mockRestore();

@@ -25,3 +25,22 @@ export function isForbiddenKey(key: string): boolean {
 export function getForbiddenKeys(): readonly string[] {
   return Array.from(_FORBIDDEN_KEYS);
 }
+
+// --- Handshake / Nonce defaults ---
+/** Default maximum nonce length accepted for handshakes (characters) */
+export const DEFAULT_HANDSHAKE_MAX_NONCE_LENGTH = 1024;
+
+/** Supported nonce encoding formats */
+export const NONCE_FORMAT_BASE64 = "base64" as const;
+export const NONCE_FORMAT_BASE64URL = "base64url" as const;
+export const NONCE_FORMAT_HEX = "hex" as const;
+
+export type NonceFormat =
+  | typeof NONCE_FORMAT_BASE64
+  | typeof NONCE_FORMAT_BASE64URL
+  | typeof NONCE_FORMAT_HEX;
+
+export const DEFAULT_NONCE_FORMATS: readonly NonceFormat[] = [
+  NONCE_FORMAT_BASE64,
+  NONCE_FORMAT_BASE64URL,
+];

@@ -22,7 +22,9 @@ function secureRandom(): number {
   const buf = Buffer.alloc(6);
   crypto.randomFillSync(buf);
   // Use a typed loop to compose a 48-bit integer from 6 random bytes
+  // eslint-disable-next-line functional/no-let -- Local accumulator for random number generation; scoped to function
   let accumulator = 0;
+  // eslint-disable-next-line functional/no-let -- Local loop index; scoped to function
   for (let index = 0; index < 6; index++) {
     accumulator = (accumulator << 8) + buf.readUInt8(index);
   }

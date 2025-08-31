@@ -23,6 +23,7 @@ const DANGEROUS_SCHEMES = new Set([
   "ftp:",
 ]);
 
+// eslint-disable-next-line functional/no-let -- Policy state must be assignable for configuration
 let _safeSchemes = new Set(DEFAULT_SAFE_SCHEMES);
 
 function isValidScheme(s: string): boolean {

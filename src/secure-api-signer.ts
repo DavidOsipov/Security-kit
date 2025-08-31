@@ -134,8 +134,7 @@ type SignerState = {
 
 /** Generate cryptographically random request ID to avoid mutable counter */
 function generateRequestId(): number {
-  const bytes = new Uint8Array(4);
-  crypto.getRandomValues(bytes);
+  const bytes = getSecureRandomBytesSync(4);
   // Convert to positive 32-bit integer, Uint8Array indices are guaranteed to exist
   return (
     (((bytes[0] ?? 0) << 24) |
@@ -251,7 +250,8 @@ export class SecureApiSigner {
   readonly #maxPendingRequests: number;
   readonly #kid: string | undefined;
 
-  readonly #state: SignerState = {
+  // eslint-disable-next-line functional/prefer-readonly-type -- These fields are intentionally mutable for state management
+  #state: SignerState = {
     destroyed: false,
     activePorts: new Map(),
     circuitBreaker: {
@@ -262,13 +262,18 @@ export class SecureApiSigner {
     },
   };
   // Reservation tokens to synchronously reserve pending slots before async work
-  readonly #pendingReservations = 0;
-  readonly #reservationTokens = new Set<number>();
-  readonly #nextReservationId = 1;
+  // eslint-disable-next-line functional/prefer-readonly-type -- These fields are intentionally mutable for state management
+  #pendingReservations = 0;
+  // eslint-disable-next-line functional/prefer-readonly-type -- These fields are intentionally mutable for state management
+  #reservationTokens = new Set<number>();
+  // eslint-disable-next-line functional/prefer-readonly-type -- These fields are intentionally mutable for state management
+  #nextReservationId = 1;
   // #pendingReservations provides synchronous slot reservation to prevent races under concurrent sign() calls.
   // Concurrency is enforced via the size of #state.activePorts after reservation is converted into an active port.
-  readonly #resolveReady!: () => void;
-  readonly #rejectReady!: (reason: unknown) => void;
+  // eslint-disable-next-line functional/prefer-readonly-type -- These fields are intentionally mutable for state management
+  #resolveReady!: () => void;
+  // eslint-disable-next-line functional/prefer-readonly-type -- These fields are intentionally mutable for state management
+  #rejectReady!: (reason: unknown) => void;
   readonly #destroyAckTimeoutMs: number;
 
   // store computedRuntimeWorkerHash when integrity === 'compute' for telemetry/debug
@@ -616,19 +621,20 @@ export class SecureApiSigner {
     const { port1: localPort, port2: workerPort } = channel;
 
     const timerMs = HANDSHAKE_TIMEOUT_MS;
-    const nonceBuf = new Uint8Array(HANDSHAKE_NONCE_BYTES);
-    crypto.getRandomValues(nonceBuf);
+    const nonceBuf = getSecureRandomBytesSync(HANDSHAKE_NONCE_BYTES);
     const nonceB64 = bytesToBase64(nonceBuf);
 
     const handshakeRequest = { type: "handshake", nonce: nonceB64 };
 
     // Local timer id so we can clear timeout in finally
+    // eslint-disable-next-line functional/no-let -- timerId is reassigned in finally
     let timerId: ReturnType<typeof setTimeout> | undefined;
 
     const handshakePromise = new Promise<void>((resolve, reject) => {
       // idempotent cleanup helper for handler
       const cleanupHandler = () => {
         try {
+          // eslint-disable-next-line -- Clearing event handler
           localPort.onmessage = null;
         } catch {
           /* ignore */
@@ -671,6 +677,7 @@ export class SecureApiSigner {
     const timeoutPromise = new Promise<void>((_resolve, reject) => {
       timerId = setTimeout(() => {
         try {
+          // eslint-disable-next-line -- Clearing event handler
           localPort.onmessage = null;
         } catch {
           /* ignore */
@@ -966,9 +973,12 @@ export class SecureApiSigner {
         }
       }
 
-      // More efficient immutable update: copy and delete
-      const newActivePorts = new Map(this.#state.activePorts);
-      newActivePorts.delete(port);
+      // More efficient immutable update: filter out the port
+      const newActivePorts = new Map(
+        Array.from(this.#state.activePorts.entries()).filter(
+          ([p]) => p !== port,
+        ),
+      );
 
       // eslint-disable-next-line functional/immutable-data -- controlled state transition
       this.#state = this.#withActivePorts(newActivePorts);

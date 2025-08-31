@@ -3,8 +3,8 @@ import {
   sendSecurePostMessage,
   createSecurePostMessageListener,
   validateTransferables,
-  TransferableNotAllowedError,
 } from '../../src/postMessage';
+import { TransferableNotAllowedError } from '../../src/errors';
 
 // Mock window.postMessage
 const mockPostMessage = vi.fn();

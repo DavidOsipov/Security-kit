@@ -29,6 +29,11 @@ import { getSafeSchemes } from "./url-policy";
 import { environment } from "./environment";
 import { secureDevLog as secureDevelopmentLog } from "./utils";
 
+// This file contains deliberate, policy-driven branching that increases
+// cognitive complexity. We allow the sonarjs cognitive-complexity rule to
+// be disabled for this file with an explicit justification.
+/* eslint-disable sonarjs/cognitive-complexity -- deliberate policy-heavy branching */
+
 /* -------------------------
    Utilities & helpers
    ------------------------- */
@@ -119,15 +124,24 @@ function _isPlainObjectOrMap(
  * Throws if caller requested allowedSchemes that have zero intersection with policy,
  * since silent deny-all is surprising and may break callers unintentionally.
  */
+// Complexity is intentional due to policy checks and explicit error paths.
+
 function getEffectiveSchemes(
   allowedSchemes?: readonly string[],
 ): ReadonlySet<string> {
-  const SAFE_SCHEMES = new Set(getSafeSchemes().map(canonicalizeScheme));
+  // Use an explicit arrow wrapper to avoid passing function reference directly
+  // which some eslint rules flag (unicorn/no-array-callback-reference).
+  const SAFE_SCHEMES = new Set(
+    getSafeSchemes().map((c) => canonicalizeScheme(c)),
+  );
   if (allowedSchemes === undefined) return SAFE_SCHEMES;
   if (Array.isArray(allowedSchemes) && allowedSchemes.length === 0)
     return new Set<string>(); // explicit deny-all
 
-  const userSet = new Set(Array.from(allowedSchemes).map(canonicalizeScheme));
+  // Same explicit wrapper for user-provided list.
+  const userSet = new Set(
+    Array.from(allowedSchemes).map((s) => canonicalizeScheme(s)),
+  );
   const intersection = new Set([...userSet].filter((s) => SAFE_SCHEMES.has(s)));
   if (userSet.size > 0 && intersection.size === 0) {
     throw new InvalidParameterError(
@@ -264,6 +278,8 @@ function processQueryParameters(
       continue;
     }
     const stringValue = value === undefined ? "" : String(value ?? "");
+    // Intentionally mutating URL.searchParams to append query parameters.
+
     url.searchParams.append(key, stringValue);
   }
 }
@@ -302,6 +318,7 @@ function processUpdateParameters(
     }
 
     // Treat nullish as empty string for updates (preserving prior behavior); avoid null literal.
+
     url.searchParams.set(key, String(value ?? ""));
   }
 }
@@ -313,8 +330,8 @@ function processUpdateParameters(
 const ENCODE_SUBDELIMS_RE = /[!'()*]/g;
 
 function hasControlChars(s: string): boolean {
-  for (let index = 0; index < s.length; index += 1) {
-    const code = s.charCodeAt(index);
+  for (const ch of s) {
+    const code = ch.charCodeAt(0);
     if ((code >= 0x00 && code <= 0x1f) || (code >= 0x7f && code <= 0x9f))
       return true;
   }
@@ -371,7 +388,11 @@ function appendPathSegments(url: URL, pathSegments: readonly string[]): void {
     }
 
     const encoded = encodePathSegment(segment);
+    // Intentionally mutating URL.pathname in-place; this is the simplest,
+    // behavior-preserving way to append path segments to the existing URL.
+    // eslint-disable-next-line functional/immutable-data -- deliberate in-place update of URL object
     if (!url.pathname.endsWith("/")) url.pathname += "/";
+    // eslint-disable-next-line functional/immutable-data -- deliberate in-place update of URL object
     url.pathname += encoded;
   }
 }
@@ -457,6 +478,7 @@ export function createSecureURL(
           "Fragment contains control characters.",
         );
       // Set without leading '#'
+      // eslint-disable-next-line functional/immutable-data -- deliberate in-place mutation of URL
       url.hash = fragment;
     }
 
@@ -469,6 +491,7 @@ export function createSecureURL(
 /**
  * updateURLParams - update/patch the query part of an existing URL string.
  */
+/* eslint-disable-next-line unicorn/prevent-abbreviations -- stable public API name; descriptive alias exported below */
 export function updateURLParams(
   baseUrl: string,
   updates: Record<string, unknown> | ReadonlyMap<string, unknown>,
@@ -635,6 +658,7 @@ export function validateURL(
    parseURLParams
    ------------------------- */
 
+/* eslint-disable-next-line unicorn/prevent-abbreviations -- stable public API name; descriptive alias exported below */
 export function parseURLParams(urlString: string): Record<string, string>;
 export function parseURLParams<K extends string>(
   urlString: string,
@@ -659,10 +683,13 @@ export function parseURLParams(
 
   const url = parseUrlOrThrow(urlString);
 
-  const parameterMap = new Map<string, string>();
-  for (const [key, value] of url.searchParams.entries()) {
-    if (isSafeKey(key)) parameterMap.set(key, value);
-  }
+  // Build entries immutably from searchParams to avoid in-place array mutation.
+  const parameterEntries: ReadonlyArray<readonly [string, string]> = Array.from(
+    url.searchParams.entries(),
+  ).filter(([key]) => isSafeKey(key));
+  const parameterMap = new Map<string, string>(
+    parameterEntries as ReadonlyArray<readonly [string, string]>,
+  );
 
   // Validate expected parameters
   if (expectedParameters)
@@ -671,6 +698,9 @@ export function parseURLParams(
   // Freeze and return a POJO with a null prototype created from the map so
   // callers can assert the prototype is null to detect tampering.
   const object = Object.create(null) as Record<string, string>;
+  // Intentionally creating a plain POJO from the Map for return; this requires
+  // assigning properties on the newly-created object. It's safe and intentional.
+  // eslint-disable-next-line functional/immutable-data -- creating return POJO from map
   for (const [k, v] of parameterMap.entries()) object[k] = v;
   return Object.freeze(object);
 }
@@ -751,9 +781,9 @@ export function strictDecodeURIComponent(
 }
 
 export function strictDecodeURIComponentOrThrow(string_: string): string {
-  const res = strictDecodeURIComponent(string_);
-  if (!res.ok) throw res.error;
-  return res.value;
+  const result = strictDecodeURIComponent(string_);
+  if (!result.ok) throw result.error;
+  return result.value;
 }
 
 /* -------------------------
@@ -813,3 +843,7 @@ function enforceSchemeAndLength(
     );
   }
 }
+
+// Provide descriptive compatibility aliases for commonly-used public APIs.
+export const updateURLParameters = updateURLParams;
+export const parseURLParameters = parseURLParams;

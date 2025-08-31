@@ -33,10 +33,15 @@ function isCryptoLike(v: unknown): v is Crypto {
   );
 }
 
+/* Deliberate mutable module-level state for lifecycle management. These
+  variables must be mutable so the module can manage crypto provider
+  initialization, caching and sealing. Narrowly disable the rule here. */
+/* eslint-disable functional/no-let -- deliberate mutable lifecycle state */
 let _cachedCrypto: Crypto | undefined = undefined;
 let _cryptoPromise: Promise<Crypto> | undefined = undefined;
 let _cryptoState: CryptoState = CryptoState.Unconfigured;
 let _cryptoInitGeneration = 0;
+/* eslint-enable functional/no-let */
 
 // --- Internal State Accessors ---
 export function getCryptoState(): CryptoState {
@@ -184,18 +189,17 @@ export async function ensureCrypto(): Promise<Crypto> {
     }
   })();
 
-  _cryptoPromise.catch((error) => {
+  _cryptoPromise.catch((error: unknown) => {
     const safeContext = {
       component: "security-kit",
       phase: "ensureCrypto",
       message: "initialization failed",
     };
     try {
+      const safeError =
+        error instanceof Error ? error : new Error(String(error));
       if (environment.isProduction) {
-        reportProductionError(
-          error instanceof Error ? error : new Error(String(error)),
-          safeContext,
-        );
+        reportProductionError(safeError, safeContext);
       } else if (isDevelopment()) {
         secureDevelopmentLog(
           "error",
@@ -203,14 +207,14 @@ export async function ensureCrypto(): Promise<Crypto> {
           "ensureCrypto initialization failed",
           {
             error:
-              error instanceof Error
-                ? { name: error.name, message: error.message }
-                : String(error),
+              safeError instanceof Error
+                ? { name: safeError.name, message: safeError.message }
+                : String(safeError),
           },
         );
       }
     } catch {
-      /* ignore */
+      /* best-effort reporting; ignore errors from reporting */
     }
   });
 
@@ -246,8 +250,12 @@ export const __test_resetCryptoStateForUnitTests: undefined | (() => void) =
     ? (() => {
         // runtime guard to prevent accidental execution in production
         // import lazily to avoid cycles at module load time
-        const { assertTestApiAllowed } = require("./development-guards");
-        assertTestApiAllowed();
+        // Use a typed require to avoid `any` leakage into the surrounding scope
+        // while still loading the test guard lazily in test-only paths.
+        const _developmentGuards = require("./development-guards") as {
+          readonly assertTestApiAllowed: () => void;
+        };
+        _developmentGuards.assertTestApiAllowed();
         return () => {
           _cachedCrypto = undefined;
           _cryptoPromise = undefined;
@@ -260,6 +268,25 @@ export const __test_resetCryptoStateForUnitTests: undefined | (() => void) =
       })()
     : undefined;
 
+// Additional test helper: make reset available when running under NODE_ENV=test.
+// This is intentionally guarded so it only works in test runs. It helps test
+// harnesses that don't set __TEST__ at compile-time to reset global state.
+export function __resetCryptoStateForTests(): void {
+  if (process.env["NODE_ENV"] !== "test") {
+    throw new Error(
+      "__resetCryptoStateForTests is test-only and cannot be used outside tests.",
+    );
+  }
+  _cachedCrypto = undefined;
+  _cryptoPromise = undefined;
+  _cryptoState = CryptoState.Unconfigured;
+  _cryptoInitGeneration = 0;
+  try {
+    environment.clearCache();
+  } catch {}
+}
+
+/* eslint-disable-next-line unicorn/prevent-abbreviations -- stable public test helper name; descriptive alias exported below */
 export function getInternalTestUtils():
   | {
       readonly _getCryptoGenerationForTest: () => number;
@@ -275,6 +302,10 @@ export function getInternalTestUtils():
   }
   return undefined;
 }
+
+// Provide a descriptive compatibility alias to satisfy callers and reduce
+// noisy naming warnings from lint rules (non-breaking).
+export const getInternalTestUtilities = getInternalTestUtils;
 
 // Small test helper to inspect cached crypto in unit tests when allowed.
 export function __test_getCachedCrypto(): Crypto | null | undefined {

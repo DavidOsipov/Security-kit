@@ -4,8 +4,13 @@
 
 import { SHARED_ENCODER } from "../encoding";
 import type { InitMessage, SignRequest } from "../protocol";
-import { bytesToBase64, secureWipeWrapper } from "../encoding-utils";
-import { secureDevLog } from "../utils";
+import {
+  bytesToBase64,
+  secureWipeWrapper,
+  isLikelyBase64,
+} from "../encoding-utils";
+import { getHandshakeConfig } from "../config";
+import { secureDevLog as secureDevelopmentLog } from "../utils";
 import { sanitizeErrorForLogs } from "../errors";
 
 // --- State Management ---
@@ -39,10 +44,14 @@ const createInitialState = (): WorkerState => ({
   maxConcurrentSigning: 5,
 });
 
+// Maximum allowed nonce length for handshake messages to prevent resource abuse
+const HANDSHAKE_MAX_NONCE_LENGTH = 1024;
+
 /**
  * Creates a simple, encapsulated state manager using a closure.
  */
 const createStateManager = (initialState: WorkerState) => {
+  // eslint-disable-next-line functional/no-let -- intentional mutable state in closure for state management
   let state = initialState;
   return {
     getCurrent: (): WorkerState => state,
@@ -52,6 +61,8 @@ const createStateManager = (initialState: WorkerState) => {
   };
 };
 
+// Keep createStateManager closure result immutable (const). The manager
+// itself holds internal mutable state via closure which is intentional.
 const { getCurrent, update: updateState } =
   createStateManager(createInitialState());
 
@@ -119,6 +130,38 @@ async function handleHandshakeRequest(
   if (!isHandshakeMessage(messageData) || !replyPort) {
     postMessage({ type: "error", reason: "invalid-handshake" });
     return;
+  }
+
+  // Validate nonce length and format using runtime-configured policies
+  try {
+    if (typeof messageData.nonce === "string") {
+      const cfg = getHandshakeConfig();
+      if (messageData.nonce.length > cfg.handshakeMaxNonceLength) {
+        replyPort.postMessage({ type: "error", reason: "nonce-too-large" });
+        return;
+      }
+
+      // Validate allowed formats
+      const allowed = cfg.allowedNonceFormats;
+      // Prefer const and boolean expressions instead of mutable let.
+      const okFormatBase64 =
+        allowed.includes("base64") && isLikelyBase64(messageData.nonce);
+      const okFormatBase64Url =
+        allowed.includes("base64url") && isLikelyBase64(messageData.nonce);
+      const okFormatHex =
+        allowed.includes("hex") && /^[0-9a-f]+$/i.test(messageData.nonce);
+      const okFormat = okFormatBase64 || okFormatBase64Url || okFormatHex;
+      if (!okFormat) {
+        replyPort.postMessage({
+          type: "error",
+          reason: "nonce-format-invalid",
+        });
+        return;
+      }
+    }
+  } catch {
+    // Deliberately ignore parse/validation exceptions here and continue.
+    // We don't expose internal error details to the caller.
   }
 
   const { hmacKey } = getCurrent();
@@ -209,7 +252,7 @@ function enforceRateLimit(requestId: number, replyPort?: MessagePort): boolean {
 
   if (total >= rateLimitPerMinute) {
     if (developmentLogging) {
-      secureDevLog("warn", "signing-worker", "rate limit exceeded", {
+      secureDevelopmentLog("warn", "signing-worker", "rate limit exceeded", {
         total,
         rateLimitPerMinute,
       });
@@ -237,7 +280,7 @@ function checkOverload(requestId: number, replyPort?: MessagePort): boolean {
     getCurrent();
   if (pendingCount >= maxConcurrentSigning) {
     if (developmentLogging) {
-      secureDevLog("warn", "signing-worker", "worker overloaded", {
+      secureDevelopmentLog("warn", "signing-worker", "worker overloaded", {
         pendingCount,
         maxConcurrentSigning,
       });
@@ -260,7 +303,7 @@ async function executeSign(
     await doSign(requestId, canonical, replyPort);
   } catch (signError) {
     if (getCurrent().developmentLogging) {
-      secureDevLog("error", "signing-worker", "sign operation failed", {
+      secureDevelopmentLog("error", "signing-worker", "sign operation failed", {
         error: sanitizeErrorForLogs(signError),
         requestId,
       });
@@ -324,10 +367,11 @@ async function importKey(raw: ArrayBuffer): Promise<void> {
     );
     updateState({ hmacKey: key });
   } finally {
+    // wipe secret in a best-effort manner; intentionally ignore wipe errors
     try {
       secureWipeWrapper(new Uint8Array(raw));
     } catch {
-      // best-effort only
+      /* best-effort only */
     }
   }
 }
@@ -367,8 +411,41 @@ function isHandshakeMessage(data: unknown): data is { readonly nonce: string } {
   );
 }
 
+// Runtime guard for exposing test-only helpers
+function _assertTestApiAllowedInlineWorker(): void {
+  try {
+    // allow in non-production or when explicit allow flag is set
+    const environmentAllow =
+      typeof process !== "undefined" &&
+      process?.env?.["SECURITY_KIT_ALLOW_TEST_APIS"] === "true";
+    const globalAllow = !!(globalThis as unknown as Record<string, unknown>)[
+      "__SECURITY_KIT_ALLOW_TEST_APIS"
+    ];
+    // If either allow is set, permit; otherwise throw when environment seems production
+    if (environmentAllow || globalAllow) return;
+    // If there's no indication of test allow, try to be permissive in non-Node envs
+    if (typeof process === "undefined") return;
+    // If process exists and no allow flag, restrict access
+    throw new Error(
+      "Test-only APIs are disabled. Set SECURITY_KIT_ALLOW_TEST_APIS=true to enable.",
+    );
+  } catch {
+    throw new Error(
+      "Test-only APIs are disabled. Set SECURITY_KIT_ALLOW_TEST_APIS=true to enable.",
+    );
+  }
+}
+
+export function __test_validateHandshakeNonce(nonce: string): boolean {
+  _assertTestApiAllowedInlineWorker();
+  return (
+    typeof nonce === "string" && nonce.length <= HANDSHAKE_MAX_NONCE_LENGTH
+  );
+}
+
 // --- Main Event Listener ---
 
+// eslint-disable-next-line sonarjs/post-message -- dedicated worker spawned by same origin; origin verification not applicable
 self.addEventListener("message", async (event: MessageEvent) => {
   if (event.data === undefined || typeof event.data !== "object") {
     postMessage({ type: "error", reason: "invalid-message-format" });
@@ -409,18 +486,18 @@ self.addEventListener("message", async (event: MessageEvent) => {
           reason: "unknown-message-type",
         });
     }
-  } catch (e) {
+  } catch (error) {
     postMessage({
       type: "error",
       requestId: undefined,
       reason: "worker-exception",
     });
     if (getCurrent().developmentLogging) {
-      secureDevLog(
+      secureDevelopmentLog(
         "error",
         "signing-worker",
         "Unhandled exception in worker event listener",
-        { error: sanitizeErrorForLogs(e) },
+        { error: sanitizeErrorForLogs(error) },
       );
     }
   }

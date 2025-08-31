@@ -13,8 +13,9 @@ export type DevLogger = (
   context?: unknown,
 ) => void;
 
+// eslint-disable-next-line functional/no-let -- Logger facade must be assignable for replacement
 export let devLog: DevLogger = () => {};
 
-export function setDevLogger(fn: DevLogger): void {
-  devLog = fn;
+export function setDevLogger(function_: DevLogger): void {
+  devLog = function_;
 }

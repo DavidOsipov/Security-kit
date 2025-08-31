@@ -120,6 +120,15 @@ export class TransferableNotAllowedError extends Error {
   }
 }
 
+export class IllegalStateError extends Error {
+  public readonly code = "ERR_ILLEGAL_STATE";
+
+  constructor(message: string) {
+    super(`[security-kit] ${message}`);
+    this.name = "IllegalStateError";
+  }
+}
+
 /**
  * Sanitizes error objects for safe logging by truncating messages
  * and extracting only safe properties. Prevents leaking sensitive

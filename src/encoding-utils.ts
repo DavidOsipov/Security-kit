@@ -29,9 +29,12 @@ export function bytesToBase64(
   }
 
   if (typeof btoa === "function") {
+    // eslint-disable-next-line functional/no-let -- Local binary string accumulator; scoped to function
     let binary = "";
+    // eslint-disable-next-line functional/no-let -- Local loop index; scoped to function
     for (let index = 0; index < bytes.length; index += chunkSize) {
       const slice = bytes.subarray(index, index + chunkSize);
+      // eslint-disable-next-line functional/no-let -- Local loop index; scoped to function
       for (let index_ = 0; index_ < slice.length; index_++)
         binary += String.fromCharCode(slice[index_] as number);
     }
@@ -48,6 +51,7 @@ export function base64ToBytes(b64: string): Uint8Array {
       const bin = atob(normalized);
       const length = bin.length;
       const out = new Uint8Array(length);
+      // eslint-disable-next-line functional/no-let -- Local loop index; scoped to function
       for (let index = 0; index < length; index++)
         out[index] = bin.charCodeAt(index);
       return out;
@@ -97,6 +101,7 @@ export async function sha256Base64(input: BufferSource): Promise<string> {
 export function secureWipeWrapper(view: Uint8Array): void {
   try {
     // Best-effort overwrite
+    // eslint-disable-next-line functional/no-let, functional/immutable-data -- Local loop index and intentional array modification for secure wipe; scoped to function
     for (let index = 0; index < view.length; index++) view[index] = 0;
   } catch {
     // ignore
