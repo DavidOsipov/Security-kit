@@ -131,8 +131,10 @@ export function reportProdError(error: Error, context: unknown = {}) {
       // (which may have side-effectful getters) and to guarantee a sanitized
       // payload is passed to the production hook. Freeze the final object so
       // downstream reporters cannot mutate it.
-      const redactedContext =
-        (_redact(context) || {}) as Record<string, unknown>;
+      const redactedContext = (_redact(context) || {}) as Record<
+        string,
+        unknown
+      >;
       const finalContext = Object.freeze({
         ...redactedContext,
         stackHash: (sanitized as { readonly stackHash?: string }).stackHash,
