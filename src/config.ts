@@ -51,6 +51,10 @@ export type LoggingConfig = {
    * telemetry mechanisms and avoid exposing key identifiers.
    */
   readonly unsafeKeyHashSalt?: string | undefined;
+  /**
+   * Dev-only: maximum number of dev log tokens per minute. Defaults to 200.
+   */
+  readonly rateLimitTokensPerMinute?: number | undefined;
 };
 
 /* eslint-disable functional/no-let -- controlled mutable configuration allowed here */
@@ -58,6 +62,7 @@ let _loggingConfig: LoggingConfig = {
   allowUnsafeKeyNamesInDev: false,
   includeUnsafeKeyHashesInDev: false,
   unsafeKeyHashSalt: undefined,
+  rateLimitTokensPerMinute: 200,
 };
 /* eslint-enable functional/no-let */
 
@@ -105,6 +110,17 @@ export function setLoggingConfig(cfg: Partial<LoggingConfig>): void {
     typeof cfg.unsafeKeyHashSalt !== "string"
   ) {
     throw new InvalidParameterError("unsafeKeyHashSalt must be a string.");
+  }
+
+  if (cfg.rateLimitTokensPerMinute !== undefined) {
+    if (
+      !Number.isInteger(cfg.rateLimitTokensPerMinute) ||
+      cfg.rateLimitTokensPerMinute <= 0
+    ) {
+      throw new InvalidParameterError(
+        "rateLimitTokensPerMinute must be a positive integer.",
+      );
+    }
   }
 
   _loggingConfig = { ..._loggingConfig, ...cfg } as LoggingConfig;
