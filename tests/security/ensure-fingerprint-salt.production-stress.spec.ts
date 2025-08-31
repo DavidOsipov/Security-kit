@@ -23,7 +23,10 @@ async function loadWithMockedEnsureCryptoAndProd(ensureCryptoImpl: () => Promise
 
 describe('ensureFingerprintSalt production cooldown stress', () => {
   it('concurrent failures set cooldown and block retries until cleared', async () => {
-    const concurrency = Number(process.env.STRESS_CONCURRENCY ?? 200);
+    const MAX_CONCURRENCY = 2000;
+    let concurrency = Number(process.env.STRESS_CONCURRENCY ?? 200);
+    if (isNaN(concurrency) || concurrency < 1) concurrency = 1;
+    if (concurrency > MAX_CONCURRENCY) concurrency = MAX_CONCURRENCY; // Avoid resource exhaustion
 
     let calls = 0;
     const failingEnsure = async () => {
