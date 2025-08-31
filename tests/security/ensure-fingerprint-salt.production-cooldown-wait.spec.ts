@@ -27,7 +27,11 @@ function sleep(ms: number) {
 
 describe('ensureFingerprintSalt production cooldown (wait realistic)', () => {
   it('waits the real cooldown period before retrying', async () => {
-    const concurrency = Number(process.env.STRESS_CONCURRENCY ?? 50);
+    const MAX_CONCURRENCY = 500;
+    let rawConcurrency = Number(process.env.STRESS_CONCURRENCY ?? 50);
+    if (!Number.isFinite(rawConcurrency) || rawConcurrency < 1) rawConcurrency = 1;
+    if (rawConcurrency > MAX_CONCURRENCY) rawConcurrency = MAX_CONCURRENCY;
+    const concurrency = rawConcurrency;
 
     let calls = 0;
     const failingEnsure = async () => {
