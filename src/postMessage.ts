@@ -266,7 +266,7 @@ function validateTransferables(
         payload as Record<string, unknown>,
         key,
       );
-      if (desc && Object.prototype.hasOwnProperty.call(desc, "value")) {
+      if (desc && Object.hasOwn(desc, "value")) {
         const value = desc.value;
         validateTransferables(
           value,
@@ -369,7 +369,7 @@ function toNullProto(
         // Skip accessor properties to avoid executing untrusted getters
         continue;
       }
-      if (desc && Object.prototype.hasOwnProperty.call(desc, "value")) {
+      if (desc && Object.hasOwn(desc, "value")) {
         value = (desc as PropertyDescriptor & { readonly value?: unknown })
           .value as unknown;
       } else {
@@ -1489,7 +1489,7 @@ export function _validatePayload(
     return { valid: false, reason: "Forbidden property name present" };
   }
   for (const [key, expectedType] of Object.entries(validator)) {
-    if (!Object.prototype.hasOwnProperty.call(plainData, key)) {
+    if (!Object.hasOwn(plainData, key)) {
       return { valid: false, reason: `Missing property '${key}'` };
     }
     const value = plainData[key];

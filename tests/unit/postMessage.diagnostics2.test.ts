@@ -101,7 +101,7 @@ describe("postMessage diagnostics - budget and ensureCrypto error paths", () => 
       const foundNoFingerprint = calls.some((c) => {
         try {
           const [, comp, msg, ctx] = c as any;
-          return msg === "Message dropped due to failed validation" && ctx && !Object.prototype.hasOwnProperty.call(ctx, "fingerprint");
+          return msg === "Message dropped due to failed validation" && ctx && !Object.hasOwn(ctx, "fingerprint");
         } catch {
           return false;
         }

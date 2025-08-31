@@ -208,7 +208,7 @@ function _checkForDangerousKeys(
   const ownKeysSet = new Set<string>(ownPropertyNames);
   for (const dangerous of GLOBAL_DANGEROUS_KEYS) {
     if (dangerous === "__proto__") {
-      if (Object.prototype.hasOwnProperty.call(object, "__proto__")) {
+      if (Object.hasOwn(object, "__proto__")) {
         const message = `Unsafe key '__proto__' present on ${componentName} object.`;
         if (onUnsafeKey === "throw") throw new InvalidParameterError(message);
         secureDevelopmentLog("warn", componentName, message, {

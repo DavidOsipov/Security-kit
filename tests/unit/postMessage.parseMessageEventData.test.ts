@@ -37,7 +37,7 @@ test('structured wireFormat accepts object payload and sanitizes', () => {
   // If the environment delivered the event, ensure we got sanitized object; otherwise we at least validated listener creation.
   if (received.length > 0) {
     const out = received[0] as Record<string, unknown>;
-    expect(Object.prototype.hasOwnProperty.call(out, '__proto__')).toBe(false);
+    expect(Object.hasOwn(out, '__proto__')).toBe(false);
   }
 });
 

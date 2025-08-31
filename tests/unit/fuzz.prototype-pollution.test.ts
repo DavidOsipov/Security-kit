@@ -62,7 +62,7 @@ describe("prototype-pollution fuzz tests", () => {
     const validator = (obj: any) => {
       // simple validator that throws on unexpected keys but should not mutate prototypes
       if (typeof obj !== "object" || obj === null) return false;
-      if (Object.prototype.hasOwnProperty.call(obj, "unexpected")) throw new Error("unexpected");
+      if (Object.hasOwn(obj, "unexpected")) throw new Error("unexpected");
       return true;
     };
 

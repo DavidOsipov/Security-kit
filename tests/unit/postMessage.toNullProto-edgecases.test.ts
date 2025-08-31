@@ -26,7 +26,7 @@ test("toNullProto skips accessor properties that throw and preserves plain value
   expect(res).toHaveProperty("good", 1);
   expect(Object.getPrototypeOf(res)).toBeNull();
   // accessor 'bad' should be skipped
-  expect(Object.prototype.hasOwnProperty.call(res, "bad")).toBe(false);
+  expect(Object.hasOwn(res, "bad")).toBe(false);
 });
 
 test("toNullProto ignores symbol-keyed properties and removes forbidden names", () => {
@@ -44,9 +44,9 @@ test("toNullProto ignores symbol-keyed properties and removes forbidden names", 
   // symbol keys must not be copied
   expect(Object.getOwnPropertySymbols(res).length).toBe(0);
   // forbidden keys removed
-  expect(Object.prototype.hasOwnProperty.call(res, "__proto__")).toBe(false);
-  expect(Object.prototype.hasOwnProperty.call(res, "constructor")).toBe(false);
-  expect(Object.prototype.hasOwnProperty.call(res, "prototype")).toBe(false);
+  expect(Object.hasOwn(res, "__proto__")).toBe(false);
+  expect(Object.hasOwn(res, "constructor")).toBe(false);
+  expect(Object.hasOwn(res, "prototype")).toBe(false);
   expect(res).toHaveProperty("a", 1);
 });
 

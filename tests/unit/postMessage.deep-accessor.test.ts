@@ -23,5 +23,5 @@ test("deep accessor that throws is skipped and other properties preserved", () =
   // Ensure top.nested.ok.fine preserved
   expect(res.top.nested.ok.fine).toBe(1);
   // The accessor 'bad' should not be present
-  expect(Object.prototype.hasOwnProperty.call(res.top.nested.ok, "bad")).toBe(false);
+  expect(Object.hasOwn(res.top.nested.ok, "bad")).toBe(false);
 });

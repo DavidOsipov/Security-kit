@@ -43,7 +43,7 @@ describe("createSecurePostMessageListener basic hardening", () => {
     window.dispatchEvent(ev);
     expect(onMessage).toHaveBeenCalled();
     // ensure prototype was not polluted
-    expect(Object.prototype.hasOwnProperty.call({}, "hacked")).toBe(false);
+    expect(Object.hasOwn({}, "hacked")).toBe(false);
     // depth limit test: craft deep payload
     const deep: any = { a: {} };
     let cur = deep.a;
