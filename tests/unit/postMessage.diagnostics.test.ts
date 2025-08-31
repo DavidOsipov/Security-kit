@@ -95,7 +95,7 @@ describe("postMessage diagnostics and fingerprinting", () => {
           return (
             msg === "Message dropped due to failed validation" &&
             ctx &&
-            !Object.prototype.hasOwnProperty.call(ctx, "fingerprint")
+            !Object.hasOwn(ctx, "fingerprint")
           );
         } catch {
           return false;

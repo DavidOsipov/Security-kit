@@ -679,6 +679,10 @@ export const MAX_REDACT_DEPTH = 8;
 /** Maximum length of a string in logs before it is truncated. */
 export const MAX_LOG_STRING = 8192;
 
+// NEW: Breadth limits to complement depth caps
+const MAX_KEYS_PER_OBJECT = 64;
+const MAX_ITEMS_PER_ARRAY = 128;
+
 const JWT_LIKE_REGEX = /^eyJ[\w-]{5,}\.[\w-]{5,}\.[\w-]{5,}$/;
 const REDACTED_VALUE = "[REDACTED]";
 const SAFE_KEY_REGEX = /^[\w.-]{1,64}$/;
@@ -759,12 +763,16 @@ function _redactObject(
   // the resulting object to prevent accidental leakage of internal or
   // sensitive key identifiers. We still redact values for known sensitive
   // keys when the name is safe.
+  // eslint-disable-next-line functional/no-let -- intentional mutable counter for unsafe key count
   let unsafeCount = 0;
   const loggingCfg = getLoggingConfig();
   const includeHashes =
-    !environment.isProduction && loggingCfg.allowUnsafeKeyNamesInDev &&
+    !environment.isProduction &&
+    loggingCfg.allowUnsafeKeyNamesInDev &&
     loggingCfg.includeUnsafeKeyHashesInDev;
-  const unsafeHashes: string[] = [];
+  // mutable on-purpose for collecting dev-only hashes
+  // eslint-disable-next-line functional/no-let -- collecting dev-only hashes in a local mutable
+  let unsafeHashes: readonly string[] = [];
   const result = entriesSource.reduce(
     (acc, [key, rawValue]) => {
       if (!SAFE_KEY_REGEX.test(key)) {
@@ -788,11 +796,11 @@ function _redactObject(
             // eslint-disable-next-line functional/no-let -- loop counter
             for (let i = 0; i < input.length; i++) {
               /* intentional bitwise ops for DJB2 */
-                h = ((h << 5) + h) ^ input.charCodeAt(i);
+              h = ((h << 5) + h) ^ input.charCodeAt(i);
             }
-            // Normalize to hex string; intentionally mutate local dev-only array
-            // eslint-disable-next-line functional/immutable-data -- local dev-only collection
-            unsafeHashes.push((h >>> 0).toString(16));
+            // Normalize to hex string; append immutably to avoid mutating shared
+            // arrays while still keeping this local, development-only collection.
+            unsafeHashes = [...unsafeHashes, (h >>> 0).toString(16)];
           } catch {
             /* ignore hashing failures in dev */
           }
@@ -859,6 +867,28 @@ function handleSpecialObjectTypes(
 
   visited: ReadonlySet<unknown>,
 ): unknown {
+  // NEW: Opaque handling for Map/Set to avoid leaking entries
+  try {
+    if (data instanceof Map) {
+      return {
+        __type: "Map",
+        size: data.size,
+        __redacted: true,
+        reason: "content-not-logged",
+      };
+    }
+    if (data instanceof Set) {
+      return {
+        __type: "Set",
+        size: data.size,
+        __redacted: true,
+        reason: "content-not-logged",
+      };
+    }
+  } catch {
+    // ignore prototype trickery; fall through to other handlers
+  }
+
   if (data instanceof Error) {
     return sanitizeErrorForLogs(data);
   }
@@ -899,9 +929,27 @@ function handleArray(
 
   visited: ReadonlySet<unknown>,
 ): unknown {
-  return data.map((item) =>
-    _cloneAndNormalizeForLogging(item, depth + 1, visited),
-  );
+  // NEW: breadth limiting
+  const limit = Math.min(MAX_ITEMS_PER_ARRAY, Math.max(0, data.length));
+  /* eslint-disable functional/prefer-readonly-type -- mutable array for building result */
+  const out: unknown[] = [];
+  /* eslint-enable functional/prefer-readonly-type */
+  // eslint-disable-next-line functional/no-let -- intentional loop counter for array breadth processing
+  for (let i = 0; i < limit; i++) {
+    /* eslint-disable functional/immutable-data -- intentional push to build array */
+    out.push(_cloneAndNormalizeForLogging(data[i], depth + 1, visited));
+    /* eslint-enable functional/immutable-data */
+  }
+  if (data.length > limit) {
+    /* eslint-disable functional/immutable-data -- intentional push for truncation summary */
+    out.push({
+      __truncated: true,
+      originalCount: data.length,
+      displayedCount: limit,
+    });
+    /* eslint-enable functional/immutable-data */
+  }
+  return out;
 }
 
 /**
@@ -913,25 +961,48 @@ function handlePlainObject(
 
   visited: ReadonlySet<unknown>,
 ): unknown {
-  const keys = Object.keys(data).filter(
+  const result = Object.create(null) as Record<string, unknown>;
+
+  // NEW: count symbol keys without exposing them
+  try {
+    const symCount = Object.getOwnPropertySymbols?.(data)?.length ?? 0;
+    if (symCount > 0) {
+      // eslint-disable-next-line functional/immutable-data
+      result["__symbol_key_count__"] = symCount;
+    }
+  } catch {
+    // ignore
+  }
+
+  const allKeys = Object.keys(data).filter(
     (k) => k !== "__proto__" && k !== "prototype" && k !== "constructor",
   );
-
-  const result = keys.reduce(
-    (acc, key) => {
-      try {
-        const v = _cloneAndNormalizeForLogging(
-          (data as Record<string, unknown>)[key],
-          depth + 1,
-          visited,
-        );
-        return { ...acc, [key]: v };
-      } catch {
-        return { ...acc, [key]: { __redacted: true, reason: "getter-threw" } };
-      }
-    },
-    Object.create(null) as Record<string, unknown>,
-  );
+  // NEW: breadth limiting for keys
+  const limit = Math.min(MAX_KEYS_PER_OBJECT, Math.max(0, allKeys.length));
+  /* eslint-disable functional/no-let -- loop counter for key processing */
+  for (let i = 0; i < limit; i++) {
+    const key = allKeys[i]!;
+    try {
+      // eslint-disable-next-line functional/immutable-data
+      result[key] = _cloneAndNormalizeForLogging(
+        (data as Record<string, unknown>)[key],
+        depth + 1,
+        visited,
+      );
+    } catch {
+      // eslint-disable-next-line functional/immutable-data
+      result[key] = { __redacted: true, reason: "getter-threw" };
+    }
+  }
+  /* eslint-enable functional/no-let */
+  if (allKeys.length > limit) {
+    // eslint-disable-next-line functional/immutable-data
+    result["__additional_keys__"] = {
+      __truncated: true,
+      originalCount: allKeys.length,
+      displayedCount: limit,
+    };
+  }
 
   return result;
 }
@@ -954,6 +1025,73 @@ export function _redact(data: unknown, depth = 0): unknown {
   return _redactObject(data as Record<string, unknown>, depth);
 }
 
+// --- Dev log rate limiting (development only) ---
+// Keep this small and auditable to satisfy Hardened Simplicity.
+/* eslint-disable functional/no-let -- audited mutable state for rate limiting */
+const DEV_LOG_TOKENS = 200; // Max logs per minute in dev
+
+let devLogBucket = DEV_LOG_TOKENS;
+
+let devLogLastRefill = Date.now();
+
+let devLogDroppedCount = 0;
+
+let devLogLastDropReport = 0;
+/* eslint-enable functional/no-let */
+
+function devLogAllow(): boolean {
+  if (environment.isProduction) return false;
+  const now = Date.now();
+  const loggingCfg = getLoggingConfig();
+  const tokensPerMinute = loggingCfg.rateLimitTokensPerMinute ?? DEV_LOG_TOKENS;
+
+  // If the configured tokens-per-minute is lower than the current bucket,
+  // clamp the bucket immediately so tests or runtime config changes take
+  // effect without waiting for the next refill window.
+  // This keeps the behaviour simple and auditable.
+  if (devLogBucket > Math.max(0, Math.trunc(tokensPerMinute))) {
+    devLogBucket = Math.max(0, Math.trunc(tokensPerMinute));
+  }
+
+  // Refill bucket once per minute using configured tokens
+  if (now - devLogLastRefill >= 60_000) {
+    devLogBucket = Math.max(1, Math.trunc(tokensPerMinute));
+    devLogLastRefill = now;
+  }
+  if (devLogBucket > 0) {
+    devLogBucket--;
+    return true;
+  }
+
+  // Track dropped and occasionally emit a summary (no recursion into our logger)
+  devLogDroppedCount++;
+  if (now - devLogLastDropReport > 5_000) {
+    devLogLastDropReport = now;
+    try {
+      // Do NOT call secureDevLog here; go straight to console
+      // Avoid including user context; share only counts
+
+      console.warn(
+        "[security-kit] dev log rate-limit: dropping",
+        devLogDroppedCount,
+        "messages in the last 5s window",
+      );
+      // Emit telemetry for rate hits
+      try {
+        safeEmitMetric("logRateLimit.hit", devLogDroppedCount, {
+          reason: "dev",
+        });
+      } catch {
+        /* ignore telemetry failures */
+      }
+      devLogDroppedCount = 0;
+    } catch {
+      // ignore console errors in exotic environments
+    }
+  }
+  return false;
+}
+
 type LogLevel = "debug" | "info" | "warn" | "error";
 
 /**
@@ -969,13 +1107,21 @@ export function _devConsole(
   // Serialize a string-safe representation of the context to avoid leaking structured data
   const ctxString = ((): string => {
     try {
+      // Use an untyped JS replacer to avoid explicit `any` annotations while
+      // keeping a simple length truncation for string values. This local
+      // function is intentionally narrow and used only for serializing
+      // dev-only log context.
+      /**
+       * JSON replacer used only for dev logging string truncation.
+       * @param _k The key (ignored).
+       * @param v The value to process.
+       */
       function replacer(_k: string, v: unknown): unknown {
         return typeof v === "string" && v.length > 1024
           ? `${v.slice(0, 1024)}...[TRUNC]`
           : v;
       }
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- JSON replacer signature requires `any`-compatible type
-      return JSON.stringify(safeContext, replacer as any);
+      return JSON.stringify(safeContext, replacer);
     } catch {
       return String(safeContext);
     }
@@ -1015,6 +1161,9 @@ export function secureDevLog(
   context: unknown = {},
 ): void {
   if (environment.isProduction) return;
+  // Apply rate limit before any work (redaction, event dispatch, stringify)
+  if (!devLogAllow()) return;
+
   const safeContext = _redact(context);
   const logEntry = {
     timestamp: new Date().toISOString(),

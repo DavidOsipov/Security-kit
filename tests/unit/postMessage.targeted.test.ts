@@ -36,7 +36,7 @@ describe("postMessage targeted hardening tests", () => {
     // symbol-key should not have been preserved (not enumerable string key)
     expect(Object.getOwnPropertySymbols(arg).length).toBe(0);
     // accessor property should be skipped
-    expect(Object.prototype.hasOwnProperty.call(arg, "bad")).toBe(false);
+    expect(Object.hasOwn(arg, "bad")).toBe(false);
 
     listener.destroy();
   });
@@ -78,9 +78,9 @@ describe("postMessage targeted hardening tests", () => {
     const last = onMessage.mock.calls[onMessage.mock.calls.length - 1];
     if (last) {
       const parsed = last[0];
-      expect(Object.prototype.hasOwnProperty.call(parsed, "__proto__")).toBe(false);
-      expect(Object.prototype.hasOwnProperty.call(parsed, "constructor")).toBe(false);
-      expect(Object.prototype.hasOwnProperty.call(parsed, "prototype")).toBe(false);
+      expect(Object.hasOwn(parsed, "__proto__")).toBe(false);
+      expect(Object.hasOwn(parsed, "constructor")).toBe(false);
+      expect(Object.hasOwn(parsed, "prototype")).toBe(false);
     }
 
     listener.destroy();

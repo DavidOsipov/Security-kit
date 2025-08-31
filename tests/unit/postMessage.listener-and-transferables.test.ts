@@ -86,7 +86,7 @@ test('toNullProto strips forbidden keys like __proto__', () => {
     const input = { good: 1, __proto__: { polluted: true } } as unknown as Record<string, unknown>;
     const out = __test_toNullProto(input) as Record<string, unknown>;
     expect(out.good).toBe(1);
-    expect(Object.prototype.hasOwnProperty.call(out, '__proto__')).toBe(false);
+    expect(Object.hasOwn(out, '__proto__')).toBe(false);
   } finally {
     delete (globalThis as any).__SECURITY_KIT_ALLOW_TEST_APIS;
   }

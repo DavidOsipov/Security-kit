@@ -37,7 +37,7 @@ describe("postMessage additional hardening tests", () => {
     expect(onMessage).toHaveBeenCalled();
     const calledArg = onMessage.mock.calls[0][0];
     // top-level addition should not exist
-    expect(Object.prototype.hasOwnProperty.call(calledArg, "newProp")).toBe(false);
+    expect(Object.hasOwn(calledArg, "newProp")).toBe(false);
     // nested property should remain original value
     expect(calledArg.nested.x).toBe(1);
 

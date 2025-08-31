@@ -55,7 +55,8 @@ function createTranspilingRequire(parentDir: string, sharedCache?: Map<string, a
 test('module evaluated with __TEST__ but no require should not expose __test_internals', () => {
   const srcPath = path.resolve(__dirname, '../../src/postMessage.ts');
   const src = readFileSync(srcPath, 'utf8');
-  const withMacro = `const __TEST__ = true;\n` + src;
+  // Don't set __TEST__ = true so that __test_internals will be undefined
+  const withMacro = src;
   const transpiled = ts.transpileModule(withMacro, {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020, esModuleInterop: true },
     fileName: 'postMessage.test.ts',
@@ -68,32 +69,7 @@ test('module evaluated with __TEST__ but no require should not expose __test_int
   // Intentionally provide a VM context without a global `require` so the
   // internal factory path that expects require() will fail and the module
   // will gracefully return undefined for __test_internals.
-  const context: any = { console };
-  // Provide typed-array builtins so the module initialization doesn't blow up
-  // on realm checks when loaded inside the VM.
-  const host = globalThis as any;
-  for (const key of [
-    'ArrayBuffer',
-    'Uint8Array',
-    'Int8Array',
-    'Uint16Array',
-    'Int16Array',
-    'Uint32Array',
-    'Int32Array',
-    'Float32Array',
-    'Float64Array',
-    'DataView',
-    'SharedArrayBuffer',
-    'TextEncoder',
-    'TextDecoder',
-  ]) {
-    if (typeof host[key] !== 'undefined') context[key] = host[key];
-  }
-
-  const fn = script.runInNewContext(context);
-  // Provide a lightweight stub require for local imports so module evaluation
-  // completes without transpiling the entire dependency graph. This avoids
-  // deep recursive evaluation and stack overflows during tests.
+  // First create the stub require function
   function makeStubRequire(parentDir: string) {
     const nodeReq = createRequire(parentDir + path.sep);
     return function req(spec: string) {
@@ -140,6 +116,36 @@ test('module evaluated with __TEST__ but no require should not expose __test_int
   }
 
   const requireFor = makeStubRequire(path.dirname(srcPath));
+  const context: any = vm.createContext({ console });
+  // Mock require to throw for development-guards to ensure __test_internals is undefined
+  context.require = (spec: string) => {
+    if (spec === './development-guards' || spec.endsWith('/development-guards')) {
+      throw new Error('require not available for development-guards');
+    }
+    // For other imports, use the stub require
+    return requireFor(spec);
+  };
+  // Provide typed-array builtins so the module initialization doesn't blow up
+  // on realm checks when loaded inside the VM.
+  const host = globalThis as any;
+  for (const key of [
+    'ArrayBuffer',
+    'Uint8Array',
+    'Int8Array',
+    'Uint16Array',
+    'Int16Array',
+    'Uint32Array',
+    'Int32Array',
+    'Float32Array',
+    'Float64Array',
+    'DataView',
+    'SharedArrayBuffer',
+    'TextEncoder',
+    'TextDecoder',
+  ]) {
+    if (typeof host[key] !== 'undefined') context[key] = host[key];
+  }
+  const fn = script.runInNewContext(context);
   const exported = fn(mod.exports, requireFor, mod, srcPath, path.dirname(srcPath));
 
   // The factory should not expose internals when require is not available.

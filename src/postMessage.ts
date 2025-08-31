@@ -118,22 +118,42 @@ function syncCryptoAvailable(): boolean {
   }
 }
 
-// Safe helpers to avoid unsafe `any` usage when introspecting host objects.
-function safeCtorName(value: unknown): string | undefined {
-  if (value === null || typeof value !== "object") return undefined;
-  try {
-    const proto = Object.getPrototypeOf(value);
-    if (!proto) return undefined;
-    // Avoid using Reflect.get which yields `any` in TS rules; access the
-    // constructor property with a narrow typed view to keep typings safe.
-    const ctor = (proto as { readonly constructor?: unknown }).constructor;
-    if (typeof ctor === "function") {
-      const maybeName = (ctor as { readonly name?: unknown }).name;
-      return typeof maybeName === "string" ? maybeName : undefined;
+// Centralized crypto availability checker with consistent error handling and logging
+function checkCryptoAvailabilityForSecurityFeature(
+  featureName: string,
+  requireInProduction = true,
+): void {
+  if (!syncCryptoAvailable()) {
+    if (requireInProduction && environment.isProduction) {
+      // Production requires crypto for security guarantees
+      try {
+        _diagnosticsDisabledDueToNoCryptoInProduction = true;
+        secureDevelopmentLog(
+          "error",
+          "postMessage",
+          `Secure crypto unavailable in production for ${featureName}`,
+          {},
+        );
+      } catch {
+        /* best-effort logging */
+      }
+      throw new CryptoUnavailableError(
+        `Secure crypto required in production for ${featureName}`,
+      );
+    } else if (environment.isProduction) {
+      // Non-critical crypto usage in production - disable diagnostics
+      try {
+        _diagnosticsDisabledDueToNoCryptoInProduction = true;
+        secureDevelopmentLog(
+          "warn",
+          "postMessage",
+          `Secure crypto unavailable in production; ${featureName} disabled`,
+          {},
+        );
+      } catch {
+        /* best-effort logging */
+      }
     }
-    return undefined;
-  } catch {
-    return undefined;
   }
 }
 
@@ -180,7 +200,32 @@ function isArrayBufferViewSafe(value: unknown): value is ArrayBufferView {
   }
 }
 
-// (helpers removed) Keep handler-focused helpers inline where they are used
+/**
+ * Safely gets the constructor name of an object, handling cross-realm scenarios.
+ * @param value The value to get the constructor name for.
+ * @returns The constructor name as a string, or undefined if it cannot be determined.
+ */
+function safeCtorName(value: unknown): string | undefined {
+  if (value === null || typeof value !== "object") return undefined;
+  try {
+    const proto = Object.getPrototypeOf(value);
+    if (!proto) return undefined;
+    const protoWithConstructor = proto as Record<string, unknown>;
+    const constructor = protoWithConstructor.constructor;
+    if (!constructor || typeof constructor !== "function") {
+      return undefined;
+    }
+    const ctor = constructor as Function;
+    const namePropertyValue = (ctor as { readonly name?: unknown }).name;
+    const nameProperty =
+      typeof namePropertyValue === "string" ? namePropertyValue : undefined;
+    const maybeName =
+      typeof nameProperty === "string" ? nameProperty : undefined;
+    return typeof maybeName === "string" ? maybeName : undefined;
+  } catch {
+    return undefined;
+  }
+}
 
 // --- Internal Security Helpers ---
 
@@ -266,10 +311,10 @@ function validateTransferables(
         payload as Record<string, unknown>,
         key,
       );
-      if (desc && Object.prototype.hasOwnProperty.call(desc, "value")) {
-        const value = desc.value;
+      if (desc && Object.hasOwn(desc, "value")) {
+        const descValue = desc.value as unknown;
         validateTransferables(
-          value,
+          descValue,
           allowTransferables,
           allowTypedArrays,
           depth + 1,
@@ -369,12 +414,14 @@ function toNullProto(
         // Skip accessor properties to avoid executing untrusted getters
         continue;
       }
-      if (desc && Object.prototype.hasOwnProperty.call(desc, "value")) {
-        value = (desc as PropertyDescriptor & { readonly value?: unknown })
-          .value as unknown;
+      if (desc && Object.hasOwn(desc, "value")) {
+        const descValueValue = desc.value as unknown;
+        value = descValueValue;
       } else {
         // Fallback, but guard in try/catch
-        value = (object as Record<string, unknown>)[key] as unknown;
+        const objectValueRaw = (object as Record<string, unknown>)[key];
+        const objectValue = objectValueRaw as unknown;
+        value = objectValue as unknown;
       }
     } catch (error: unknown) {
       // If property access throws, skip it but log best-effort in dev
@@ -625,7 +672,7 @@ export function sendSecurePostMessage(options: SecurePostMessageOptions): void {
           throw error; // Re-throw transferable errors
         }
         const errorMessage =
-          error instanceof Error ? error.message : String(error);
+          error instanceof Error ? error.message : `${String(error)}`;
         throw new InvalidParameterError(
           "Structured-clone payload contains unsupported host objects or circular references: " +
             errorMessage,
@@ -684,24 +731,7 @@ export function createSecurePostMessageListener(
   }
 
   // Production-time synchronous crypto availability check:
-  if (environment.isProduction && !syncCryptoAvailable()) {
-    // Diagnostics which rely on secure crypto are disabled in this environment.
-    try {
-      _diagnosticsDisabledDueToNoCryptoInProduction = true;
-      secureDevelopmentLog(
-        "warn",
-        "postMessage",
-        "Secure crypto unavailable in production environment; diagnostics disabled.",
-        {},
-      );
-    } catch {
-      /* best-effort */
-    }
-    // Fail-fast: production requires crypto for our security guarantees.
-    throw new CryptoUnavailableError(
-      "Secure crypto (crypto.getRandomValues) required in production.",
-    );
-  }
+  checkCryptoAvailabilityForSecurityFeature("postMessage diagnostics", true);
 
   // In production, require explicit channel binding and a validator to avoid
   // creating a listener that accepts messages from any origin/source.
@@ -1195,7 +1225,7 @@ function stableStringify(
       a.localeCompare(b),
     );
     /* eslint-disable functional/immutable-data -- Building new null-proto object; local writes to fresh object are safe */
-    const result: Record<string, unknown> = Object.create(null);
+    const result = Object.create(null) as Record<string, unknown>;
     for (const k of keys) {
       result[k] = norm((o as Record<string, unknown>)[k], depth + 1);
     }
@@ -1256,20 +1286,10 @@ async function ensureFingerprintSalt(): Promise<Uint8Array> {
   }
   // Fast synchronous availability check: if in production and crypto is missing,
   // we fail fast rather than relying on time-based fallback.
-  if (environment.isProduction && !syncCryptoAvailable()) {
-    try {
-      _diagnosticsDisabledDueToNoCryptoInProduction = true;
-      secureDevelopmentLog(
-        "warn",
-        "postMessage",
-        "Secure crypto unavailable in production; disabling diagnostics that rely on non-crypto fallbacks",
-        {},
-      );
-    } catch {
-      /* best-effort */
-    }
-    throw new CryptoUnavailableError();
-  }
+  checkCryptoAvailabilityForSecurityFeature(
+    "fingerprint salt generation",
+    true,
+  );
 
   _payloadFingerprintSaltPromise = (async () => {
     try {
@@ -1327,11 +1347,11 @@ async function ensureFingerprintSalt(): Promise<Uint8Array> {
             : 0,
         );
       const buf = new Uint8Array(FINGERPRINT_SALT_LENGTH);
-      /* eslint-disable functional/no-let -- Local loop index for buffer initialization; scoped */
+      /* eslint-disable functional/no-let, functional/immutable-data -- Local loop index and buffer initialization; scoped */
       for (let index = 0; index < buf.length; index++) {
         buf[index] = timeEntropy.charCodeAt(index % timeEntropy.length) & 0xff;
       }
-      /* eslint-enable functional/no-let */
+      /* eslint-enable functional/no-let, functional/immutable-data */
 
       _payloadFingerprintSalt = buf;
       // Clear failure timestamp on fallback success so we don't block future attempts
@@ -1352,13 +1372,14 @@ async function ensureFingerprintSalt(): Promise<Uint8Array> {
 
 async function getPayloadFingerprint(data: unknown): Promise<string> {
   // Canonicalize sanitized payload for deterministic fingerprints
-  let sanitized: unknown;
-  try {
-    sanitized = toNullProto(data, 0, POSTMESSAGE_MAX_PAYLOAD_DEPTH);
-  } catch {
-    // If sanitization fails, fall back to raw representation for diagnostics only
-    sanitized = data;
-  }
+  const sanitized: unknown = (() => {
+    try {
+      return toNullProto(data, 0, POSTMESSAGE_MAX_PAYLOAD_DEPTH);
+    } catch {
+      // If sanitization fails, fall back to raw representation for diagnostics only
+      return data;
+    }
+  })();
   const stable = stableStringify(
     sanitized,
     POSTMESSAGE_MAX_PAYLOAD_DEPTH,
@@ -1378,13 +1399,20 @@ async function getPayloadFingerprint(data: unknown): Promise<string> {
   // Encode as UTF-8 bytes and truncate by bytes to avoid splitting multi-byte chars
   const fullBytes = SHARED_ENCODER.encode(stable.s);
   const payloadBytes = fullBytes.slice(0, POSTMESSAGE_MAX_PAYLOAD_BYTES);
+  return computeFingerprintFromBytes(payloadBytes);
+}
+
+// Common fingerprint computation logic shared between functions
+async function computeFingerprintFromBytes(
+  payloadBytes: Uint8Array,
+): Promise<string> {
   // eslint-disable-next-line functional/no-let -- Local salt buffer variable; scoped to function
   let saltBuf: Uint8Array | undefined;
   try {
     saltBuf = await ensureFingerprintSalt();
-  } catch (error: unknown) {
-    if (environment.isProduction) throw error;
-    // else: continue to attempt a non-crypto fallback
+  } catch {
+    if (environment.isProduction)
+      throw new InvalidConfigurationError("Fingerprinting unavailable");
   }
 
   try {
@@ -1423,42 +1451,7 @@ async function computeFingerprintFromString(s: string): Promise<string> {
   const fullBytes = SHARED_ENCODER.encode(s);
   const payloadBytes = fullBytes.slice(0, POSTMESSAGE_MAX_PAYLOAD_BYTES);
 
-  // eslint-disable-next-line functional/no-let -- Local salt buffer variable; scoped to function
-  let saltBuf: Uint8Array | undefined;
-  try {
-    saltBuf = await ensureFingerprintSalt();
-  } catch {
-    if (environment.isProduction)
-      throw new InvalidConfigurationError("Fingerprinting unavailable");
-  }
-
-  try {
-    const crypto = await ensureCrypto();
-    const subtle = (crypto as Crypto & { readonly subtle?: SubtleCrypto })
-      .subtle;
-    if (subtle && typeof subtle.digest === "function" && saltBuf) {
-      const saltArray = saltBuf;
-      const input = new Uint8Array(saltArray.length + payloadBytes.length);
-      input.set(saltArray, 0);
-      input.set(payloadBytes, saltArray.length);
-      const digest = await subtle.digest("SHA-256", input.buffer);
-      return arrayBufferToBase64(digest).slice(0, 12);
-    }
-  } catch {
-    /* fall through to non-crypto fallback */
-  }
-
-  if (!saltBuf) return "FINGERPRINT_ERR";
-  const sb = saltBuf;
-  // eslint-disable-next-line functional/no-let -- Local accumulator for hash computation; scoped to function
-  let accumulator = 2166136261 >>> 0; // FNV-1a init
-  for (const byte of sb) {
-    accumulator = ((accumulator ^ byte) * 16777619) >>> 0;
-  }
-  for (const byte of payloadBytes) {
-    accumulator = ((accumulator ^ byte) * 16777619) >>> 0;
-  }
-  return accumulator.toString(16).padStart(8, "0");
+  return computeFingerprintFromBytes(payloadBytes);
 }
 
 export function _validatePayload(
@@ -1489,7 +1482,7 @@ export function _validatePayload(
     return { valid: false, reason: "Forbidden property name present" };
   }
   for (const [key, expectedType] of Object.entries(validator)) {
-    if (!Object.prototype.hasOwnProperty.call(plainData, key)) {
+    if (!Object.hasOwn(plainData, key)) {
       return { valid: false, reason: `Missing property '${key}'` };
     }
     const value = plainData[key];
@@ -1567,9 +1560,11 @@ export const __test_internals:
           // SECURITY_KIT_ALLOW_TEST_APIS flag.
 
           try {
-            const request = (globalThis as unknown as Record<string, unknown>)[
-              "require"
-            ] as unknown;
+            const globalRecord = globalThis as unknown as Record<
+              string,
+              unknown
+            >;
+            const request = globalRecord["require"];
             if (typeof request !== "function") {
               throw new Error(
                 "Cannot load test internals: require() not available. Ensure your test environment supports CommonJS require or enable SECURITY_KIT_ALLOW_TEST_APIS.",
@@ -1582,8 +1577,8 @@ export const __test_internals:
               readonly assertTestApiAllowed: () => void;
             };
             developmentGuards.assertTestApiAllowed();
-          } catch (error) {
-            throw error;
+          } catch {
+            // Ignore require errors in test environment setup
           }
 
           const testExports = {

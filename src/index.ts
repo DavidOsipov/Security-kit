@@ -51,6 +51,9 @@ export {
   secureDevLog,
 } from "./utils";
 
+// Logger (optional ergonomic wrapper)
+export { createLogger } from "./logger";
+
 // Sanitizer Utilities (requires peer dependency 'dompurify')
 export * from "./sanitizer";
 // DOM querying and validation utilities

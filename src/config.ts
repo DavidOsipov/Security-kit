@@ -51,6 +51,10 @@ export type LoggingConfig = {
    * telemetry mechanisms and avoid exposing key identifiers.
    */
   readonly unsafeKeyHashSalt?: string | undefined;
+  /**
+   * Dev-only: maximum number of dev log tokens per minute. Defaults to 200.
+   */
+  readonly rateLimitTokensPerMinute?: number | undefined;
 };
 
 /* eslint-disable functional/no-let -- controlled mutable configuration allowed here */
@@ -58,11 +62,115 @@ let _loggingConfig: LoggingConfig = {
   allowUnsafeKeyNamesInDev: false,
   includeUnsafeKeyHashesInDev: false,
   unsafeKeyHashSalt: undefined,
+  rateLimitTokensPerMinute: 200,
 };
 /* eslint-enable functional/no-let */
 
 export function getLoggingConfig(): LoggingConfig {
   return Object.freeze({ ..._loggingConfig });
+}
+
+// Helper result type for validated extraction
+type ExtractResult<T> =
+  | { readonly present: true; readonly value: T }
+  | { readonly present: false };
+
+function extractValidatedProperty<T>(
+  cfg: Partial<LoggingConfig>,
+  property: keyof LoggingConfig,
+): ExtractResult<T> {
+  if (!Object.hasOwn(cfg, property)) {
+    return { present: false };
+  }
+  const desc = Object.getOwnPropertyDescriptor(cfg as object, property);
+  if (!desc) return { present: false };
+  if ("get" in desc || "set" in desc) {
+    throw new InvalidParameterError(
+      `Configuration property "${String(property)}" must be a plain data property (no getters/setters).`,
+    );
+  }
+  // Value may be any type; refine using small helpers for each property to keep
+  // the function simple and easier to reason about.
+  const rawValue = desc.value as unknown;
+
+  const validateBoolean = <U>(v: unknown, propertyName: string): U => {
+    if (typeof v !== "boolean") {
+      throw new InvalidParameterError(`${propertyName} must be a boolean.`);
+    }
+    return v as U;
+  };
+
+  const validateStringOrUndefined = <U>(v: unknown): U => {
+    if (v !== undefined && typeof v !== "string") {
+      throw new InvalidParameterError("unsafeKeyHashSalt must be a string.");
+    }
+    return v as U;
+  };
+
+  const validatePositiveIntegerOrUndefined = <U>(v: unknown): U => {
+    if (v !== undefined) {
+      if (typeof v !== "number" || !Number.isInteger(v) || v <= 0) {
+        throw new InvalidParameterError(
+          "rateLimitTokensPerMinute must be a positive integer.",
+        );
+      }
+    }
+    return v as U;
+  };
+
+  switch (property) {
+    case "allowUnsafeKeyNamesInDev":
+    case "includeUnsafeKeyHashesInDev":
+      return {
+        present: true,
+        value: validateBoolean<T>(rawValue, String(property)),
+      };
+    case "unsafeKeyHashSalt":
+      return { present: true, value: validateStringOrUndefined<T>(rawValue) };
+    case "rateLimitTokensPerMinute":
+      return {
+        present: true,
+        value: validatePositiveIntegerOrUndefined<T>(rawValue),
+      };
+    default:
+      return { present: true, value: rawValue as T };
+  }
+}
+
+function enforceProductionConstraints(
+  isProduction: boolean,
+  allowExtract: ExtractResult<boolean>,
+  includeExtract: ExtractResult<boolean>,
+): void {
+  if (!isProduction) return;
+  if (
+    (allowExtract.present && allowExtract.value === true) ||
+    (includeExtract.present && includeExtract.value === true)
+  ) {
+    throw new InvalidParameterError(
+      "Dev-only logging features cannot be enabled in production.",
+    );
+  }
+}
+
+function buildMergedPartial(
+  allowExtract: ExtractResult<boolean>,
+  includeExtract: ExtractResult<boolean>,
+  saltExtract: ExtractResult<string | undefined>,
+  rateExtract: ExtractResult<number | undefined>,
+): Partial<LoggingConfig> {
+  return {
+    ...(allowExtract.present
+      ? { allowUnsafeKeyNamesInDev: allowExtract.value }
+      : {}),
+    ...(includeExtract.present
+      ? { includeUnsafeKeyHashesInDev: includeExtract.value }
+      : {}),
+    ...(saltExtract.present ? { unsafeKeyHashSalt: saltExtract.value } : {}),
+    ...(rateExtract.present
+      ? { rateLimitTokensPerMinute: rateExtract.value }
+      : {}),
+  } as Partial<LoggingConfig>;
 }
 
 export function setLoggingConfig(cfg: Partial<LoggingConfig>): void {
@@ -71,43 +179,37 @@ export function setLoggingConfig(cfg: Partial<LoggingConfig>): void {
       "Configuration is sealed and cannot be changed.",
     );
   }
+  // Use helper to safely extract and validate cfg values, then merge.
+  const allowExtract = extractValidatedProperty<boolean>(
+    cfg,
+    "allowUnsafeKeyNamesInDev",
+  );
+  const includeExtract = extractValidatedProperty<boolean>(
+    cfg,
+    "includeUnsafeKeyHashesInDev",
+  );
+  const saltExtract = extractValidatedProperty<string | undefined>(
+    cfg,
+    "unsafeKeyHashSalt",
+  );
+  const rateExtract = extractValidatedProperty<number | undefined>(
+    cfg,
+    "rateLimitTokensPerMinute",
+  );
 
-  // Prevent enabling development-only unsafe key visibility in production.
-  if (environment.isProduction) {
-    if (
-      cfg.allowUnsafeKeyNamesInDev === true ||
-      cfg.includeUnsafeKeyHashesInDev === true
-    ) {
-      throw new InvalidParameterError(
-        "Dev-only logging features cannot be enabled in production.",
-      );
-    }
-  }
+  enforceProductionConstraints(
+    environment.isProduction,
+    allowExtract,
+    includeExtract,
+  );
 
-  if (cfg.allowUnsafeKeyNamesInDev !== undefined) {
-    if (typeof cfg.allowUnsafeKeyNamesInDev !== "boolean") {
-      throw new InvalidParameterError(
-        "allowUnsafeKeyNamesInDev must be a boolean.",
-      );
-    }
-  }
-
-  if (cfg.includeUnsafeKeyHashesInDev !== undefined) {
-    if (typeof cfg.includeUnsafeKeyHashesInDev !== "boolean") {
-      throw new InvalidParameterError(
-        "includeUnsafeKeyHashesInDev must be a boolean.",
-      );
-    }
-  }
-
-  if (
-    cfg.unsafeKeyHashSalt !== undefined &&
-    typeof cfg.unsafeKeyHashSalt !== "string"
-  ) {
-    throw new InvalidParameterError("unsafeKeyHashSalt must be a string.");
-  }
-
-  _loggingConfig = { ..._loggingConfig, ...cfg } as LoggingConfig;
+  const merged = buildMergedPartial(
+    allowExtract,
+    includeExtract,
+    saltExtract,
+    rateExtract,
+  );
+  _loggingConfig = { ..._loggingConfig, ...merged } as LoggingConfig;
 }
 
 /**
