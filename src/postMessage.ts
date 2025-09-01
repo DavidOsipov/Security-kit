@@ -1188,6 +1188,11 @@ export function createSecurePostMessageListener(
         );
       }
 
+      // Special handling for ArrayBuffers when allowed
+      if (allowTypedArraysLocal && event.data instanceof ArrayBuffer) {
+        return event.data; // Return ArrayBuffer as-is without toNullProto processing
+      }
+
       // Convert to null-prototype and enforce depth/forbidden keys
       return toNullProto(event.data, 0, POSTMESSAGE_MAX_PAYLOAD_DEPTH);
     }

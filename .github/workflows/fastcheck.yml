@@ -1,0 +1,66 @@
+name: Fast-check property tests
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  schedule:
+    - cron: '0 2 * * *' # Nightly at 02:00 UTC
+
+jobs:
+  fastcheck-ci:
+    name: Fast-check (CI conservative)
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node-version: [18.x]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Use Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Run fast-check (conservative)
+        env:
+          FASTCHECK_RUNS: 200
+        run: npm test -- tests/security/property-based.handshake-and-sign.runtime.test.ts --silent
+
+  fastcheck-nightly:
+    name: Fast-check (nightly deep run)
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    strategy:
+      matrix:
+        node-version: [18.x]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Use Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Run fast-check (nightly)
+        env:
+          FASTCHECK_MODE: nightly
+          FASTCHECK_RUNS: 2000
+        run: npm test -- tests/security/property-based.handshake-and-sign.runtime.test.ts --silent

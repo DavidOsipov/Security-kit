@@ -62,6 +62,12 @@
     "build": "tsup --config tsup.config.ts",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:unit": "vitest run --include '**/unit/**'",
+    "test:integration": "vitest run --include '**/integration/**'",
+    "test:security": "npm run build && vitest run --include '**/security/**' --silent",
+    "test:a11y": "vitest run --include '**/a11y/**'",
+    "test:seo": "vitest run --include '**/seo/**'",
+    "test:i18n": "vitest run --include '**/i18n/**'",
     "coverage": "vitest run --coverage",
     "lint": "eslint 'src/**/*.{ts,tsx}' --max-warnings=0",
     "lint:fix": "eslint 'src/**/*.{ts,tsx}' --fix",
@@ -84,7 +90,6 @@
     "ci:check": "npm run guard:no-blob-fallback && npm run typecheck && npm run lint:ci && npm run test && npm run ci:knip",
     "check:secrets": "NODE_OPTIONS=--no-warnings npx ts-node-esm ./tools/check-short-secrets.ts",
     "fuzz:standalone": "npm run build && node -e \"(async function(){const m=await import('./dist/index.mjs');const it=Number(process.env.RUN_FUZZ_ITERATIONS||'100');if(typeof m.runStandaloneFuzzHarness==='function'){const code=await m.runStandaloneFuzzHarness(it);process.exit(code||0);}else{console.error('runStandaloneFuzzHarness not exported');process.exit(1);}})()\""
-    ,"test:security": "npm run build && npm test -- tests/security --silent"
   },
   "peerDependencies": {
     "dompurify": "^3.2.0"

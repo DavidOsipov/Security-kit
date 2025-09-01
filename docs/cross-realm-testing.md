@@ -92,3 +92,12 @@ Migration guidance
 Further reading
 
 See `docs/The Official Testing & Quality Assurance Constitution.md` for the project's formal rule on controlled-realm tests.
+
+Quick references
+
+Two small, concrete examples live in `tests/security/controlled-realm.vm.tests.ts`:
+
+- A `structuredClone` example that clones a `Uint8Array` inside the VM and returns both the original and cloned contents along with a `sameRef` flag (assert cloned contents are equal and `sameRef` is false).
+- An `ArrayBuffer.isView` example that creates a typed array and a `DataView` inside the VM and returns whether `ArrayBuffer.isView` recognizes each and their constructor names.
+
+If you need to validate the worker's runtime rate-limiting end-to-end, the test `tests/security/token-refill.worker-integration.test.ts` demonstrates importing the worker after mocking `createSecurePostMessageListener`, initializing the worker with a low `rateLimitPerMinute`, sending repeated `sign` requests, and asserting the worker returns `signed` until tokens are exhausted then `rate-limit-exceeded`. The integration test uses Vitest fake timers and deterministic time control (`vi.setSystemTime`) so it is fully repeatable.

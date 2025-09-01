@@ -6,6 +6,14 @@
 ![Security Tests](https://img.shields.io/github/actions/workflow/status/david-osipov/Security-Kit/ci.yml?branch=main&style=for-the-badge&label=security-tests)
 ![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?style=for-the-badge&logo=typescript&logoColor=white)
 
+# ⚠️ SECURITY WARNING: EXPERIMENTAL & NON-AUDITED ⚠️
+
+## **DO NOT USE THIS LIBRARY IN PRODUCTION ENVIRONMENTS.**
+
+This repository is a security-critical library created as a case study in using advanced prompt engineering with Large Language Models (LLMs) to generate code aligned with the OWASP Application Security Verification Standard (ASVS).
+
+**This code has NOT undergone a professional, third-party security audit.**
+
 **Security-Kit is not just a collection of utilities; it's a security philosophy you can install.**
 
 This is a comprehensive, opinionated, and modern security toolkit for browser-based applications. It provides both cryptographic primitives and safe development helpers, all designed to be the reference implementation for a project's Security Constitution. It is built on a **Zero Trust** philosophy, assuming no part of the system is infallible.
@@ -42,11 +50,15 @@ Preventing regressions:
 ## Table of Contents
 
 - [Security-Kit](#security-kit)
+- [⚠️ SECURITY WARNING: EXPERIMENTAL \& NON-AUDITED ⚠️](#️-security-warning-experimental--non-audited-️)
+  - [**DO NOT USE THIS LIBRARY IN PRODUCTION ENVIRONMENTS.**](#do-not-use-this-library-in-production-environments)
   - [Secret length policy](#secret-length-policy)
   - [Table of Contents](#table-of-contents)
   - [Core Philosophy](#core-philosophy)
   - [Installation](#installation)
   - [Quick Start](#quick-start)
+  - [Choosing the right API (security vs convenience)](#choosing-the-right-api-security-vs-convenience)
+  - [Supported runtimes](#supported-runtimes)
   - [Key Features](#key-features)
   - [Detailed API Examples](#detailed-api-examples)
     - [Secure ID \& UUID Generation](#secure-id--uuid-generation)

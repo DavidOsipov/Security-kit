@@ -9,3 +9,12 @@ tmp-*-*
 coverage
 .codeql
 .codeql/**
+coverage-*.*
+coverage_*.*
+*.log
+*.tmp
+*.temp
+*.bak
+*.swp
+*.swo
+*.class

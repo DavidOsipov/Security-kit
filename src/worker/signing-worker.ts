@@ -28,6 +28,7 @@ import type { NonceFormat } from "../constants";
 interface WorkerState {
   readonly hmacKey: CryptoKey | undefined;
   readonly initialized: boolean;
+  readonly initializing?: boolean; // guard to prevent concurrent init races
   readonly shuttingDown: boolean; // Flag for graceful shutdown
   readonly pendingCount: number;
   readonly rateLimitPerMinute: number;
@@ -45,6 +46,7 @@ interface WorkerState {
 const createInitialState = (): WorkerState => ({
   hmacKey: undefined,
   initialized: false,
+  initializing: false,
   shuttingDown: false,
   pendingCount: 0,
   rateLimitPerMinute: 0,
@@ -86,6 +88,9 @@ const { getCurrent, update: updateState } =
 // Using a single origin keeps the policy simple and auditable.
 let _allowedInboundOrigin: string | undefined = undefined;
 
+// Lightweight critical section for concurrency slot reservation to avoid races
+const _reservation = { chain: Promise.resolve() as Promise<void> };
+
 /**
  * Verifies whether a MessageEvent originates from the allowed inbound origin.
  * Returns true if the event should be accepted, false otherwise.
@@ -93,6 +98,14 @@ let _allowedInboundOrigin: string | undefined = undefined;
 // ...existing code... (origin handling moved into postMessage helpers)
 
 // --- Message Handlers ---
+
+// Attempt to reserve a concurrency slot without yielding; returns true if reserved
+function tryReserveSlotInline(): boolean {
+  const { pendingCount, maxConcurrentSigning } = getCurrent();
+  if (pendingCount >= maxConcurrentSigning) return false;
+  updateState({ pendingCount: pendingCount + 1 });
+  return true;
+}
 
 /**
  * Applies handshake configuration overrides from init message.
@@ -123,10 +136,13 @@ function applyHandshakeOverrides(options: InitMessage["workerOptions"]): void {
 function applyRateLimitConfig(options: InitMessage["workerOptions"]): void {
   if (typeof options?.rateLimitPerMinute === "number") {
     const rateLimit = Math.max(0, Math.floor(options.rateLimitPerMinute));
-    const burst = Math.max(
-      rateLimit,
-      Math.floor(options.rateLimitBurst ?? rateLimit),
-    );
+    // Respect explicit burst settings even if less than the per-minute rate.
+    // When unspecified, default burst to the per-minute rate.
+    const burst =
+      typeof options.rateLimitBurst === "number" &&
+      Number.isFinite(options.rateLimitBurst)
+        ? Math.max(1, Math.floor(options.rateLimitBurst))
+        : rateLimit;
     updateState({
       rateLimitPerMinute: rateLimit,
       tokens: burst, // start full
@@ -184,10 +200,14 @@ async function handleInitMessage(
   message: InitMessage,
   event?: MessageEvent,
 ): Promise<void> {
-  if (getCurrent().initialized) {
+  const current = getCurrent();
+  if (current.initialized || current.initializing) {
     postMessage({ type: "error", reason: "already-initialized" });
     return;
   }
+
+  // mark as initializing to prevent concurrent init attempts
+  updateState({ initializing: true });
 
   const options = message.workerOptions;
   if (options && typeof options === "object") {
@@ -231,7 +251,7 @@ async function handleInitMessage(
   }
 
   await importKey(message.secretBuffer);
-  updateState({ initialized: true });
+  updateState({ initialized: true, initializing: false });
   postMessage({ type: "initialized" });
 }
 
@@ -326,12 +346,48 @@ async function handleSignRequest(
   }
 
   if (!validateSignParameters(requestId, canonical, replyPort)) return;
-  // Enforce concurrency BEFORE consuming rate-limit tokens to avoid wasting capacity on jobs
-  // we are going to reject due to overload.
-  if (checkOverload(requestId, replyPort)) return;
-  if (!enforceRateLimit(requestId, replyPort)) return;
+  // Reserve slot synchronously to avoid races
+  if (!tryReserveSlotInline()) {
+    const message = {
+      type: "error",
+      requestId,
+      reason: "worker-overloaded",
+    } as const;
+    if (replyPort) replyPort.postMessage(message);
+    else postMessage(message);
+    return;
+  }
+  // Ensure reservation state is flushed before proceeding (helps test environments)
+  await Promise.resolve();
+  try {
+    // After reserving the slot, enforce rate-limit; if it fails, release slot
+    if (!enforceRateLimit(requestId, replyPort)) return;
+    await doSign(requestId, canonical, replyPort);
+  } catch (signError) {
+    if (getCurrent().developmentLogging) {
+      secureDevelopmentLog("error", "signing-worker", "sign operation failed", {
+        error: sanitizeErrorForLogs(signError),
+        requestId,
+      });
+    }
+    const message = {
+      type: "error",
+      requestId,
+      reason: "sign-failed",
+    } as const;
+    if (replyPort) replyPort.postMessage(message);
+    else postMessage(message);
+  } finally {
+    const newPendingCount = Math.max(0, getCurrent().pendingCount - 1);
+    updateState({ pendingCount: newPendingCount });
 
-  await executeSign(requestId, canonical, replyPort);
+    // If a shutdown has been requested and this is the last pending operation,
+    // complete the shutdown process.
+    if (getCurrent().shuttingDown && newPendingCount === 0) {
+      postMessage({ type: "destroyed" });
+      self.close();
+    }
+  }
 }
 
 // --- Core Logic & Validation ---
@@ -395,6 +451,19 @@ function enforceRateLimit(requestId: number, replyPort?: MessagePort): boolean {
 
 // --- Token bucket helpers (integer arithmetic for precision) ---
 function refillTokens(): void {
+  // NOTE (developer): Token bucket refill uses integer arithmetic and a
+  // precision multiplier to avoid floating-point drift across environments.
+  // - `precision` is set to 60000 (ms per minute). The worker computes
+  //   `perMs = Math.floor((rateLimitPerMinute * precision) / 60000)` and
+  //   multiplies by `deltaMs` to compute tokensToAdd in integer space.
+  // - `tokens` and `burst` are tracked in whole tokens, but intermediate
+  //   arithmetic uses `precision` to preserve fractional accrual across ms.
+  // - All divisions/final conversions use `Math.floor`, so refills are
+  //   effectively floor-based: fractional tokens accumulate in the internal
+  //   integer representation but are floored when stored back into `tokens`.
+  // This means short time slices may not produce visible token increments
+  // until enough ms have accumulated to cross the floor threshold. Tests
+  // should configure rate/burst and time advances accordingly.
   const nowSec = Math.floor(Date.now() / 1000);
   const { rateLimitPerMinute, tokens, burst, lastRefillSec } = getCurrent();
 
@@ -426,58 +495,9 @@ function refillTokens(): void {
   });
 }
 
-function checkOverload(requestId: number, replyPort?: MessagePort): boolean {
-  const { pendingCount, maxConcurrentSigning, developmentLogging } =
-    getCurrent();
-  if (pendingCount >= maxConcurrentSigning) {
-    if (developmentLogging) {
-      secureDevelopmentLog("warn", "signing-worker", "worker overloaded", {
-        pendingCount,
-        maxConcurrentSigning,
-      });
-    }
-    const message = { type: "error", requestId, reason: "worker-overloaded" };
-    if (replyPort) replyPort.postMessage(message);
-    else postMessage(message);
-    return true;
-  }
-  return false;
-}
+// checkOverload removed; logic is handled inline for atomic reservation
 
-async function executeSign(
-  requestId: number,
-  canonical: string,
-  replyPort?: MessagePort,
-): Promise<void> {
-  updateState({ pendingCount: getCurrent().pendingCount + 1 });
-  try {
-    await doSign(requestId, canonical, replyPort);
-  } catch (signError) {
-    if (getCurrent().developmentLogging) {
-      secureDevelopmentLog("error", "signing-worker", "sign operation failed", {
-        error: sanitizeErrorForLogs(signError),
-        requestId,
-      });
-    }
-    const message = {
-      type: "error",
-      requestId,
-      reason: "sign-failed",
-    } as const;
-    if (replyPort) replyPort.postMessage(message);
-    else postMessage(message);
-  } finally {
-    const newPendingCount = Math.max(0, getCurrent().pendingCount - 1);
-    updateState({ pendingCount: newPendingCount });
-
-    // If a shutdown has been requested and this is the last pending operation,
-    // complete the shutdown process.
-    if (getCurrent().shuttingDown && newPendingCount === 0) {
-      postMessage({ type: "destroyed" });
-      self.close();
-    }
-  }
-}
+// executeSign inlined into handleSignRequest to guarantee slot reservation ordering
 
 async function doSign(
   requestId: number,
@@ -641,7 +661,8 @@ function workerMessageValidator(data: unknown): boolean {
           typeof ArrayBuffer.isView === "function" &&
           ArrayBuffer.isView(d.secretBuffer as unknown as ArrayBufferView);
         return (
-          typeof d.type === "string" && (hasArrayBuffer || hasArrayBufferView)
+          typeof d["type"] === "string" &&
+          (hasArrayBuffer || hasArrayBufferView)
         );
       }
       case "handshake": {
@@ -673,6 +694,8 @@ function workerMessageValidator(data: unknown): boolean {
 createSecurePostMessageListener({
   allowedOrigins: [typeof location !== "undefined" ? location.origin : ""],
   validate: workerMessageValidator,
+  wireFormat: "structured",
+  allowTypedArrays: true,
   onMessage: async (data: unknown, context) => {
     try {
       // Basic shape check
