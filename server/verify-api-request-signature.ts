@@ -55,7 +55,7 @@ const KID_RE = /^[a-zA-Z0-9._-]+$/;
 const MAX_SIGNATURE_LENGTH = 512;
 const MAX_PATH_LENGTH = 2048;
 const MAX_METHOD_LENGTH = 20;
-const MIN_SECRET_BYTES = 16; // recommended >= 32 bytes
+const MIN_SECRET_BYTES = 32; // L3 security posture requires >= 32 bytes
 const MAX_SECRET_BYTES = 4096;
 
 /**
@@ -231,11 +231,11 @@ function validateVerifyInput(input: VerifyExtendedInput): void {
       throw new InvalidParameterError("Invalid secret length");
     }
   } else if (secret instanceof ArrayBuffer) {
-    if (secret.byteLength === 0 || secret.byteLength > 512) {
+    if (secret.byteLength === 0 || secret.byteLength > MAX_SECRET_BYTES) {
       throw new InvalidParameterError("Invalid secret buffer length");
     }
   } else if (ArrayBuffer.isView(secret)) {
-    if (secret.length === 0 || secret.length > 512) {
+    if (secret.length === 0 || secret.length > MAX_SECRET_BYTES) {
       throw new InvalidParameterError("Invalid secret array length");
     }
   } else {

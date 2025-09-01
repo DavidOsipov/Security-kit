@@ -18,3 +18,4 @@ coverage_*.*
 *.swp
 *.swo
 *.class
+.vitest-*.*

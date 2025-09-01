@@ -15,7 +15,6 @@ import { secureDevLog as secureDevelopmentLog } from "../utils";
 import { sanitizeErrorForLogs } from "../errors";
 import {
   createSecurePostMessageListener,
-  computeInitialAllowedOrigin,
   isEventAllowedWithLock,
 } from "../postMessage";
 import type { NonceFormat } from "../constants";
@@ -40,7 +39,9 @@ interface WorkerState {
   // NEW: token bucket state
   readonly tokens: number;
   readonly burst: number;
-  readonly lastRefillSec: number;
+  readonly lastRefillMs: number;
+  // Allowed inbound origin captured during init; undefined until set
+  readonly allowedInboundOrigin?: string | undefined;
 }
 
 const createInitialState = (): WorkerState => ({
@@ -57,7 +58,8 @@ const createInitialState = (): WorkerState => ({
   maxConcurrentSigning: 5,
   tokens: 0,
   burst: 0,
-  lastRefillSec: Math.floor(Date.now() / 1000),
+  lastRefillMs: Date.now(),
+  allowedInboundOrigin: undefined,
 });
 
 // Maximum allowed nonce length for handshake messages to prevent resource abuse
@@ -82,14 +84,9 @@ const createStateManager = (initialState: WorkerState) => {
 const { getCurrent, update: updateState } =
   createStateManager(createInitialState());
 
-// Track the single origin which is permitted to send control messages to
-// this dedicated worker. It is established by the initial "init" message
-// and defaults to the creating document's origin if not explicitly set.
-// Using a single origin keeps the policy simple and auditable.
-let _allowedInboundOrigin: string | undefined = undefined;
+// Allowed inbound origin is tracked inside WorkerState (allowedInboundOrigin)
 
-// Lightweight critical section for concurrency slot reservation to avoid races
-const _reservation = { chain: Promise.resolve() as Promise<void> };
+// Concurrency slot reservation now handled inline without external reservation chain
 
 /**
  * Verifies whether a MessageEvent originates from the allowed inbound origin.
@@ -147,7 +144,7 @@ function applyRateLimitConfig(options: InitMessage["workerOptions"]): void {
       rateLimitPerMinute: rateLimit,
       tokens: burst, // start full
       burst,
-      lastRefillSec: Math.floor(Date.now() / 1000),
+      lastRefillMs: Date.now(),
     });
   }
 }
@@ -227,14 +224,15 @@ async function handleInitMessage(
   // If an `event` is supplied, prefer its `origin` value. This prevents
   // attackers from later posting fake control messages from other origins.
   try {
-    if (typeof _allowedInboundOrigin === "undefined") {
+    if (typeof getCurrent().allowedInboundOrigin === "undefined") {
       const origin =
         event && typeof event.origin === "string" ? event.origin : "";
       // Default to location.origin when origin is empty (e.g. some non-browser
       // environments). We intentionally reject empty-origins unless they match
       // location.origin to avoid a permissive default.
-      _allowedInboundOrigin =
+      const locked =
         origin || (typeof location !== "undefined" ? location.origin : "");
+      updateState({ allowedInboundOrigin: locked });
     }
   } catch (error) {
     // Non-fatal: don't block initialization on inability to determine origin
@@ -449,50 +447,43 @@ function enforceRateLimit(requestId: number, replyPort?: MessagePort): boolean {
   return false;
 }
 
-// --- Token bucket helpers (integer arithmetic for precision) ---
+// --- Token bucket helpers (millisecond precision, floor-based) ---
 function refillTokens(): void {
-  // NOTE (developer): Token bucket refill uses integer arithmetic and a
-  // precision multiplier to avoid floating-point drift across environments.
-  // - `precision` is set to 60000 (ms per minute). The worker computes
-  //   `perMs = Math.floor((rateLimitPerMinute * precision) / 60000)` and
-  //   multiplies by `deltaMs` to compute tokensToAdd in integer space.
-  // - `tokens` and `burst` are tracked in whole tokens, but intermediate
-  //   arithmetic uses `precision` to preserve fractional accrual across ms.
-  // - All divisions/final conversions use `Math.floor`, so refills are
-  //   effectively floor-based: fractional tokens accumulate in the internal
-  //   integer representation but are floored when stored back into `tokens`.
-  // This means short time slices may not produce visible token increments
-  // until enough ms have accumulated to cross the floor threshold. Tests
-  // should configure rate/burst and time advances accordingly.
-  const nowSec = Math.floor(Date.now() / 1000);
-  const { rateLimitPerMinute, tokens, burst, lastRefillSec } = getCurrent();
-
+  // Deterministic floor-based refill using ms precision.
+  // We maintain tokens as integers and advance lastRefillMs by the exact
+  // whole-token time added to preserve fractional accrual across calls.
+  const nowMs = Date.now();
+  const { rateLimitPerMinute, tokens, burst, lastRefillMs } = getCurrent();
   if (rateLimitPerMinute <= 0) return;
 
-  const last = lastRefillSec ?? nowSec;
-  if (nowSec <= last) return;
+  const last = typeof lastRefillMs === "number" ? lastRefillMs : nowMs;
+  if (nowMs <= last) return;
 
-  // Prevent overflow: cap delta to reasonable maximum (1 hour)
-  const deltaSec = Math.min(nowSec - last, 3600);
+  // Cap the window to 1 hour to avoid extreme math and stick with floor semantics
+  const deltaMs = Math.min(nowMs - last, 60 * 60 * 1000);
+  if (deltaMs <= 0) return;
 
-  // Use higher precision for accurate token calculation
-  // 60000ms per minute ensures exact timing for any rate limit
-  const precision = 60000;
-  const perMs = Math.floor((rateLimitPerMinute * precision) / 60000);
-  const deltaMs = deltaSec * 1000; // convert to milliseconds
+  // Tokens to add based on elapsed time (floor-based)
+  const tokensToAdd = Math.floor((deltaMs * rateLimitPerMinute) / 60000);
+  if (tokensToAdd <= 0) return; // not enough time elapsed for a whole token
 
-  const currentTokens = Math.floor(tokens * precision);
-  const capacity = Math.floor(burst * precision);
+  const capacityLeft = Math.max(0, burst - tokens);
+  if (capacityLeft <= 0) {
+    // At capacity: reset the accrual window to avoid unbounded deltas
+    updateState({ lastRefillMs: nowMs });
+    return;
+  }
 
-  // Prevent overflow: ensure tokensToAdd doesn't exceed remaining capacity
-  const remainingCapacity = Math.max(0, capacity - currentTokens);
-  const tokensToAdd = Math.min(remainingCapacity, perMs * deltaMs);
-  const nextTokens = currentTokens + tokensToAdd;
+  const added = Math.min(tokensToAdd, capacityLeft);
+  const perTokenMs = Math.floor(60000 / Math.max(1, rateLimitPerMinute));
+  const advancedMs = added * perTokenMs;
 
-  updateState({
-    tokens: Math.floor(nextTokens / precision),
-    lastRefillSec: nowSec,
-  });
+  // If we filled to capacity, snap the clock to now; otherwise advance by the
+  // exact whole-token time to preserve fractional remainder deterministically.
+  const newTokens = tokens + added;
+  const newLast = newTokens >= burst ? nowMs : last + advancedMs;
+
+  updateState({ tokens: newTokens, lastRefillMs: newLast });
 }
 
 // checkOverload removed; logic is handled inline for atomic reservation
@@ -719,7 +710,10 @@ createSecurePostMessageListener({
 
       // For other message types, enforce that the event origin matches the
       // stored allowed origin or fallback policies.
-      if (event && !isEventAllowedWithLock(event, _allowedInboundOrigin)) {
+      if (
+        event &&
+        !isEventAllowedWithLock(event, getCurrent().allowedInboundOrigin)
+      ) {
         if (getCurrent().developmentLogging) {
           secureDevelopmentLog(
             "warn",

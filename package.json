@@ -46,6 +46,26 @@
       "types": "./dist/test-internals.d.ts",
       "import": "./dist/test-internals.mjs",
       "require": "./dist/test-internals.cjs"
+    },
+    "./worker": {
+      "types": "./dist/worker/signing-worker.d.ts",
+      "import": "./dist/worker/signing-worker.mjs",
+      "require": "./dist/worker/signing-worker.cjs"
+    },
+    "./server": {
+      "types": "./dist/server/verify-api-request-signature.d.ts",
+      "import": "./dist/server/verify-api-request-signature.mjs",
+      "require": "./dist/server/verify-api-request-signature.cjs"
+    },
+    "./server/nonce-store": {
+      "types": "./dist/server/nonce-store.d.ts",
+      "import": "./dist/server/nonce-store.mjs",
+      "require": "./dist/server/nonce-store.cjs"
+    },
+    "./server/redis-nonce-store": {
+      "types": "./dist/server/redis-nonce-store.d.ts",
+      "import": "./dist/server/redis-nonce-store.mjs",
+      "require": "./dist/server/redis-nonce-store.cjs"
     }
   },
   "files": [

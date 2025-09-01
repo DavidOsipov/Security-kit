@@ -13,7 +13,10 @@ import {
 } from "./errors";
 import { environment, isDevelopment } from "./environment";
 import { reportProdError as reportProductionError } from "./reporting";
-import { devLog as secureDevelopmentLog } from "./dev-logger";
+import {
+  developmentLog_ as secureDevelopmentLog,
+  setDevelopmentLogger_,
+} from "./dev-logger";
 
 // --- State Machine ---
 export const CryptoState = Object.freeze({
@@ -100,6 +103,15 @@ async function detectNodeCrypto(
   } catch (error) {
     // Secure logging: don't expose internal error details
     if (isDevelopment()) {
+      // Initialize logger on first use to avoid side effects on import
+      import("./utils")
+        .then(({ secureDevLog }) => {
+          setDevelopmentLogger_(secureDevLog);
+        })
+        .catch(() => {
+          // Ignore logger initialization failures
+        });
+
       secureDevelopmentLog(
         "debug",
         "security-kit",
@@ -265,6 +277,15 @@ export async function ensureCrypto(): Promise<Crypto> {
 
         // Log successful Node crypto detection in development
         if (isDevelopment()) {
+          // Initialize logger on first use to avoid side effects on import
+          import("./utils")
+            .then(({ secureDevLog }) => {
+              setDevelopmentLogger_(secureDevLog);
+            })
+            .catch(() => {
+              // Ignore logger initialization failures
+            });
+
           secureDevelopmentLog(
             "info",
             "security-kit",
@@ -309,6 +330,15 @@ export async function ensureCrypto(): Promise<Crypto> {
       if (environment.isProduction) {
         reportProductionError(safeError, safeContext);
       } else if (isDevelopment()) {
+        // Initialize logger on first use to avoid side effects on import
+        import("./utils")
+          .then(({ secureDevLog }) => {
+            setDevelopmentLogger_(secureDevLog);
+          })
+          .catch(() => {
+            // Ignore logger initialization failures
+          });
+
         secureDevelopmentLog(
           "error",
           "security-kit",

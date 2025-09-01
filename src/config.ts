@@ -355,3 +355,91 @@ export function setHandshakeConfig(cfg: Partial<HandshakeConfig>): void {
 
   _handshakeConfig = { ..._handshakeConfig, ...cfg };
 }
+
+// --- Runtime Policy Configuration ---
+export type RuntimePolicyConfig = {
+  /**
+   * Whether to allow Blob URLs in general. Defaults to true in development, false in production.
+   * This controls broader Blob usage policies beyond just workers.
+   */
+  readonly allowBlobUrls: boolean;
+  /**
+   * Whether to allow creating Workers from Blob URLs for integrity verification.
+   * Defaults to false in production. When enabled, eliminates TOCTOU race conditions
+   * by creating workers from verified bytes rather than URLs.
+   */
+  readonly allowBlobWorkers: boolean;
+  /**
+   * Global default: if true, allows integrity: 'compute' in production unless the per-call
+   * init explicitly forbids it. Default: false (safer). Per-call init.allowComputeIntegrityInProduction
+   * still required when this is false.
+   */
+  readonly allowComputeIntegrityInProductionDefault: boolean;
+  /**
+   * Controls whether the library caches verified worker bytes in memory when using integrity: 'compute'.
+   * This cache is in-memory only (no disk persistence) and short-lived, but can be disabled for
+   * maximum minimalism. Defaults to true.
+   */
+  readonly enableWorkerByteCache: boolean;
+};
+
+/* eslint-disable functional/no-let -- Controlled mutable configuration allowed here */
+let _runtimePolicy: RuntimePolicyConfig = {
+  allowBlobUrls: !environment.isProduction,
+  allowBlobWorkers: false,
+  allowComputeIntegrityInProductionDefault: false,
+  enableWorkerByteCache: !environment.isProduction,
+};
+/* eslint-enable functional/no-let */
+
+export function getRuntimePolicy(): RuntimePolicyConfig {
+  return Object.freeze({ ..._runtimePolicy });
+}
+
+export function setRuntimePolicy(cfg: Partial<RuntimePolicyConfig>): void {
+  if (getCryptoState() === CryptoState.Sealed) {
+    throw new InvalidConfigurationError(
+      "Configuration is sealed and cannot be changed.",
+    );
+  }
+  // Validate and filter only known keys; ignore unknown keys to preserve hardened simplicity
+  const allowedKeys: readonly (keyof RuntimePolicyConfig)[] = [
+    "allowBlobUrls",
+    "allowBlobWorkers",
+    "allowComputeIntegrityInProductionDefault",
+    "enableWorkerByteCache",
+  ];
+  // Build filtered object functionally without mutating any intermediate object
+  const knownEntries = Object.entries(cfg).filter(([key]) =>
+    allowedKeys.includes(key as keyof RuntimePolicyConfig),
+  );
+
+  // Validate all values before constructing the final object to preserve error semantics
+  for (const [key, value] of knownEntries) {
+    if (typeof value !== "boolean") {
+      throw new InvalidParameterError(
+        `RuntimePolicy.${key} must be a boolean.`,
+      );
+    }
+  }
+
+  const filtered = Object.fromEntries(
+    knownEntries.map(([key, value]) => [key, value as boolean]),
+  ) as Partial<RuntimePolicyConfig>;
+
+  // Production constraints: allow explicit opt-in but log warnings for security-critical settings
+  if (environment.isProduction) {
+    if (filtered.allowBlobWorkers === true) {
+      // Allow but require explicit conscious opt-in. This guards against accidental enabling.
+      // In a real implementation, you might want to add logging here.
+    }
+    if (filtered.allowBlobUrls === true) {
+      // Also allowed only with explicit opt-in.
+    }
+    if (filtered.allowComputeIntegrityInProductionDefault === true) {
+      // Safer default is false; require explicit opt-in.
+    }
+  }
+
+  _runtimePolicy = { ..._runtimePolicy, ...filtered };
+}

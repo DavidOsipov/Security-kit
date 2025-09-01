@@ -10,7 +10,7 @@ import { getSecureRandomBytesSync } from '../../src/crypto';
 
 describe('sign -> verify (integration)', () => {
   it('creates a signature and verifies it', async () => {
-    const secretBytes = new Uint8Array([1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16]);
+  const secretBytes = new Uint8Array([1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32]);
     const secretB64 = Buffer.from(secretBytes).toString('base64');
     const payload = { v: 1 };
   // Use a 16-byte (128-bit) base64-encoded nonce as required by validation

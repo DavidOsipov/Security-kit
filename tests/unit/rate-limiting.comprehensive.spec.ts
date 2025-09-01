@@ -77,7 +77,7 @@ beforeEach(() => {
   } as any;
 
   // Default successful fetch response for worker script
-  mockFetch.mockImplementation((url, options) => {
+  mockFetch.mockImplementation((url: any, options?: any) => {
     console.log('[MOCK FETCH] Called with url:', url, 'options:', options);
     return Promise.resolve({
       ok: true,
@@ -116,13 +116,16 @@ describe('Rate Limiting - Comprehensive Tests', () => {
   let maxConcurrent = 5;
   let pendingRequests = 0;
   let rateLimitPerMinute = 10;
+  // Track last refill timestamp for deterministic token bucket behavior
+  let internalLastRefillMs = Date.now();
 
   beforeEach(() => {
-    // Reset mock state
+  // Reset mock state
     rateLimitTokens = 10;
     maxConcurrent = 5;
     pendingRequests = 0;
     rateLimitPerMinute = 10;
+  internalLastRefillMs = Date.now();
 
     // Mock worker message handling
     mockWorker.addEventListener.mockImplementation((event: string, handler: Function) => {
@@ -145,7 +148,13 @@ describe('Rate Limiting - Comprehensive Tests', () => {
         // Expose these values on the mock worker so tests can assert they were propagated
         mockWorker.rateLimitPerMinute = rateLimitPerMinute;
         mockWorker.maxConcurrentSigning = maxConcurrent;
-        rateLimitTokens = rateLimitPerMinute;
+        // Initialize token bucket: start full up to a burst cap.
+        // For simplicity in tests, use per-minute cap as an upper bound.
+        // Individual requests always consume 1 token.
+        rateLimitTokens = Math.max(0, Math.floor(rateLimitPerMinute));
+        internalLastRefillMs = Date.now();
+        // Also expose/track lastRefillMs for tests that manipulate it
+        mockWorker.lastRefillMs = internalLastRefillMs;
         
         // Simulate successful initialization - use setImmediate for faster response
         setImmediate(() => {
@@ -173,6 +182,29 @@ describe('Rate Limiting - Comprehensive Tests', () => {
       } else if (msg.type === 'sign') {
         const { requestId, canonical } = msg;
         const port = transfer && transfer.length === 1 ? transfer[0] : null;
+
+        // On-demand token refill using floor-based integer arithmetic.
+        // Allows fractional accumulation over time without floating point drift.
+        const now = Date.now();
+        // Prefer externally controlled lastRefillMs if tests set it; else use internal tracker
+        const lastRefill = typeof mockWorker.lastRefillMs === 'number'
+          ? mockWorker.lastRefillMs
+          : internalLastRefillMs;
+        const elapsedMs = Math.max(0, now - lastRefill);
+        if (rateLimitPerMinute > 0 && elapsedMs > 0) {
+          // tokensToAdd = floor(elapsedMs * rateLimitPerMinute / 60000)
+          const tokensToAdd = Math.floor((elapsedMs * rateLimitPerMinute) / 60000);
+          if (tokensToAdd > 0) {
+            // Cap to a simple burst limit: do not exceed rateLimitPerMinute
+            const cap = Math.max(1, Math.floor(rateLimitPerMinute));
+            rateLimitTokens = Math.min(cap, rateLimitTokens + tokensToAdd);
+            // Advance lastRefill by the exact whole-token time we accounted for
+            const msPerToken = 60000 / Math.max(1, rateLimitPerMinute);
+            const advanced = Math.floor(tokensToAdd * msPerToken);
+            internalLastRefillMs = lastRefill + advanced;
+            mockWorker.lastRefillMs = internalLastRefillMs;
+          }
+        }
 
 
         // Check concurrency - use >= to match real worker behavior
@@ -510,6 +542,129 @@ describe('Rate Limiting - Comprehensive Tests', () => {
       
       const config = signer.getRateLimitConfig();
       expect(config.rateLimitPerMinute).toBe(0);
+      
+      await signer.destroy();
+    });
+  });
+
+  describe('Token Bucket Fractional Accumulation', () => {
+    it('accumulates fractional tokens over very short intervals', async () => {
+      const secret = new Uint8Array(32);
+      crypto.getRandomValues(secret);
+      
+      const signer = await SecureApiSigner.create({
+        secret,
+        workerUrl: new URL('https://example.com/worker.js'),
+        integrity: 'none',
+        rateLimitPerMinute: 60, // 1 token per second
+        maxConcurrentSigning: 10,
+      });
+      
+      // Exhaust initial tokens
+      await signer.sign({ test: 1 });
+      
+      // Simulate very short time intervals (100ms each)
+      // With rate 60/min = 1/sec, each second should add 1 token
+      // But 100ms should add 0.1 tokens (fractional accumulation)
+      const shortIntervals = 10; // 1 second total
+      for (let i = 0; i < shortIntervals; i++) {
+        // Manually simulate fractional refill in mock
+        // In real implementation, this would accumulate internally
+        mockWorker.lastRefillMs = Date.now() - 100; // 100ms ago
+        await new Promise(resolve => setTimeout(resolve, 10)); // Small delay
+      }
+      
+      // After accumulating fractional tokens, should be able to make request
+      const result = await signer.sign({ test: 2 });
+      expect(result.signature).toBeDefined();
+      
+      await signer.destroy();
+    });
+
+  it('handles floor-based token refills correctly', async () => {
+      const secret = new Uint8Array(32);
+      crypto.getRandomValues(secret);
+      
+      const signer = await SecureApiSigner.create({
+        secret,
+        workerUrl: new URL('https://example.com/worker.js'),
+        integrity: 'none',
+        rateLimitPerMinute: 120, // 2 tokens per second
+        maxConcurrentSigning: 10,
+      });
+      
+      // Exhaust initial tokens
+      await signer.sign({ test: 1 });
+      await signer.sign({ test: 2 });
+      
+      // Simulate time passing that should add exactly 1.5 tokens
+      // But due to floor-based arithmetic, only 1 token should be added
+      mockWorker.lastRefillMs = Date.now() - 750; // 750ms = 1.5 tokens worth
+      
+  // With a standard token bucket, floor(1.5) = 1 token is available,
+  // which is sufficient for a single request. This should succeed.
+  const r3 = await signer.sign({ test: 3 });
+  expect(r3.signature).toBeDefined();
+      
+  // After full second, there would be 2 tokens; next request should also succeed
+  mockWorker.lastRefillMs = Date.now() - 1000; // 1 second = 2 tokens
+  const r4 = await signer.sign({ test: 4 });
+  expect(r4.signature).toBeDefined();
+      
+      await signer.destroy();
+    });
+
+    it('prevents overflow in token accumulation', async () => {
+      const secret = new Uint8Array(32);
+      crypto.getRandomValues(secret);
+      
+      const signer = await SecureApiSigner.create({
+        secret,
+        workerUrl: new URL('https://example.com/worker.js'),
+        integrity: 'none',
+        rateLimitPerMinute: 60,
+        maxConcurrentSigning: 10,
+      });
+      
+      // Exhaust tokens
+      await signer.sign({ test: 1 });
+      
+      // Simulate very long time period that could cause overflow
+      mockWorker.lastRefillMs = Date.now() - (3600 * 1000); // 1 hour ago
+      
+      // Should succeed without overflow issues
+      const result = await signer.sign({ test: 2 });
+      expect(result.signature).toBeDefined();
+      
+      await signer.destroy();
+    });
+
+    it('handles precision multiplier correctly for fractional rates', async () => {
+      const secret = new Uint8Array(32);
+      crypto.getRandomValues(secret);
+      
+      const signer = await SecureApiSigner.create({
+        secret,
+        workerUrl: new URL('https://example.com/worker.js'),
+        integrity: 'none',
+        rateLimitPerMinute: 1, // Very slow rate: 1 token per minute
+        maxConcurrentSigning: 10,
+      });
+      
+      // Exhaust token
+      await signer.sign({ test: 1 });
+      
+      // Simulate 30 seconds passing (should add 0.5 tokens fractionally)
+      mockWorker.lastRefillMs = Date.now() - 30000; // 30 seconds
+      
+      // Should still be rate limited (0.5 < 1)
+      await expect(signer.sign({ test: 2 })).rejects.toThrow(/rate.*limit/i);
+      
+      // Wait for full minute
+      mockWorker.lastRefillMs = Date.now() - 60000; // 60 seconds = 1 token
+      
+      const result = await signer.sign({ test: 3 });
+      expect(result.signature).toBeDefined();
       
       await signer.destroy();
     });

@@ -35,7 +35,7 @@ import {
 import { ensureCrypto } from "./state";
 import { environment, isDevelopment } from "./environment";
 import { SHARED_ENCODER } from "./encoding";
-import { setDevLogger } from "./dev-logger";
+import { setDevelopmentLogger_ } from "./dev-logger";
 import { getLoggingConfig } from "./config";
 
 // Type definitions for cross-platform compatibility
@@ -156,6 +156,23 @@ function safeEmitMetric(
     queueMicrotask(call);
   } else {
     void Promise.resolve().then(call);
+  }
+}
+
+/**
+ * Public wrapper for emitting telemetry metrics in a safe, non-blocking way.
+ * This calls the internal safeEmitMetric and is the supported public API for
+ * other modules to emit library telemetry.
+ */
+export function emitMetric(
+  name: string,
+  value?: number,
+  tags?: Record<string, string>,
+): void {
+  try {
+    safeEmitMetric(name, value, tags);
+  } catch {
+    /* swallow — telemetry must not throw */
   }
 }
 
@@ -666,66 +683,70 @@ export async function secureCompareAsync(
   }
 
   try {
-    const { subtle } = await checkCryptoAvailability(options);
-
-    // eslint-disable-next-line functional/no-let -- temporary buffers created and wiped in finally
-    let ua: Uint8Array | undefined;
-
-    // eslint-disable-next-line functional/no-let -- temporary buffers created and wiped in finally
-    let ub: Uint8Array | undefined;
-
-    try {
-      const [da, db] = await Promise.all([
-        subtle.digest("SHA-256", SHARED_ENCODER.encode(sa)),
-        subtle.digest("SHA-256", SHARED_ENCODER.encode(sb)),
-      ]);
-      ua = new Uint8Array(da);
-      ub = new Uint8Array(db);
-
-      return compareUint8Arrays(ua, ub);
-    } finally {
-      // Best-effort wipe
-      if (ua) secureWipe(ua);
-      if (ub) secureWipe(ub);
-    }
+    return await compareWithCrypto(sa, sb, options);
   } catch (error) {
-    // Handle crypto unavailability by falling back to non-crypto comparison
-    const strict = options?.requireCrypto === true || isSecurityStrict();
-    if (error instanceof CryptoUnavailableError) {
-      if (strict) {
-        throw error;
-      }
-      return secureCompare(sa, sb);
-    }
+    return handleCompareError(error, sa, sb, options);
+  }
+}
 
-    // Re-throw other crypto errors in strict mode
-    if (strict) {
-      if (!(error instanceof CryptoUnavailableError)) {
-        // normalize to crypto unavailable if it was another crypto failure
-        throw new CryptoUnavailableError(
-          "Cryptographic compare failed in strict mode.",
-        );
-      }
-      throw error;
-    }
+// Extracted helper to reduce cognitive complexity of secureCompareAsync
+async function compareWithCrypto(
+  sa: string,
+  sb: string,
+  options?: { readonly requireCrypto?: boolean },
+): Promise<boolean> {
+  const { subtle } = await checkCryptoAvailability(options);
 
-    if (isDevelopment()) {
-      secureDevLog(
-        "error",
-        "secureCompareAsync",
-        "Crypto compare failed; falling back",
-        {
-          error: sanitizeErrorForLogs(error),
-        },
-      );
-    }
-    safeEmitMetric("secureCompare.fallback", 1, {
-      requireCrypto: String(!!options?.requireCrypto),
-      subtlePresent: "unknown",
-      strict: strict ? "1" : "0",
-    });
+  // eslint-disable-next-line functional/no-let -- temporary buffers created and wiped in finally
+  let ua: Uint8Array | undefined;
+  // eslint-disable-next-line functional/no-let -- temporary buffers created and wiped in finally
+  let ub: Uint8Array | undefined;
+
+  try {
+    const [da, db] = await Promise.all([
+      subtle.digest("SHA-256", SHARED_ENCODER.encode(sa)),
+      subtle.digest("SHA-256", SHARED_ENCODER.encode(sb)),
+    ]);
+    ua = new Uint8Array(da);
+    ub = new Uint8Array(db);
+    return compareUint8Arrays(ua, ub);
+  } finally {
+    if (ua) secureWipe(ua);
+    if (ub) secureWipe(ub);
+  }
+}
+
+function handleCompareError(
+  error: unknown,
+  sa: string,
+  sb: string,
+  options?: { readonly requireCrypto?: boolean },
+): boolean {
+  const strict = options?.requireCrypto === true || isSecurityStrict();
+  if (error instanceof CryptoUnavailableError) {
+    if (strict) throw error;
     return secureCompare(sa, sb);
   }
+  if (strict) {
+    // Normalize to a consistent error type in strict mode
+    throw new CryptoUnavailableError(
+      "Cryptographic compare failed in strict mode.",
+    );
+  }
+  if (isDevelopment()) {
+    secureDevLog(
+      "error",
+      "secureCompareAsync",
+      "Crypto compare failed; falling back",
+      { error: sanitizeErrorForLogs(error) },
+    );
+  }
+  safeEmitMetric("secureCompare.fallback", 1, {
+    requireCrypto: String(!!options?.requireCrypto),
+    subtlePresent: "unknown",
+    strict: strict ? "1" : "0",
+  });
+  return secureCompare(sa, sb);
 }
 
 // --- Safe Logging & Redaction ---
@@ -1310,12 +1331,13 @@ export function secureDevLog(
   _devConsole(level, message_, safeContext);
 }
 
-// Set the logger for the dev-logger facade
-setDevLogger(secureDevLog);
+// Set the logger for the dev-logger facade (moved to lazy initialization)
+// This is now done lazily to avoid side effects on import
+// setDevLogger(secureDevLog);
 
 // Provide descriptive compatibility aliases for consumers that prefer
 // more explicit names. These are simple re-exports and preserve behavior.
 export const secureDevelopmentLog = secureDevLog;
-export const setDevelopmentLogger = setDevLogger;
+export const setDevelopmentLogger = setDevelopmentLogger_;
 
 // --- Internal Utilities ---

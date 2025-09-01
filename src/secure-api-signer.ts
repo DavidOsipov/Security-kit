@@ -1,23 +1,22 @@
 // SPDX-License-Identifier: MIT
 // SPDX-FileCopyrightText: © 2025 David Osipov
-// SecureApiSigner — npm-portable production-hardened TypeScript implementation (no blobs)
+// SecureApiSigner — hardened TypeScript implementation with strict integrity defaults
 //
-// This version adds a portable, safe-by-default integrity strategy suitable for publishing on npm:
-// - New option `integrity` controls behavior: "require" | "compute" | "none"
-//   - "require": a build-time `expectedWorkerScriptHash` (base64 SHA-256) MUST be provided (strict).
-//   - "compute": the library will fetch the worker script at runtime, compute its hash and proceed (default).
-//   - "none": skip script hash checks entirely (least secure).
-// - Because this library must avoid blobs, there remains a TOCTOU window when creating the Worker
-//   (the code you fetched may differ from the code `new Worker` executes if an attacker controls the origin).
-//   To mitigate this: prefer immutable/fingerprinted assets in deployments, use HTTPS, and prefer "require" mode
+// Integrity strategy:
+// - `integrity` controls behavior: "require" | "compute" | "none"
+//   - "require": a build-time `expectedWorkerScriptHash` (base64 SHA-256) MUST be provided (strict; default).
+//   - "compute": the library will fetch the worker script at runtime, compute its hash and proceed (dev-friendly).
+//   - "none": skip script hash checks entirely (forbidden in production).
+// - When runtime policy enables Blob workers AND Blob URLs, the signer creates the Worker from the verified bytes
+//   to eliminate the TOCTOU window. Otherwise, URL-based Worker creation is used as a fallback with explicit guards.
 
 import {
   InvalidParameterError,
-  InvalidConfigurationError,
   WorkerError,
   RateLimitError,
   CircuitBreakerError,
-} from "./errors.js";
+  SecurityKitError,
+} from "./errors";
 import { safeStableStringify } from "./canonical.js";
 //   in security-sensitive deployments. "compute" is the pragmatic default for npm consumers.
 // - Other hardenings retained: binary-only secrets, handshake, strict runtime guards, canonicalization,
@@ -43,7 +42,9 @@ import type {
   WorkerMessage,
   SignedResponse,
 } from "./protocol";
-import { getLoggingConfig } from "./config";
+import { getLoggingConfig, getRuntimePolicy } from "./config";
+import { VerifiedByteCache } from "./secure-lru-cache";
+import { secureCompare, secureDevelopmentLog } from "./utils";
 
 /*
  * NOTE: This file is security-critical and targets a pragmatic balance between
@@ -63,6 +64,7 @@ const HANDSHAKE_TIMEOUT_MS = 10_000;
 const DEFAULT_MAX_PENDING_REQUESTS = 200;
 const DEFAULT_DESTROY_ACK_TIMEOUT_MS = 2_000; // wait for worker to confirm destroy
 const HANDSHAKE_NONCE_BYTES = 16;
+const DEFAULT_MAX_CANONICAL_LENGTH = 2_000_000; // 2MB limit to prevent DoS
 
 /* ========================= Types ========================= */
 
@@ -213,6 +215,18 @@ function normalizeAndValidateWorkerUrl(
   allowCrossOriginWorkerOrigins?: readonly string[],
 ): URL {
   const url = new URL(String(raw), location.href);
+  // Only allow http(s) schemes for worker URLs
+  if (url.protocol !== "http:" && url.protocol !== "https:") {
+    throw new InvalidParameterError(
+      `workerUrl must use http(s) scheme, got ${url.protocol}`,
+    );
+  }
+  // In production, require HTTPS to avoid mixed content and downgrade risks
+  if (environment.isProduction && url.protocol !== "https:") {
+    throw new InvalidParameterError(
+      `In production, workerUrl must use https:, got ${url.protocol}`,
+    );
+  }
   const sameOrigin =
     url.protocol === location.protocol &&
     url.hostname === location.hostname &&
@@ -283,6 +297,13 @@ export class SecureApiSigner {
   readonly #reservationTokens = new Set<number>();
   // eslint-disable-next-line functional/prefer-readonly-type -- These fields are intentionally mutable for state management
   #nextReservationId = 1;
+  // Track created blob URLs for cleanup to avoid leaking object URLs
+  // Legacy compatibility Set (kept for external expectations); do not mutate directly
+  // eslint-disable-next-line functional/prefer-readonly-type
+  readonly _createdBlobUrls: Set<string> = new Set();
+  // Preferred immutable list for internal tracking
+  // eslint-disable-next-line functional/prefer-readonly-type
+  #blobUrls: readonly string[] = [];
   // #pendingReservations provides synchronous slot reservation to prevent races under concurrent sign() calls.
   // Concurrency is enforced via the size of #state.activePorts after reservation is converted into an active port.
   // eslint-disable-next-line functional/prefer-readonly-type -- These fields are intentionally mutable for state management
@@ -332,27 +353,55 @@ export class SecureApiSigner {
   }
 
   /**
-   * Create signer factory. Portable integrity defaults to 'compute' which computes
-   * a runtime hash and proceeds. For strict deployments use integrity: 'require'
-   * and provide expectedWorkerScriptHash.
+   * Create signer factory. Integrity defaults to 'require' for maximum security.
+   * For production deployments, always provide expectedWorkerScriptHash and use integrity: 'require'.
    */
   public static async create(
     init: SecureApiSignerInit & { readonly integrity?: IntegrityMode },
   ): Promise<SecureApiSigner> {
+    // Change default: require strict integrity unless explicitly overridden.
+    const integrity: IntegrityMode = init.integrity ?? "require";
+    if (environment.isProduction && integrity === "none") {
+      throw new SecurityKitError(
+        "Integrity mode 'none' is forbidden in production. Use 'require' with an expectedWorkerScriptHash.",
+        "E_INTEGRITY_REQUIRED",
+      );
+    }
+
+    // Refuse 'compute' in production by default unless explicitly allowed via both
+    // the init option and the runtime policy. Perform this check early so tests and
+    // callers receive a SecurityKitError rather than a URL validation error.
+    if (
+      integrity === "compute" &&
+      environment.isProduction &&
+      !(
+        init.allowComputeIntegrityInProduction &&
+        getRuntimePolicy().allowComputeIntegrityInProductionDefault
+      )
+    ) {
+      throw new SecurityKitError(
+        "Integrity mode 'compute' is not allowed in production. Provide expectedWorkerScriptHash and use integrity: 'require', or explicitly allow 'compute' in production via BOTH init.allowComputeIntegrityInProduction AND setRuntimePolicy({ allowComputeIntegrityInProductionDefault: true }).",
+        "E_INTEGRITY_REQUIRED",
+      );
+    }
+
     const url = normalizeAndValidateWorkerUrl(
       init.workerUrl,
       init.allowCrossOriginWorkerOrigins,
     );
 
+    // Validate/fetch script per chosen integrity mode
     const computedHash = await SecureApiSigner.#validateAndFetchWorkerScript(
       url,
       init,
+      integrity,
     );
 
     const signer = SecureApiSigner.#initializeWorkerAndSigner(
       url,
       init,
       computedHash,
+      integrity,
     );
 
     await signer.#transferSecretAndHandshake(init);
@@ -509,6 +558,17 @@ export class SecureApiSigner {
       } catch {
         /* empty */
       }
+      try {
+        for (const u of this.#blobUrls) {
+          try {
+            URL.revokeObjectURL(String(u));
+          } catch {
+            /* ignore */
+          }
+        }
+      } catch {
+        /* ignore */
+      }
       this.#cleanup();
     });
   }
@@ -534,54 +594,148 @@ export class SecureApiSigner {
 
   /* ========================= Private helpers ========================= */
 
+  // Track blob URLs immutably and mirror to legacy Set for external read-only use
+  #trackBlobUrl(url: string): void {
+    // Replace the internal list reference immutably
+    // eslint-disable-next-line functional/immutable-data -- controlled append to internal list reference
+    this.#blobUrls = [...this.#blobUrls, url];
+    try {
+      // eslint-disable-next-line functional/immutable-data
+      this._createdBlobUrls.add(url);
+    } catch {
+      /* ignore */
+    }
+  }
+
   static async #validateAndFetchWorkerScript(
     url: URL,
     init: SecureApiSignerInit,
+    integrity: IntegrityMode,
   ): Promise<string | undefined> {
-    const integrity: IntegrityMode = init.integrity ?? "compute";
-    // Enforce: refuse 'compute' integrity mode in production unless explicitly allowed.
+    const policy = getRuntimePolicy();
+    // 'require' demands expected hash
+    if (
+      integrity === "require" &&
+      typeof init.expectedWorkerScriptHash !== "string"
+    ) {
+      throw new SecurityKitError(
+        "Integrity mode 'require' demands expectedWorkerScriptHash (base64 SHA-256).",
+        "E_INTEGRITY_REQUIRED",
+      );
+    }
+
+    // Fail early if 'compute' is attempted in production without explicit OK
     if (
       integrity === "compute" &&
       environment.isProduction &&
-      !init.allowComputeIntegrityInProduction
+      !(
+        init.allowComputeIntegrityInProduction &&
+        policy.allowComputeIntegrityInProductionDefault
+      )
     ) {
-      throw new InvalidConfigurationError(
-        "Integrity mode 'compute' is not allowed in production. Provide expectedWorkerScriptHash and use integrity: 'require', or explicitly set allowComputeIntegrityInProduction: true after validating immutable, fingerprinted worker deployment.",
+      throw new SecurityKitError(
+        "Integrity mode 'compute' is not allowed in production. Provide expectedWorkerScriptHash and use integrity: 'require', or explicitly allow 'compute' in production via BOTH init.allowComputeIntegrityInProduction AND setRuntimePolicy({ allowComputeIntegrityInProductionDefault: true }).",
+        "E_INTEGRITY_REQUIRED",
       );
     }
-    if (integrity === "require") {
-      if (!init.expectedWorkerScriptHash) {
-        throw new InvalidParameterError(
-          "integrity='require' requires expectedWorkerScriptHash.",
+
+    // Fetch script bytes when 'compute' or when we want to verify expected hash
+    const needFetch =
+      integrity === "compute" ||
+      typeof init.expectedWorkerScriptHash === "string" ||
+      (integrity === "require" && getRuntimePolicy().allowBlobWorkers);
+
+    if (!needFetch) return undefined;
+
+    const bytes = await fetchAndValidateScript(url);
+    const hash = await sha256Base64(bytes);
+
+    if (typeof init.expectedWorkerScriptHash === "string") {
+      if (!secureCompare(hash, init.expectedWorkerScriptHash)) {
+        throw new SecurityKitError(
+          "Worker script integrity mismatch.",
+          "E_SIGNATURE_MISMATCH",
         );
       }
-      const scriptBuf = await fetchAndValidateScript(url);
-      const actualHash = await sha256Base64(scriptBuf);
-      if (actualHash !== init.expectedWorkerScriptHash) {
-        throw new WorkerError(
-          `Worker script integrity mismatch. Expected ${init.expectedWorkerScriptHash}, got ${actualHash}.`,
-        );
-      }
-      return actualHash;
     }
-    if (integrity === "compute") {
-      try {
-        const scriptBuf = await fetchAndValidateScript(url);
-        return await sha256Base64(scriptBuf);
-      } catch (error_) {
-        throw error_ instanceof Error
-          ? error_
-          : new WorkerError(String(error_));
-      }
+
+    // Store verified bytes for Blob worker creation if Blob workers are allowed
+    if (
+      (integrity === "compute" || integrity === "require") &&
+      policy.allowBlobWorkers &&
+      policy.enableWorkerByteCache
+    ) {
+      VerifiedByteCache.set(url.href, new Uint8Array(bytes));
     }
-    return undefined; // integrity === 'none'
+
+    return hash;
   }
 
+  // eslint-disable-next-line sonarjs/cognitive-complexity -- Security-critical branching kept explicit and small; further refactor would obscure error handling
   static #initializeWorkerAndSigner(
     url: URL,
     init: SecureApiSignerInit,
     computedHash?: string,
+    integrity?: IntegrityMode,
   ): SecureApiSigner {
+    const policy = getRuntimePolicy();
+    const canBlob =
+      (integrity === "compute" || integrity === "require") &&
+      policy.allowBlobWorkers &&
+      policy.allowBlobUrls;
+
+    if (canBlob) {
+      const cachedBytes = VerifiedByteCache.get(url.href);
+      if (cachedBytes) {
+        // Ensure any created blob URL is revoked on failure to avoid leaks
+        // eslint-disable-next-line functional/no-let -- temporary holder for cleanup
+        let blobUrl: string | undefined;
+        try {
+          const copied = new Uint8Array(cachedBytes);
+          const blob = new Blob([copied.buffer], { type: "text/javascript" });
+          blobUrl = URL.createObjectURL(blob);
+          const worker = new Worker(blobUrl, {
+            type: init.useModuleWorker ? "module" : "classic",
+          });
+          const signer = new SecureApiSigner(worker, init, computedHash);
+          signer.#trackBlobUrl(blobUrl);
+          return signer;
+        } catch {
+          // Best-effort revoke if blobUrl was created prior to failure
+          try {
+            if (blobUrl) URL.revokeObjectURL(blobUrl);
+          } catch (error) {
+            // Log at debug level in development only; continue with secure failure.
+            try {
+              secureDevelopmentLog(
+                "debug",
+                "secure-api-signer",
+                "revokeObjectURL failed during CSP cleanup",
+                { error: String(error) },
+              );
+            } catch {
+              /* ignore secondary log failures */
+            }
+          }
+          // Fail closed for CSP violations regardless of environment to enforce
+          // strict policy and surface misconfiguration early (ASVS L3 posture).
+          throw new SecurityKitError(
+            "Blob worker creation blocked (likely by CSP).",
+            "E_CSP_BLOCKED",
+          );
+        }
+      }
+      // In production + 'require' + Blob allowed, if we do not have verified bytes
+      // available (e.g., cache disabled), do NOT fall back to URL worker — fail loud.
+      if (environment.isProduction && integrity === "require") {
+        throw new SecurityKitError(
+          "Verified worker bytes unavailable for Blob instantiation; enable worker byte cache or disable Blob workers.",
+          "E_CONFIG",
+        );
+      }
+    }
+
+    // Fallback to URL worker
     const worker = new Worker(String(url), {
       type: init.useModuleWorker ? "module" : "classic",
     });
@@ -841,7 +995,7 @@ export class SecureApiSigner {
     const bodyHash = hasBody
       ? await sha256Base64(SHARED_ENCODER.encode(bodyString))
       : "";
-    return [
+    const canonical = [
       timestamp,
       nonce,
       (context?.method ?? "").toUpperCase(),
@@ -850,6 +1004,16 @@ export class SecureApiSigner {
       payloadString,
       this.#kid ?? "",
     ].join(".");
+
+    // Enforce max canonical length to prevent DoS
+    if (canonical.length > DEFAULT_MAX_CANONICAL_LENGTH) {
+      throw new SecurityKitError(
+        `Canonical string exceeds max length ${DEFAULT_MAX_CANONICAL_LENGTH}`,
+        "E_PAYLOAD_SIZE",
+      );
+    }
+
+    return canonical;
   }
 
   /* ========================= Event handlers ========================= */

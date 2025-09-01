@@ -71,11 +71,13 @@ Preventing regressions:
     - [Sealing the Kit for Maximum Security](#sealing-the-kit-for-maximum-security)
     - [Bundler Configuration (Vite)](#bundler-configuration-vite)
     - [Optional Dependencies \& Bundle Size](#optional-dependencies--bundle-size)
+    - [Content Security Policy (CSP) and Blob Workers](#content-security-policy-csp-and-blob-workers)
     - [Production Error Reporting](#production-error-reporting)
     - [Sanitization \& DOM Utilities](#sanitization--dom-utilities)
   - [Testing](#testing)
   - [Contributing](#contributing)
   - [Author and License](#author-and-license)
+  - [Acknowledgments](#acknowledgments)
 
 ---
 
@@ -138,6 +140,11 @@ main();
   - `secureWipe`: Best-effort memory wiping for sensitive buffers.
   - Hardened environment detection (`isDevelopment`, `isProduction`).
   - Rate-limited production error reporter.
+- **Security-Hardened LRU Cache:**
+  - High-performance, memory-safe cache for sensitive byte arrays.
+  - Built-in protections against TOCTOU attacks, memory exhaustion, and data leakage.
+  - Automatic buffer zeroization and defensive copying.
+  - TTL-based expiration with monotonic clock support.
 - **URL & URI Hardening:**
   - Safely build and modify URLs without string interpolation vulnerabilities.
   - Robust validation and parsing of URL strings and their parameters.
@@ -243,6 +250,57 @@ const sensitiveData = {
 secureDevlog("info", "AuthComponent", "User logged in", sensitiveData);
 ```
 
+### Secure LRU Cache
+
+`SecureLRUCache` is a security-hardened, high-performance LRU cache designed for storing sensitive byte arrays. It includes built-in protections against memory exhaustion attacks, timing-based side channels, and data leakage.
+
+```typescript
+import { SecureLRUCache, VerifiedByteCache } from "@david-osipov/security-kit";
+
+// Option 1: Use the singleton for simple global caching
+const scriptBytes = new TextEncoder().encode('console.log("trusted script");');
+VerifiedByteCache.set('https://cdn.example.com/script.js', scriptBytes);
+
+// Later, retrieve for TOCTOU-safe execution
+const cachedBytes = VerifiedByteCache.get('https://cdn.example.com/script.js');
+if (cachedBytes) {
+  const blob = new Blob([cachedBytes], { type: 'application/javascript' });
+  const worker = new Worker(URL.createObjectURL(blob));
+}
+
+// Option 2: Create custom cache instances for advanced use cases
+const cache = new SecureLRUCache({
+  maxEntries: 100,
+  maxBytes: 5 * 1024 * 1024, // 5MB
+  defaultTtlMs: 300_000, // 5 minutes
+  copyOnGet: true, // Return defensive copies (default: true)
+  copyOnSet: true, // Store defensive copies (default: true)
+  rejectSharedBuffers: true, // Security: reject SharedArrayBuffer views
+  onEvict: (entry) => {
+    console.log(`Evicted ${entry.url} (${entry.bytesLength} bytes, reason: ${entry.reason})`);
+  },
+});
+
+// Store sensitive data with automatic expiration and memory management
+const tokenData = new TextEncoder().encode('eyJ0eXAiOiJKV1QiLCJhbGc...');
+cache.set('user:123:token', tokenData, { ttlMs: 600_000 }); // 10 minutes
+
+// Retrieve data (returns undefined if expired or not found)
+const retrievedToken = cache.get('user:123:token');
+
+// Monitor cache performance and health
+const stats = cache.getStats();
+console.log(`Cache: ${stats.size} entries, ${stats.totalBytes} bytes, ${stats.hits}/${stats.hits + stats.misses} hit rate`);
+```
+
+**Security Features:**
+- **TOCTOU Protection:** Ensures cached bytes are identical to originally validated content
+- **Memory Safety:** Automatic zeroization of evicted byte arrays to minimize data lifetime
+- **DoS Prevention:** Strict capacity limits prevent memory exhaustion attacks
+- **Side-Channel Resistance:** Rejects SharedArrayBuffer views by default
+- **Defensive Copying:** Prevents mutation of cached data through shared references
+- **Input Validation:** Type-safe APIs with comprehensive parameter validation
+
 ## The Constitutions & Methodology
 
 This library is more than just code; it's an architecture.
@@ -304,6 +362,24 @@ Implementation note: the library build excludes these optional packages from the
 
 If you want a single-file bundle that includes fallbacks, install the optional deps in your project or contact the maintainers about publishing a "full" build variant.
 
+
+### Content Security Policy (CSP) and Blob Workers
+
+Blob-based Web Workers (created via URL.createObjectURL(new Blob(...))) can be a useful mitigation to avoid TOCTOU when loading remote worker scripts, because you can create the worker from bytes you verified locally. However, strict Content Security Policy (CSP) headers can prevent Blob creation or worker loading. To use Blob workers reliably, ensure your application's CSP allows blob: for worker-src (and optionally for script-src when module workers are used).
+
+Minimum recommended directives:
+- worker-src 'self' blob:;
+- script-src 'self' 'wasm-unsafe-eval' blob:; # if loading module workers from Blobs in some browsers
+
+If your application uses a very restrictive CSP (e.g., only 'self' with no blob:), Blob workers will fail with a CSP error when calling URL.createObjectURL or when the browser refuses to instantiate the worker. In that case, the library will fall back to normal URL-based workers when allowed by policy, but you should prefer providing a build-time hashed `expectedWorkerScriptHash` and using integrity: 'require' to eliminate TOCTOU without relying on Blobs.
+
+See docs/User docs.md for more details and examples on runtime policy and CSP guidance.
+
+### Integrity Modes Matrix (summary)
+
+- require + Blob usable: executes from verified bytes (no TOCTOU). In production, HTTPS is enforced for workerUrl.
+- require + Blob not usable: library verifies script bytes but instantiates by URL; a TOCTOU window remains. Recommended: enable Blob workers via CSP (`worker-src blob:`) and runtime policy, or precompute hashes and serve immutable worker assets.
+- compute: dev-only by default; in production requires BOTH a global override (runtime policy) AND a per-call override. If Blob is allowed, the Worker is created from the verified bytes to eliminate TOCTOU.
 
 ### Production Error Reporting
 
@@ -370,3 +446,9 @@ Contributions are welcome! Please read the **[Security Constitution](./Security%
 - **ORCID:** [0009-0005-2713-9242](https://orcid.org/0009-0005-2713-9242)
 - **Contact:** <personal@david-osipov.vision>
 - **License:** MIT License (SPDX-License-Identifier: MIT)
+
+## Acknowledgments
+
+This security-kit stands on the shoulders of giants. We extend our gratitude to the developers of the open-source software that inspired and enabled this project.
+
+- The `SecureLRUCache` implementation is a hardened and security-focused version of the excellent [lru-cache](https://github.com/isaacs/node-lru-cache) library by Isaac Z. Schlueter and its contributors.

@@ -69,3 +69,15 @@ export { reportProdError } from "./reporting";
 
 // Canonicalization utilities for secure API signing (shared client/server)
 export { safeStableStringify, toCanonicalValue } from "./canonical";
+
+// Secure LRU Cache - Standalone security-hardened cache utility
+export {
+  SecureLRUCache,
+  VerifiedByteCache,
+  type CacheOptions,
+  type SetOptions,
+  type CacheStats,
+  type EvictionReason,
+  type EvictedEntry,
+  type Logger,
+} from "./secure-lru-cache";

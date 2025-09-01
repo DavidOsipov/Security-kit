@@ -164,7 +164,7 @@ function fnv1a32(input: string): number {
     // FNV-1a: xor the octet then multiply by FNV prime (0x01000193)
     const xored = (accumulator ^ ch.charCodeAt(0)) >>> 0;
     // Use Math.imul for 32-bit integer multiplication and ensure unsigned result
-    return (Math.imul(xored, 0x01000193) >>> 0) as number;
+    return Math.imul(xored, 0x01000193) >>> 0;
   }, initial);
   return hash >>> 0;
 }
@@ -186,3 +186,34 @@ export function getStackFingerprint(
     return undefined;
   }
 }
+
+/**
+ * Unified error class for security-kit with typed error codes.
+ * Provides consistent error handling across client, worker, and server components.
+ */
+export class SecurityKitError extends Error {
+  constructor(
+    message: string,
+    public readonly code:
+      | "E_INTEGRITY_REQUIRED"
+      | "E_BLOB_FORBIDDEN"
+      | "E_CSP_BLOCKED"
+      | "E_RATE_LIMIT"
+      | "E_WORKER_INIT"
+      | "E_HANDSHAKE"
+      | "E_TIMEOUT"
+      | "E_PAYLOAD_SIZE"
+      | "E_CONFIG"
+      | "E_SIGNATURE_MISMATCH" = "E_CONFIG",
+  ) {
+    super(`[security-kit] ${message}`);
+    this.name = "SecurityKitError";
+  }
+}
+
+/**
+ * Branded types for type-safe string encodings.
+ * These prevent accidental misuse of different base64 variants.
+ */
+export type Base64String = string & { readonly __brand: "base64" };
+export type Base64UrlString = string & { readonly __brand: "base64url" };
