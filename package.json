@@ -127,7 +127,7 @@
     "isomorphic-dompurify": "^2.26.0",
     "jsdom": "^26.1.0",
     "knip": "^5.63.0",
-    "lint-staged": "^16.1.5",
+    "lint-staged": "^16.1.6",
     "prettier": "^3.6.2",
     "snyk": "^1.1298.3",
     "ts-node": "^10.9.2",
