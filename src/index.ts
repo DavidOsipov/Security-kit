@@ -20,6 +20,10 @@ export {
   setAppEnvironment,
   setProductionErrorHandler,
   configureErrorReporter,
+  // Cache profile helpers
+  getSecureLRUProfiles,
+  setSecureLRUProfiles,
+  resolveSecureLRUOptions,
 } from "./config";
 
 // State (Test-only)
@@ -80,4 +84,4 @@ export {
   type EvictionReason,
   type EvictedEntry,
   type Logger,
-} from "./secure-lru-cache";
+} from "./secure-cache";

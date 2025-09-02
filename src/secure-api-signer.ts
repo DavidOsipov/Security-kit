@@ -43,7 +43,7 @@ import type {
   SignedResponse,
 } from "./protocol";
 import { getLoggingConfig, getRuntimePolicy } from "./config";
-import { VerifiedByteCache } from "./secure-lru-cache";
+import { VerifiedByteCache } from "./secure-cache";
 import { secureCompare, secureDevelopmentLog } from "./utils";
 
 /*

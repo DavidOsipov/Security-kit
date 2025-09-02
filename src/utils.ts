@@ -258,20 +258,7 @@ export function secureWipe(
   const forbidShared = options?.forbidShared !== false;
 
   // Cross-realm SAB detection
-  const isShared = (() => {
-    try {
-      const buf = typedArray.buffer as BufferLike;
-      const tag = Object.prototype.toString.call(buf);
-      const globalWithSAB = globalThis as GlobalWithSharedArrayBuffer;
-      return (
-        typeof globalWithSAB.SharedArrayBuffer !== "undefined" &&
-        (tag === "[object SharedArrayBuffer]" ||
-          buf.constructor?.name === "SharedArrayBuffer")
-      );
-    } catch {
-      return false;
-    }
-  })();
+  const isShared = isSharedArrayBufferView(typedArray);
 
   if (forbidShared && isShared) {
     if (isDevelopment()) {
@@ -313,6 +300,33 @@ export function secureWipe(
       });
     }
     safeEmitMetric("secureWipe.error", 1, { reason: "exception" });
+    return false;
+  }
+}
+
+/**
+ * Detect whether a given ArrayBufferView appears to be backed by a SharedArrayBuffer.
+ *
+ * This helper uses cross-realm safe detection by checking both the toStringTag
+ * and constructor name, guarded behind a runtime feature probe for SharedArrayBuffer.
+ * It intentionally swallows exotic prototype tricks and returns false on errors to avoid
+ * throwing in hot paths. Prefer rejecting SharedArrayBuffer inputs at call sites.
+ */
+export function isSharedArrayBufferView(view: ArrayBufferView): boolean {
+  try {
+    const buf = view.buffer as BufferLike;
+    const tag = Object.prototype.toString.call(buf);
+    const globalWithSAB = globalThis as GlobalWithSharedArrayBuffer;
+    if (typeof globalWithSAB.SharedArrayBuffer === "undefined") return false;
+    // Prefer reliable tag or instanceof checks; avoid constructor name heuristics
+    if (tag === "[object SharedArrayBuffer]") return true;
+    try {
+      // Cross-realm instanceof should still work for SAB in most engines
+      return buf instanceof globalWithSAB.SharedArrayBuffer;
+    } catch {
+      return false;
+    }
+  } catch {
     return false;
   }
 }

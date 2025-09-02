@@ -19,3 +19,6 @@ coverage_*.*
 *.swo
 *.class
 .vitest-*.*
+benchmarks/results-*.*
+benchmarks/summary-*.*
+benchmarks/sweep-*.*

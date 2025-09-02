@@ -297,6 +297,286 @@ export function configureErrorReporter(config: {
   configureProductionErrorReporter(config);
 }
 
+// ====================== SecureLRU Cache Profiles =======================
+// We avoid importing the cache types here to prevent cycles. Options are structural.
+export type SecureLRUCacheProfile = {
+  readonly name: string;
+  readonly description: string;
+  readonly options: {
+    readonly maxEntries?: number;
+    readonly maxBytes?: number;
+    readonly defaultTtlMs?: number;
+    readonly enableByteCache?: boolean;
+    readonly copyOnSet?: boolean;
+    readonly copyOnGet?: boolean;
+    readonly rejectSharedBuffers?: boolean;
+    readonly maxEntryBytes?: number;
+    readonly maxUrlLength?: number;
+    readonly highWatermarkBytes?: number;
+    readonly freezeReturns?: boolean;
+    readonly includeUrlsInStats?: boolean;
+    readonly maxSyncEvictions?: number;
+    readonly ttlAutopurge?: boolean;
+    readonly ttlResolutionMs?: number;
+    readonly wipeStrategy?: "defer" | "sync";
+    readonly maxDeferredWipesPerFlush?: number;
+    readonly deferredWipeScheduler?: "microtask" | "timeout" | "auto";
+    readonly deferredWipeTimeoutMs?: number;
+    readonly deferredWipeAutoThreshold?: number;
+    readonly deferredWipeAutoBytesThreshold?: number;
+    readonly promoteOnGet?: "always" | "sampled";
+    readonly promoteOnGetSampleRate?: number;
+    readonly recencyMode?: "lru" | "segmented" | "second-chance" | "sieve";
+    readonly segmentedEvictScan?: number;
+    readonly segmentRotateEveryOps?: number;
+    // Optional tuning knob for second-chance mode: cap rotations per eviction.
+    readonly secondChanceMaxRotationsPerEvict?: number;
+  };
+};
+
+export type SecureLRUProfileConfig = {
+  readonly defaultProfile: string;
+  readonly profiles: readonly SecureLRUCacheProfile[];
+};
+
+/* eslint-disable functional/no-let */
+let _secureLruProfiles: SecureLRUProfileConfig = {
+  // Choose default profile based on environment; callers can still override at runtime
+  defaultProfile: environment.isProduction
+    ? "low-latency-lru"
+    : "read-heavy-lru-coarse",
+  profiles: [
+    {
+      name: "low-latency",
+      description:
+        "Low-jitter preset: enforce microtask wipe scheduling and higher auto thresholds to avoid timeout-driven drain under load.",
+      options: {
+        defaultTtlMs: 120_000,
+        copyOnSet: true,
+        copyOnGet: true,
+        rejectSharedBuffers: true,
+        maxSyncEvictions: 8,
+        ttlAutopurge: true,
+        ttlResolutionMs: 500,
+        maxDeferredWipesPerFlush: 256,
+        deferredWipeScheduler: "microtask",
+        deferredWipeTimeoutMs: 0,
+        deferredWipeAutoThreshold: 512,
+        deferredWipeAutoBytesThreshold: 1_048_576 * 2,
+        promoteOnGet: "sampled",
+        promoteOnGetSampleRate: 4,
+        recencyMode: "sieve",
+        segmentedEvictScan: 8,
+        segmentRotateEveryOps: 10_000,
+      },
+    },
+    {
+      name: "balanced",
+      description:
+        "Balanced LRU for sensitive bytes. TTL autopurge on, coarse tick, sampled GET promotion.",
+      options: {
+        defaultTtlMs: 120_000,
+        copyOnSet: true,
+        copyOnGet: true,
+        rejectSharedBuffers: true,
+        maxSyncEvictions: 8,
+        ttlAutopurge: true,
+        ttlResolutionMs: 500,
+        maxDeferredWipesPerFlush: 256,
+        deferredWipeScheduler: "auto",
+        deferredWipeTimeoutMs: 1,
+        deferredWipeAutoThreshold: 256,
+        deferredWipeAutoBytesThreshold: 1_048_576,
+        promoteOnGet: "sampled",
+        promoteOnGetSampleRate: 4,
+        recencyMode: "lru",
+      },
+    },
+    {
+      name: "low-latency-lru",
+      description:
+        "Strict LRU with low TTL jitter and no segmentation; good for DELETE-heavy or tight latency SLAs.",
+      options: {
+        defaultTtlMs: 120_000,
+        copyOnSet: true,
+        copyOnGet: true,
+        rejectSharedBuffers: true,
+        maxSyncEvictions: 8,
+        ttlAutopurge: true,
+        ttlResolutionMs: 200, // finer clock for lower jitter
+        maxDeferredWipesPerFlush: 256,
+        deferredWipeScheduler: "auto",
+        deferredWipeTimeoutMs: 0,
+        deferredWipeAutoThreshold: 128,
+        deferredWipeAutoBytesThreshold: 262_144,
+        promoteOnGet: "always",
+        recencyMode: "lru",
+      },
+    },
+    {
+      name: "throughput-segmented",
+      description:
+        "Approximate recency with segmented mode for higher GET/SET throughput. Best for read-heavy steady-state caches.",
+      options: {
+        defaultTtlMs: 120_000,
+        copyOnSet: true,
+        copyOnGet: true,
+        rejectSharedBuffers: true,
+        maxSyncEvictions: 8,
+        ttlAutopurge: true,
+        ttlResolutionMs: 500,
+        maxDeferredWipesPerFlush: 256,
+        deferredWipeScheduler: "auto",
+        deferredWipeTimeoutMs: 1,
+        deferredWipeAutoThreshold: 256,
+        deferredWipeAutoBytesThreshold: 1_048_576,
+        promoteOnGet: "sampled",
+        promoteOnGetSampleRate: 4,
+        recencyMode: "segmented",
+        segmentedEvictScan: 8,
+        segmentRotateEveryOps: 10_000,
+      },
+    },
+    {
+      name: "throughput-segmented-aggressive",
+      description:
+        "Aggressive segmented recency tuned from sweep: faster SET/UPDATE with lower TTL jitter (200ms tick) and higher promotion frequency.",
+      options: {
+        defaultTtlMs: 120_000,
+        copyOnSet: true,
+        copyOnGet: true,
+        rejectSharedBuffers: true,
+        maxSyncEvictions: 8,
+        ttlAutopurge: true,
+        ttlResolutionMs: 200, // from sweep best for SET/UPDATE
+        maxDeferredWipesPerFlush: 256,
+        deferredWipeScheduler: "auto",
+        deferredWipeTimeoutMs: 1,
+        deferredWipeAutoThreshold: 256,
+        deferredWipeAutoBytesThreshold: 1_048_576,
+        promoteOnGet: "sampled",
+        promoteOnGetSampleRate: 2, // promote ~50% of hits
+        recencyMode: "segmented",
+        segmentedEvictScan: 8,
+        segmentRotateEveryOps: 10_000,
+      },
+    },
+    {
+      name: "read-heavy-lru-coarse",
+      description:
+        "Strict LRU tuned for read-heavy steady-state: coarse TTL tick (1000ms) and sparse GET promotion (1/8). From sweep best for GET/DELETE.",
+      options: {
+        defaultTtlMs: 120_000,
+        copyOnSet: true,
+        copyOnGet: true,
+        rejectSharedBuffers: true,
+        maxSyncEvictions: 8,
+        ttlAutopurge: true,
+        ttlResolutionMs: 1000, // from sweep best for GET/DELETE
+        maxDeferredWipesPerFlush: 256,
+        deferredWipeScheduler: "auto",
+        deferredWipeTimeoutMs: 1,
+        deferredWipeAutoThreshold: 256,
+        deferredWipeAutoBytesThreshold: 1_048_576,
+        promoteOnGet: "sampled",
+        promoteOnGetSampleRate: 8,
+        recencyMode: "lru",
+      },
+    },
+    {
+      name: "experimental-sieve",
+      description:
+        "Canonical SIEVE policy: persistent hand, flip reference bits, no pointer rotations; bounded scan window.",
+      options: {
+        defaultTtlMs: 120_000,
+        copyOnSet: true,
+        copyOnGet: true,
+        rejectSharedBuffers: true,
+        maxSyncEvictions: 8,
+        ttlAutopurge: true,
+        ttlResolutionMs: 500,
+        maxDeferredWipesPerFlush: 256,
+        deferredWipeScheduler: "auto",
+        deferredWipeTimeoutMs: 1,
+        deferredWipeAutoThreshold: 256,
+        deferredWipeAutoBytesThreshold: 1_048_576,
+        promoteOnGet: "sampled",
+        promoteOnGetSampleRate: 4,
+        recencyMode: "sieve",
+        segmentedEvictScan: 8,
+        segmentRotateEveryOps: 10_000,
+      },
+    },
+    {
+      name: "second-chance",
+      description:
+        "Classic second-chance with bounded rotations per eviction; approximate LRU with reduced pointer churn.",
+      options: {
+        defaultTtlMs: 120_000,
+        copyOnSet: true,
+        copyOnGet: true,
+        rejectSharedBuffers: true,
+        maxSyncEvictions: 8,
+        ttlAutopurge: true,
+        ttlResolutionMs: 500,
+        maxDeferredWipesPerFlush: 256,
+        deferredWipeScheduler: "auto",
+        deferredWipeTimeoutMs: 1,
+        deferredWipeAutoThreshold: 256,
+        deferredWipeAutoBytesThreshold: 1_048_576,
+        promoteOnGet: "sampled",
+        promoteOnGetSampleRate: 4,
+        recencyMode: "second-chance",
+        segmentedEvictScan: 8,
+        segmentRotateEveryOps: 10_000,
+        secondChanceMaxRotationsPerEvict: 8,
+      },
+    },
+  ],
+};
+/* eslint-enable functional/no-let */
+
+export function getSecureLRUProfiles(): SecureLRUProfileConfig {
+  return {
+    defaultProfile: _secureLruProfiles.defaultProfile,
+    profiles: _secureLruProfiles.profiles.slice(),
+  };
+}
+
+export function setSecureLRUProfiles(
+  cfg: Partial<SecureLRUProfileConfig>,
+): void {
+  if (getCryptoState() === CryptoState.Sealed) {
+    throw new InvalidConfigurationError(
+      "Configuration is sealed and cannot be changed.",
+    );
+  }
+  const next: SecureLRUProfileConfig = {
+    defaultProfile: cfg.defaultProfile ?? _secureLruProfiles.defaultProfile,
+    profiles: cfg.profiles ?? _secureLruProfiles.profiles,
+  } as SecureLRUProfileConfig;
+
+  // Validate names
+  const names = new Set(next.profiles.map((p) => p.name));
+  if (!names.has(next.defaultProfile)) {
+    throw new InvalidParameterError(
+      `Unknown default cache profile: ${next.defaultProfile}`,
+    );
+  }
+  _secureLruProfiles = next;
+}
+
+export function resolveSecureLRUOptions(
+  profileName?: string,
+): Record<string, unknown> {
+  const cfg = _secureLruProfiles;
+  const name = profileName ?? cfg.defaultProfile;
+  const prof = cfg.profiles.find((p) => p.name === name);
+  if (!prof) throw new InvalidParameterError(`Unknown cache profile: ${name}`);
+  // Return a shallow clone to avoid accidental mutation
+  return { ...prof.options } as Record<string, unknown>;
+}
+
 // --- Handshake / Nonce configuration ---
 export type HandshakeConfig = {
   readonly handshakeMaxNonceLength: number;
@@ -424,7 +704,7 @@ export function setRuntimePolicy(cfg: Partial<RuntimePolicyConfig>): void {
   }
 
   const filtered = Object.fromEntries(
-    knownEntries.map(([key, value]) => [key, value as boolean]),
+    knownEntries.map(([key, value]) => [key, value]),
   ) as Partial<RuntimePolicyConfig>;
 
   // Production constraints: allow explicit opt-in but log warnings for security-critical settings
