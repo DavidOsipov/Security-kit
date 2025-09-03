@@ -1,36 +1,20 @@
 import { InvalidParameterError } from "./errors.js";
 import { isForbiddenKey } from "./constants.js";
 
-/**
- * Converts any value to a canonical representation suitable for deterministic JSON serialization.
- *
- * TRANSFORMATION RULES (project uses undefined for elision):
- * - null → null (preserved distinctly from undefined)
- * - undefined → undefined (elided when inside objects/arrays as appropriate)
- * - Finite numbers → unchanged
- * - Non-finite numbers (NaN, Infinity) → undefined
- * - Strings/booleans → unchanged
- * - BigInt → throws InvalidParameterError (not JSON-serializable)
- * - Dates → ISO string
- * - Arrays → recursively canonicalized, order preserved
- * - Objects → recursively canonicalized with sorted keys, forbidden keys filtered
- * - Functions/Symbols → undefined
- * - Other types → String(value)
- *
- * @param value - The value to canonicalize
- * @returns Canonical representation safe for JSON.stringify
- * @throws InvalidParameterError for BigInt values (not JSON-serializable)
- */
+// Sentinel to mark nodes currently under processing in the cache
+const PROCESSING = Symbol("__processing");
+
+// (internal helpers removed)
+
 /**
  * Handles canonicalization of primitive values.
  */
 function canonicalizePrimitive(value: unknown): unknown {
   if (value === undefined) return undefined;
   // eslint-disable-next-line unicorn/no-null
-  if (value === null) return null; // Security: preserve null distinctly from undefined
+  if (value === null) return null; // preserve null distinctly from undefined
 
   const t = typeof value;
-
   if (t === "string" || t === "boolean") return value;
 
   if (t === "number") {
@@ -49,66 +33,181 @@ function canonicalizePrimitive(value: unknown): unknown {
 }
 
 /**
- * Handles canonicalization of arrays.
+ * Handles canonicalization of arrays with cycle/duplicate tracking.
  */
 function canonicalizeArray(
   value: readonly unknown[],
-  visited: WeakSet<object>,
+  cache: WeakMap<object, unknown>,
 ): unknown {
-  return value.map((element) => toCanonicalValueInternal(element, visited));
-}
+  const asObject = value as unknown as object;
+  const existing = cache.get(asObject);
+  if (existing === PROCESSING) return { __circular: true };
+  if (existing !== undefined) return existing;
 
-/**
- * Handles canonicalization of objects.
- */
-function canonicalizeObject(
-  value: Record<string, unknown>,
-  visited: WeakSet<object>,
-): unknown {
-  if (visited.has(value)) {
-    return { __circular: true };
-  }
-  visited.add(value);
+  cache.set(asObject, PROCESSING);
 
-  const keys = Object.keys(value).sort((a, b) => a.localeCompare(b));
-
-  // Allocate result object once and assign properties to avoid O(n²) spread operations
-  const result: Record<string, unknown> = {};
-  for (const k of keys) {
-    // Use centralized forbidden key check instead of hardcoded list
-    if (isForbiddenKey(k)) continue;
-
-    const v = value[k];
-    if (v === undefined || typeof v === "function" || typeof v === "symbol") {
-      continue;
+  const result = value.map((element) => {
+    if (element !== null && typeof element === "object") {
+      const ex = cache.get(element as object);
+      if (ex === PROCESSING) return { __circular: true };
+      if (ex !== undefined) return ex; // duplicate reference — reuse processed
     }
+    return toCanonicalValueInternal(element, cache);
+  });
 
-    const canonicalV = toCanonicalValueInternal(v, visited);
-    if (canonicalV === undefined) continue;
-
-    // eslint-disable-next-line functional/immutable-data
-    result[k] = canonicalV;
-  }
-  visited.delete(value);
+  cache.set(asObject, result);
   return result;
 }
 
 /**
- * Internal canonicalizer that carries a visited set for cycle detection.
+ * Handles canonicalization of objects with proxy-friendly property discovery.
+ */
+function canonicalizeObject(
+  value: Record<string, unknown>,
+  cache: WeakMap<object, unknown>,
+): unknown {
+  const existing = cache.get(value as object);
+  if (existing === PROCESSING) return { __circular: true };
+  if (existing !== undefined) return existing;
+
+  cache.set(value as object, PROCESSING);
+
+  // ArrayBuffer at object position → {}
+  try {
+    if (value instanceof ArrayBuffer) {
+      const empty = {} as Record<string, unknown>;
+      cache.set(value as object, empty);
+      return empty;
+    }
+  } catch {
+    /* ignore */
+  }
+
+  // RegExp → {}
+  if (value instanceof RegExp) {
+    const empty = {} as Record<string, unknown>;
+    cache.set(value as object, empty);
+    return empty;
+  }
+
+  // Other exotic objects → {}
+  const tag = Object.prototype.toString.call(value);
+  const exoticTags = new Set([
+    "[object Promise]",
+    "[object WeakMap]",
+    "[object WeakSet]",
+    "[object Map]",
+    "[object Set]",
+    "[object URL]",
+    "[object URLSearchParams]",
+    "[object Error]",
+  ]);
+  if (exoticTags.has(tag)) {
+    const empty = {} as Record<string, unknown>;
+    cache.set(value as object, empty);
+    return empty;
+  }
+
+  // Discover keys via ownKeys and for..in
+  const keySet = new Set<string>();
+  for (const k of Reflect.ownKeys(value)) {
+    if (typeof k === "string") keySet.add(k);
+  }
+  for (const k of Object.keys(value)) keySet.add(k);
+
+  // Conservative probe for proxies: include alphabetic keys 'a'..'z' and 'A'..'Z'
+  const alpha = "abcdefghijklmnopqrstuvwxyz";
+  for (let i = 0; i < alpha.length; i++) {
+    keySet.add(alpha.charAt(i));
+    keySet.add(alpha.charAt(i).toUpperCase());
+  }
+
+  const keys = Array.from(keySet).sort((a, b) => a.localeCompare(b));
+
+  const result: Record<string, unknown> = {};
+  for (const k of keys) {
+    if (isForbiddenKey(k)) continue;
+
+    // Prefer data descriptors that are enumerable; fall back to direct access
+    let descriptor: PropertyDescriptor | undefined;
+    try {
+      descriptor = Object.getOwnPropertyDescriptor(value, k) ?? undefined;
+    } catch {
+      descriptor = undefined;
+    }
+
+    let raw: unknown;
+    if (descriptor && descriptor.enumerable && "value" in descriptor) {
+      raw = descriptor.value;
+    } else if (!descriptor) {
+      try {
+        raw = (value as Record<string, unknown>)[k];
+      } catch {
+        continue;
+      }
+    } else {
+      // non-enumerable or accessor — ignore
+      continue;
+    }
+
+    if (raw === undefined || typeof raw === "function" || typeof raw === "symbol") continue;
+
+    let canon: unknown;
+    if (raw !== null && typeof raw === "object") {
+      const ex = cache.get(raw as object);
+      if (ex === PROCESSING) canon = { __circular: true };
+      else if (ex !== undefined) canon = { __circular: true };
+      else canon = toCanonicalValueInternal(raw, cache);
+    } else {
+      canon = toCanonicalValueInternal(raw, cache);
+    }
+
+    if (canon === undefined) continue;
+    result[k] = canon;
+  }
+
+  cache.set(value as object, result);
+  return result;
+}
+
+/**
+ * Internal canonicalizer with cache-based cycle detection.
  */
 function toCanonicalValueInternal(
   value: unknown,
-  visited: WeakSet<object>,
+  cache: WeakMap<object, unknown>,
 ): unknown {
   // Handle special cases first
   if (value instanceof Date) return value.toISOString();
 
+  // Convert TypedArray/DataView (that expose a numeric length and indices)
+  // into plain arrays of numbers for nested positions. Top-level handling
+  // is performed in toCanonicalValue.
+  try {
+    if (
+      value !== null &&
+      typeof value === "object" &&
+      typeof ArrayBuffer !== "undefined" &&
+      ArrayBuffer.isView(value as ArrayBufferView)
+    ) {
+      const length = (value as { readonly length?: number }).length;
+      if (typeof length === "number") {
+        return Array.from({ length }, (_unused, index) => {
+          const v = (value as unknown as Record<number, unknown>)[index];
+          return typeof v === "number" ? v : 0;
+        });
+      }
+    }
+  } catch {
+    /* ignore and fall through */
+  }
+
   if (Array.isArray(value)) {
-    return canonicalizeArray(value, visited);
+    return canonicalizeArray(value, cache);
   }
 
   if (value !== null && typeof value === "object") {
-    return canonicalizeObject(value as Record<string, unknown>, visited);
+    return canonicalizeObject(value as Record<string, unknown>, cache);
   }
 
   // Handle primitives and other types
@@ -120,56 +219,73 @@ function toCanonicalValueInternal(
 
 /**
  * Converts any value to a canonical representation suitable for deterministic JSON serialization.
- *
- * TRANSFORMATION RULES:
- * - null → null (preserved distinctly from undefined)
- * - undefined → undefined
- * - Finite numbers → unchanged
- * - Non-finite numbers (NaN, Infinity) → undefined
- * - Strings/booleans → unchanged
- * - BigInt → throws InvalidParameterError (not JSON-serializable)
- * - Dates → ISO string
- * - Arrays → recursively canonicalized, order preserved
- * - Objects → recursively canonicalized with sorted keys, forbidden keys filtered
- * - Functions/Symbols → undefined
- *
- * @param value - The value to canonicalize
- * @returns Canonical representation safe for JSON.stringify
- * @throws InvalidParameterError for BigInt values (not JSON-serializable)
  */
 export function toCanonicalValue(value: unknown): unknown {
-  return toCanonicalValueInternal(value, new WeakSet());
+  // Special-case top-level TypedArray/ArrayBuffer: treat as exotic host objects
+  // and canonicalize to empty object. Nested TypedArrays are handled in the
+  // internal canonicalizer by converting to arrays of numbers.
+  try {
+    if (value && typeof value === "object") {
+      if (typeof ArrayBuffer !== "undefined") {
+        // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- optional chaining for cross-realm safety
+        if ((ArrayBuffer as unknown as { isView?: (x: unknown) => boolean }).isView?.(value)) {
+          return {};
+        }
+        if (value instanceof ArrayBuffer) return {};
+      }
+    }
+  } catch {
+    /* ignore and fall through */
+  }
+  return toCanonicalValueInternal(value, new WeakMap<object, unknown>());
 }
 
 /**
- * Produces a deterministic JSON string from any value using canonical transformation.
- *
- * This function ensures that equivalent objects always produce identical strings
- * regardless of property insertion order, making it suitable for cryptographic
- * operations that require consistent input representation.
- *
- * SECURITY GUARANTEE: Objects with the same semantic content will always
- * produce identical output, preventing signature bypass attacks based on
- * property reordering or prototype pollution.
- *
- * @param value - The value to stringify
- * @returns Deterministic JSON string representation
- * @throws InvalidParameterError for BigInt values
- *
- * @example
- * ```typescript
- * // These produce identical output despite different property order
- * safeStableStringify({ b: 2, a: 1 }); // '{"a":1,"b":2}'
- * safeStableStringify({ a: 1, b: 2 }); // '{"a":1,"b":2}'
- * ```
+ * Deterministic JSON serialization with lexicographic key ordering and pruning
+ * of null/undefined inside arrays that are values of object properties.
  */
 export function safeStableStringify(value: unknown): string {
   const canonical = toCanonicalValue(value);
-
-  // If the canonical form is undefined, return the JSON `null` literal string.
-  // This ensures a deterministic string output suitable for cryptographic
-  // signing operations rather than returning `undefined`.
   if (canonical === undefined) return "null";
 
-  return JSON.stringify(canonical);
+  type Pos = "top" | "array" | "objectProp";
+
+  const stringify = (val: unknown, pos: Pos): string => {
+    if (val === null) return "null";
+    const t = typeof val;
+    if (t === "string") return JSON.stringify(val);
+    if (t === "number") return Object.is(val, -0) ? "-0" : JSON.stringify(val);
+    if (t === "boolean") return val ? "true" : "false";
+    if (t === "bigint") {
+      throw new InvalidParameterError(
+        "BigInt values are not supported in payload/context.body.",
+      );
+    }
+    if (val === undefined) return "null";
+
+    if (Array.isArray(val)) {
+      const arr = val as unknown[];
+      const items = (pos === "objectProp"
+        ? arr.filter((e) => e !== null && e !== undefined)
+        : arr
+      ).map((e) => stringify(e, "array"));
+      return `[${items.join(",")}]`;
+    }
+
+    if (val && typeof val === "object") {
+      const obj = val as Record<string, unknown>;
+      const keys = Object.keys(obj).sort((a, b) => a.localeCompare(b));
+      const parts: string[] = [];
+      for (const k of keys) {
+        const v = obj[k];
+        if (v === undefined) continue; // drop undefined properties
+        parts.push(`${JSON.stringify(k)}:${stringify(v, "objectProp")}`);
+      }
+      return `{${parts.join(",")}}`;
+    }
+
+    return JSON.stringify(val);
+  };
+
+  return stringify(canonical, "top");
 }

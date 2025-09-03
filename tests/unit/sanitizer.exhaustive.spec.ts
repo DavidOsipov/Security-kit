@@ -55,6 +55,10 @@ describe("Sanitizer exhaustive tests", () => {
     (global as any).window = {
       trustedTypes: {
         createPolicy(name: string, rules: any) {
+          // Call createScript to cover it
+          expect(() => rules.createScript()).toThrow("Dynamic scripts are not allowed");
+          // Call createScriptURL to cover it
+          expect(() => rules.createScriptURL()).toThrow("Dynamic script URLs are not allowed");
           // call createHTML to ensure sanitize path is exercised
           const res = rules.createHTML("<ok>");
           created[name] = res;
@@ -100,12 +104,10 @@ describe("Sanitizer exhaustive tests", () => {
     expect(p).toBeUndefined();
   });
 
-  it("getSanitizedString delegates to sanitizeForNonTTBrowsers and handles different policies", () => {
-    const dp = makeDP(false);
-    const s = new Sanitizer(dp as any, { strict: STRICT_HTML_POLICY_CONFIG, svg: HARDENED_SVG_POLICY_CONFIG });
-    const out1 = s.getSanitizedString("<img onerror=1>", "svg");
-    expect(out1).toContain("&lt;img");
-    const out2 = s.getSanitizedString("<b>ok</b>", "strict");
-    expect(out2).toContain("&lt;b&gt;ok&lt;/b&gt;");
+  it("createPolicyIfAvailable throws when policy not defined", () => {
+    const dp = makeDP(true);
+    const s = new Sanitizer(dp as any, { strict: STRICT_HTML_POLICY_CONFIG });
+    (global as any).window = { trustedTypes: { createPolicy: () => ({}) } };
+    expect(() => s.createPolicyIfAvailable("missing")).toThrow(InvalidConfigurationError);
   });
 });

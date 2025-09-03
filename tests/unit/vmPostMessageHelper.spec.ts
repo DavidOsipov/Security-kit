@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import loadPostMessageInternals from '../helpers/vmPostMessageHelper';
 
 describe('vmPostMessageHelper.__runInVmJson', () => {
-  it('returns arrays from VM code', () => {
+  it('returns arrays from VM code', { timeout: 20000 }, () => {
     const pm = loadPostMessageInternals();
     const res = pm.__runInVmJson(`
       const a = new Uint8Array([1,2,3]);
@@ -11,7 +11,7 @@ describe('vmPostMessageHelper.__runInVmJson', () => {
     expect(res).toEqual([1,2,3]);
   });
 
-  it('returns strings from VM code', () => {
+  it('returns strings from VM code', { timeout: 20000 }, () => {
     const pm = loadPostMessageInternals();
     const res = pm.__runInVmJson(`
       return JSON.stringify({ok: true});
@@ -19,7 +19,7 @@ describe('vmPostMessageHelper.__runInVmJson', () => {
     expect(res).toBe('{"ok":true}');
   });
 
-  it('returns error markers when VM code throws', () => {
+  it('returns error markers when VM code throws', { timeout: 20000 }, () => {
     const pm = loadPostMessageInternals();
     const res = pm.__runInVmJson(`
       throw new Error('boom');

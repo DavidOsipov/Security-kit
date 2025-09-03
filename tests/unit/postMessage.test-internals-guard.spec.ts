@@ -6,6 +6,9 @@ test('__test accessors throw when test APIs not allowed and env not set', async 
   try {
     delete (globalThis as any).__SECURITY_KIT_ALLOW_TEST_APIS;
   } catch {}
+  const prevEnv = process.env.SECURITY_KIT_ALLOW_TEST_APIS;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (process.env as any).SECURITY_KIT_ALLOW_TEST_APIS = undefined;
 
   // Temporarily set explicit environment to production to force guard
   const env = await import('../../src/environment');
@@ -24,6 +27,8 @@ test('__test accessors throw when test APIs not allowed and env not set', async 
 
   // restore environment for tests
   env.environment.setExplicitEnv('development');
+  if (typeof prevEnv === 'undefined') delete process.env.SECURITY_KIT_ALLOW_TEST_APIS;
+  else process.env.SECURITY_KIT_ALLOW_TEST_APIS = prevEnv;
 });
 
 test('__test accessors succeed when global allow flag is set', async () => {

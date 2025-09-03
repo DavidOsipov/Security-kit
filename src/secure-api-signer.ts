@@ -160,6 +160,61 @@ function generateRequestId(): number {
 
 // Use shared encoding-utils for base64/hash/wipe helpers
 
+// Small, conservative cross-call cache for canonical JSON strings.
+// WeakMap ensures GC-bound entries; we only cache deeply frozen roots (shallow audit)
+// with primitive or frozen nested values to avoid stale reads after mutation.
+const STRINGIFY_CACHE: WeakMap<object, string> = new WeakMap();
+
+function canCacheRoot(root: unknown): boolean {
+  if (root === null || typeof root !== "object") return false;
+  if (!Object.isFrozen(root)) return false;
+  if (Array.isArray(root)) {
+    const arr = root as readonly unknown[];
+    for (const v of arr) {
+      if (v === null) continue;
+      const t = typeof v;
+      if (t === "string" || t === "boolean") continue;
+      if (t === "number" && Number.isFinite(v as number)) continue;
+      if (t === "object") {
+        if (!Object.isFrozen(v as object)) return false;
+        continue;
+      }
+      return false; // functions/symbols/bigint/NaN/Infinity disqualify
+    }
+    return true;
+  }
+  const obj = root as Record<string, unknown>;
+  const keys = Object.keys(obj);
+  for (const k of keys) {
+    const d = Object.getOwnPropertyDescriptor(obj, k);
+    if (!d || !d.enumerable || !("value" in d)) return false;
+    const v = (d as PropertyDescriptor & { value: unknown }).value;
+    if (v === null) continue;
+    const t = typeof v;
+    if (t === "string" || t === "boolean") continue;
+    if (t === "number" && Number.isFinite(v as number)) continue;
+    if (t === "object") {
+      if (!Object.isFrozen(v as object)) return false;
+      continue;
+    }
+    return false;
+  }
+  return true;
+}
+
+function stringifyWithCache(value: unknown): string {
+  if (value !== null && typeof value === "object") {
+    const cached = STRINGIFY_CACHE.get(value as object);
+    if (cached !== undefined) return cached;
+    if (canCacheRoot(value)) {
+      const s = safeStableStringify(value);
+      STRINGIFY_CACHE.set(value as object, s);
+      return s;
+    }
+  }
+  return safeStableStringify(value);
+}
+
 /* ========================= Runtime Guards for messages ========================= */
 
 function isSignedMessage(d: unknown): d is SignedResponse {
@@ -989,9 +1044,9 @@ export class SecureApiSigner {
     timestamp: number,
     nonce: string,
   ): Promise<string> {
-    const payloadString = safeStableStringify(payload);
+    const payloadString = stringifyWithCache(payload);
     const hasBody = context?.body !== undefined;
-    const bodyString = safeStableStringify(context?.body ?? undefined);
+    const bodyString = stringifyWithCache(context?.body ?? undefined);
     const bodyHash = hasBody
       ? await sha256Base64(SHARED_ENCODER.encode(bodyString))
       : "";

@@ -11,6 +11,11 @@ test('production guard blocks test-only APIs when not allowed', async () => {
   // Force production
   env.environment.setExplicitEnv("production");
 
+  // Ensure process env does not allow test APIs for this test
+  const prevEnv = process.env.SECURITY_KIT_ALLOW_TEST_APIS;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (process.env as any).SECURITY_KIT_ALLOW_TEST_APIS = undefined;
+
   // Ensure the global allow flag is not set
   // eslint-disable-next-line @typescript-eslint/ban-ts-comment
   // @ts-ignore
@@ -32,4 +37,6 @@ test('production guard blocks test-only APIs when not allowed', async () => {
 
   // Restore environment to development for other tests
   env.environment.setExplicitEnv("development");
+  if (typeof prevEnv === "undefined") delete process.env.SECURITY_KIT_ALLOW_TEST_APIS;
+  else process.env.SECURITY_KIT_ALLOW_TEST_APIS = prevEnv;
 });
