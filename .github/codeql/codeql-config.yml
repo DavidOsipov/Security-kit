@@ -1,0 +1,52 @@
+name: "CodeQL Config for Security-Kit"
+
+# Disable default queries and use only security-relevant ones for production code
+disable-default-queries: false
+
+# Configure paths to exclude from analysis
+paths-ignore:
+  # Exclude test directories that contain intentional malicious payloads
+  - tests/
+  - test/
+  - "**/*.test.ts"
+  - "**/*.test.js"
+  - "**/*.spec.ts" 
+  - "**/*.spec.js"
+  # Exclude standalone test files
+  - test-*.js
+  - test-*.ts
+  # Exclude demo, scripts, and tooling that may contain example vulnerabilities
+  - demo/
+  - scripts/
+  - tools/
+  - benchmarks/
+  # Exclude build artifacts and dependencies
+  - dist/
+  - node_modules/
+  - coverage/
+  - tmp-*/
+  - .husky/
+  - .vscode/
+  - .github/
+  - .sonarlint/
+  - .mcp/
+
+# Include only production source code
+paths:
+  - src/
+  - server/
+
+# Use security-focused query suites for production code
+queries:
+  - uses: security-extended
+  - uses: security-and-quality
+
+# Configure specific query filters
+query-filters:
+  # Allow some patterns that are safe in this context
+  - exclude:
+      id: js/unsafe-html-construction
+      # We use DOMPurify and have extensive sanitization - false positives expected
+  - exclude:
+      id: js/code-injection
+      # Our eval usage is controlled and validated

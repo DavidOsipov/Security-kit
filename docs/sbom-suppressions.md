@@ -2,6 +2,8 @@
 
 This document explains why certain static analyzer warnings (Sonar, CodeQL, ESLint security plugin) in `scripts/generate-sbom.ts` are safe to suppress.
 
+> **Note**: For CodeQL suppressions related to test files with intentional malicious payloads, see [`docs/codeql-suppressions.md`](./codeql-suppressions.md).
+
 ## Background
 The SBOM generator needs to operate on user-supplied paths (package path, output path) while remaining secure. To defend against path traversal and symlink attacks the script:
 
