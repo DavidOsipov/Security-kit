@@ -57,7 +57,7 @@ const signer = await SecureApiSigner.create({
   workerUrl: new URL("/assets/signing-worker.js", location.href),
   secret: secretArrayBuffer,
   integrity: "require",
-  expectedWorkerScriptHash: "<base64-sha256>"
+  expectedWorkerScriptHash: "<base64-sha256>",
 });
 ```
 
@@ -73,7 +73,7 @@ const signer = await SecureApiSigner.create({
   workerUrl: "/assets/signing-worker.js",
   secret: secretArrayBuffer,
   integrity: "compute",
-  allowComputeIntegrityInProduction: false // per-call guard
+  allowComputeIntegrityInProduction: false, // per-call guard
 });
 ```
 

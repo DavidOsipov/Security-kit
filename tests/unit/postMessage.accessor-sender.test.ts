@@ -18,11 +18,15 @@ describe("postMessage sender-side accessor tests", () => {
       },
     });
 
-  const postMessage = await import("../../src/postMessage");
+    const postMessage = await import("../../src/postMessage");
     // sendSecurePostMessage sanitizes payload and should NOT throw; it skips accessors
     const spy = vi.spyOn(console, "warn").mockImplementation(() => {});
     expect(() => {
-      postMessage.sendSecurePostMessage({ targetWindow: window, payload: o, targetOrigin: "http://localhost" } as any);
+      postMessage.sendSecurePostMessage({
+        targetWindow: window,
+        payload: o,
+        targetOrigin: "http://localhost",
+      } as any);
     }).not.toThrow();
     // Current implementation skips accessor properties silently; no dev warning expected.
     expect(spy).not.toHaveBeenCalled();
@@ -41,8 +45,14 @@ describe("postMessage sender-side accessor tests", () => {
     });
 
     // create a crafted JSON string that would represent an object with dangerous getters
-  const safeSerialized = JSON.stringify({ x: 1 });
-    window.dispatchEvent(new MessageEvent("message", { data: safeSerialized, origin: "http://localhost", source: window }));
+    const safeSerialized = JSON.stringify({ x: 1 });
+    window.dispatchEvent(
+      new MessageEvent("message", {
+        data: safeSerialized,
+        origin: "http://localhost",
+        source: window,
+      }),
+    );
 
     await vi.runAllTimersAsync();
     expect(onMessage).toHaveBeenCalled();

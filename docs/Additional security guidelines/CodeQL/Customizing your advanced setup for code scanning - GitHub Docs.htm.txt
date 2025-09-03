@@ -1,0 +1,2518 @@
+Skip to main content <#main-content>
+
+GitHub Docs <https://docs.github.com/en>
+Version: Free, Pro, & Team
+
+Search or ask Copilot
+Search or askCopilot
+
+Select language: current language is English
+Search or ask Copilot
+Search or askCopilot
+
+Open menu
+
+Open Sidebar
+
+  * Secure coding <https://docs.github.com/en/code-security>/
+  * Code scanning <https://docs.github.com/en/code-security/code-scanning>/
+  * Create advanced setup <https://docs.github.com/en/code-security/
+    code-scanning/creating-an-advanced-setup-for-code-scanning>/
+  * Customize advanced setup <https://docs.github.com/en/code-security/
+    code-scanning/creating-an-advanced-setup-for-code-scanning/
+    customizing-your-advanced-setup-for-code-scanning>
+
+Home <https://docs.github.com/en>
+
+
+    Secure coding <https://docs.github.com/en/code-security>
+
+  *
+    Getting started
+
+      o GitHub security features <https://docs.github.com/en/code-
+        security/getting-started/github-security-features>
+      o Dependabot quickstart <https://docs.github.com/en/code-security/
+        getting-started/dependabot-quickstart-guide>
+      o Secure repository quickstart <https://docs.github.com/en/code-
+        security/getting-started/quickstart-for-securing-your-repository>
+      o Add a security policy <https://docs.github.com/en/code-security/
+        getting-started/adding-a-security-policy-to-your-repository>
+      o Audit security alerts <https://docs.github.com/en/code-security/
+        getting-started/auditing-security-alerts>
+      o Prevent data leaks <https://docs.github.com/en/code-security/
+        getting-started/best-practices-for-preventing-data-leaks-in-
+        your-organization>
+      o GitHub secret types <https://docs.github.com/en/code-security/
+        getting-started/understanding-github-secret-types>
+  *
+    Trial GitHub Advanced Security
+
+      o Plan GHAS trial <https://docs.github.com/en/code-security/
+        trialing-github-advanced-security/planning-a-trial-of-ghas>
+      o Trial Advanced Security <https://docs.github.com/en/code-
+        security/trialing-github-advanced-security/trial-advanced-security>
+      o Enable security features in trial <https://docs.github.com/en/
+        code-security/trialing-github-advanced-security/enable-security-
+        features-trial>
+      o Trial Secret Protection <https://docs.github.com/en/code-
+        security/trialing-github-advanced-security/explore-trial-secret-
+        scanning>
+      o Trial Code Security <https://docs.github.com/en/code-security/
+        trialing-github-advanced-security/explore-trial-code-scanning>
+  *
+    Secure your organization
+
+      o
+        Introduction
+
+          + About organization security <https://docs.github.com/en/
+            code-security/securing-your-organization/introduction-to-
+            securing-your-organization-at-scale/about-enabling-security-
+            features-at-scale>
+          + Choose security configuration <https://docs.github.com/en/
+            code-security/securing-your-organization/introduction-to-
+            securing-your-organization-at-scale/choosing-a-security-
+            configuration-for-your-repositories>
+      o
+        Enable security features
+
+          + Apply recommended configuration <https://docs.github.com/en/
+            code-security/securing-your-organization/enabling-security-
+            features-in-your-organization/applying-the-github-
+            recommended-security-configuration-in-your-organization>
+          + Create custom configuration <https://docs.github.com/en/
+            code-security/securing-your-organization/enabling-security-
+            features-in-your-organization/creating-a-custom-security-
+            configuration>
+          + Apply custom configuration <https://docs.github.com/en/code-
+            security/securing-your-organization/enabling-security-
+            features-in-your-organization/applying-a-custom-security-
+            configuration>
+          + Configure global settings <https://docs.github.com/en/code-
+            security/securing-your-organization/enabling-security-
+            features-in-your-organization/configuring-global-security-
+            settings-for-your-organization>
+          + Give access to private registries <https://docs.github.com/
+            en/code-security/securing-your-organization/enabling-
+            security-features-in-your-organization/giving-org-access-
+            private-registries>
+      o
+        Manage organization security
+
+          + Interpret security data <https://docs.github.com/en/code-
+            security/securing-your-organization/managing-the-security-
+            of-your-organization/interpreting-security-findings>
+          + Filter repositories <https://docs.github.com/en/code-
+            security/securing-your-organization/managing-the-security-
+            of-your-organization/filtering-repositories-in-your-
+            organization-using-the-repository-table>
+          + Edit custom configuration <https://docs.github.com/en/code-
+            security/securing-your-organization/managing-the-security-
+            of-your-organization/editing-a-custom-security-configuration>
+          + Manage paid GHAS use <https://docs.github.com/en/code-
+            security/securing-your-organization/managing-the-security-
+            of-your-organization/managing-your-github-advanced-security-
+            license-usage>
+          + Detach security configuration <https://docs.github.com/en/
+            code-security/securing-your-organization/managing-the-
+            security-of-your-organization/detaching-repositories-from-
+            their-security-configurations>
+          + Find attachment failures <https://docs.github.com/en/code-
+            security/securing-your-organization/managing-the-security-
+            of-your-organization/finding-repositories-with-attachment-
+            failures>
+          + Delete custom configuration <https://docs.github.com/en/
+            code-security/securing-your-organization/managing-the-
+            security-of-your-organization/deleting-a-custom-security-
+            configuration>
+      o
+        Exposure to leaked secrets
+
+          + Secret risk assessment <https://docs.github.com/en/code-
+            security/securing-your-organization/understanding-your-
+            organizations-exposure-to-leaked-secrets/about-secret-risk-
+            assessment>
+          + View secret risk assessment <https://docs.github.com/en/
+            code-security/securing-your-organization/understanding-your-
+            organizations-exposure-to-leaked-secrets/viewing-the-secret-
+            risk-assessment-report-for-your-organization>
+          + Interpret results <https://docs.github.com/en/code-security/
+            securing-your-organization/understanding-your-organizations-
+            exposure-to-leaked-secrets/interpreting-secret-risk-
+            assessment-results>
+          + Secret protection <https://docs.github.com/en/code-security/
+            securing-your-organization/understanding-your-organizations-
+            exposure-to-leaked-secrets/choosing-github-secret-protection>
+          + Push protection cost savings <https://docs.github.com/en/
+            code-security/securing-your-organization/understanding-your-
+            organizations-exposure-to-leaked-secrets/calculating-the-
+            cost-savings-of-push-protection>
+          + Secret protection pricing <https://docs.github.com/en/code-
+            security/securing-your-organization/understanding-your-
+            organizations-exposure-to-leaked-secrets/estimating-the-
+            price-of-secret-protection>
+      o
+        Exposure to vulnerabilities
+
+          + Dependency vulnerability exposure <https://docs.github.com/
+            en/code-security/securing-your-organization/understanding-
+            your-organizations-exposure-to-vulnerabilities/about-your-
+            exposure-to-vulnerable-dependencies>
+          + Prioritize Dependabot alerts using metrics <https://
+            docs.github.com/en/code-security/securing-your-organization/
+            understanding-your-organizations-exposure-to-
+            vulnerabilities/prioritizing-dependabot-alerts-using-metrics>
+      o
+        Fix alerts at scale
+
+          + About security campaigns <https://docs.github.com/en/code-
+            security/securing-your-organization/fixing-security-alerts-
+            at-scale/about-security-campaigns>
+          + Best practices <https://docs.github.com/en/code-security/
+            securing-your-organization/fixing-security-alerts-at-scale/
+            best-practice-fix-alerts-at-scale>
+          + Create security campaigns <https://docs.github.com/en/code-
+            security/securing-your-organization/fixing-security-alerts-
+            at-scale/creating-managing-security-campaigns>
+          + Track security campaigns <https://docs.github.com/en/code-
+            security/securing-your-organization/fixing-security-alerts-
+            at-scale/tracking-security-campaigns>
+      o
+        Troubleshoot configurations
+
+          + Active advanced setup <https://docs.github.com/en/code-
+            security/securing-your-organization/troubleshooting-
+            security-configurations/a-repository-is-using-advanced-
+            setup-for-code-scanning>
+          + Unexpected default setup <https://docs.github.com/en/code-
+            security/securing-your-organization/troubleshooting-
+            security-configurations/unexpected-default-setup>
+          + Not enough GHAS licenses <https://docs.github.com/en/code-
+            security/securing-your-organization/troubleshooting-
+            security-configurations/not-enough-github-advanced-security-
+            licenses>
+  *
+    Secret scanning
+
+      o
+        Introduction
+
+          + Secret scanning <https://docs.github.com/en/code-security/
+            secret-scanning/introduction/about-secret-scanning>
+          + Push protection <https://docs.github.com/en/code-security/
+            secret-scanning/introduction/about-push-protection>
+          + Secret scanning for partners <https://docs.github.com/en/
+            code-security/secret-scanning/introduction/about-secret-
+            scanning-for-partners>
+          + Supported patterns <https://docs.github.com/en/code-
+            security/secret-scanning/introduction/supported-secret-
+            scanning-patterns>
+      o
+        Enable features
+
+          + Enable secret scanning <https://docs.github.com/en/code-
+            security/secret-scanning/enabling-secret-scanning-features/
+            enabling-secret-scanning-for-your-repository>
+          + Enable push protection <https://docs.github.com/en/code-
+            security/secret-scanning/enabling-secret-scanning-features/
+            enabling-push-protection-for-your-repository>
+          + Enable validity checks <https://docs.github.com/en/code-
+            security/secret-scanning/enabling-secret-scanning-features/
+            enabling-validity-checks-for-your-repository>
+      o
+        Manage alerts
+
+          + About alerts <https://docs.github.com/en/code-security/
+            secret-scanning/managing-alerts-from-secret-scanning/about-
+            alerts>
+          + View alerts <https://docs.github.com/en/code-security/
+            secret-scanning/managing-alerts-from-secret-scanning/
+            viewing-alerts>
+          + Evaluate alerts <https://docs.github.com/en/code-security/
+            secret-scanning/managing-alerts-from-secret-scanning/
+            evaluating-alerts>
+          + Resolve alerts <https://docs.github.com/en/code-security/
+            secret-scanning/managing-alerts-from-secret-scanning/
+            resolving-alerts>
+          + Monitor alerts <https://docs.github.com/en/code-security/
+            secret-scanning/managing-alerts-from-secret-scanning/
+            monitoring-alerts>
+      o
+        Work with secret scanning
+
+          + Remediate a leaked secret <https://docs.github.com/en/code-
+            security/secret-scanning/working-with-secret-scanning-and-
+            push-protection/remediating-a-leaked-secret>
+          + Push protection for users <https://docs.github.com/en/code-
+            security/secret-scanning/working-with-secret-scanning-and-
+            push-protection/push-protection-for-users>
+          + Push protection on the command line <https://
+            docs.github.com/en/code-security/secret-scanning/working-
+            with-secret-scanning-and-push-protection/working-with-push-
+            protection-from-the-command-line>
+          + Push protection from the REST API <https://docs.github.com/
+            en/code-security/secret-scanning/working-with-secret-
+            scanning-and-push-protection/working-with-push-protection-
+            from-the-rest-api>
+          + Push protection in the GitHub UI <https://docs.github.com/
+            en/code-security/secret-scanning/working-with-secret-
+            scanning-and-push-protection/working-with-push-protection-
+            in-the-github-ui>
+          + Push protection and the GitHub MCP server <https://
+            docs.github.com/en/code-security/secret-scanning/working-
+            with-secret-scanning-and-push-protection/working-with-push-
+            protection-and-the-github-mcp-server>
+      o
+        Advanced features
+
+          + Exclude folders and files <https://docs.github.com/en/code-
+            security/secret-scanning/using-advanced-secret-scanning-and-
+            push-protection-features/excluding-folders-and-files-from-
+            secret-scanning>
+          +
+            Non-provider patterns
+
+              # Enable for non-provider patterns <https://
+                docs.github.com/en/code-security/secret-scanning/using-
+                advanced-secret-scanning-and-push-protection-features/
+                non-provider-patterns/enabling-secret-scanning-for-non-
+                provider-patterns>
+          +
+            Custom patterns
+
+              # Define custom patterns <https://docs.github.com/en/code-
+                security/secret-scanning/using-advanced-secret-scanning-
+                and-push-protection-features/custom-patterns/defining-
+                custom-patterns-for-secret-scanning>
+              # Manage custom patterns <https://docs.github.com/en/code-
+                security/secret-scanning/using-advanced-secret-scanning-
+                and-push-protection-features/custom-patterns/managing-
+                custom-patterns>
+              # Custom pattern metrics <https://docs.github.com/en/code-
+                security/secret-scanning/using-advanced-secret-scanning-
+                and-push-protection-features/custom-patterns/metrics-
+                for-custom-patterns>
+          +
+            Delegated bypass
+
+              # About delegated bypass <https://docs.github.com/en/code-
+                security/secret-scanning/using-advanced-secret-scanning-
+                and-push-protection-features/delegated-bypass-for-push-
+                protection/about-delegated-bypass-for-push-protection>
+              # Enable delegated bypass <https://docs.github.com/en/
+                code-security/secret-scanning/using-advanced-secret-
+                scanning-and-push-protection-features/delegated-bypass-
+                for-push-protection/enabling-delegated-bypass-for-push-
+                protection>
+              # Manage bypass requests <https://docs.github.com/en/code-
+                security/secret-scanning/using-advanced-secret-scanning-
+                and-push-protection-features/delegated-bypass-for-push-
+                protection/managing-requests-to-bypass-push-protection>
+          + Delegated alert dismissal <https://docs.github.com/en/code-
+            security/secret-scanning/using-advanced-secret-scanning-and-
+            push-protection-features/enabling-delegated-alert-dismissal-
+            for-secret-scanning>
+      o
+        Copilot secret scanning
+
+          + Generic secret detection <https://docs.github.com/en/code-
+            security/secret-scanning/copilot-secret-scanning/
+            responsible-ai-generic-secrets>
+          + Enable generic secret detection <https://docs.github.com/en/
+            code-security/secret-scanning/copilot-secret-scanning/
+            enabling-ai-powered-generic-secret-detection>
+          + Generate regular expressions with AI <https://
+            docs.github.com/en/code-security/secret-scanning/copilot-
+            secret-scanning/responsible-ai-regex-generator>
+          + Regular expression generator <https://docs.github.com/en/
+            code-security/secret-scanning/copilot-secret-scanning/
+            generating-regular-expressions-for-custom-patterns-with-
+            copilot-secret-scanning>
+      o
+        Troubleshoot
+
+          + Troubleshoot secret scanning <https://docs.github.com/en/
+            code-security/secret-scanning/troubleshooting-secret-
+            scanning-and-push-protection/troubleshooting-secret-scanning>
+      o
+        Partner program
+
+          + Partner program <https://docs.github.com/en/code-security/
+            secret-scanning/secret-scanning-partnership-program/secret-
+            scanning-partner-program>
+  *
+    Code scanning
+
+      o
+        Introduction
+
+          + About code scanning <https://docs.github.com/en/code-
+            security/code-scanning/introduction-to-code-scanning/about-
+            code-scanning>
+          + About CodeQL code scanning <https://docs.github.com/en/code-
+            security/code-scanning/introduction-to-code-scanning/about-
+            code-scanning-with-codeql>
+      o
+        Enable code scanning
+
+          + Configure code scanning <https://docs.github.com/en/code-
+            security/code-scanning/enabling-code-scanning/configuring-
+            default-setup-for-code-scanning>
+          + Evaluate code scanning <https://docs.github.com/en/code-
+            security/code-scanning/enabling-code-scanning/evaluating-
+            default-setup-for-code-scanning>
+          + Code scanning at scale <https://docs.github.com/en/code-
+            security/code-scanning/enabling-code-scanning/configuring-
+            default-setup-for-code-scanning-at-scale>
+      o
+        Create advanced setup
+
+          + Configure advanced setup <https://docs.github.com/en/code-
+            security/code-scanning/creating-an-advanced-setup-for-code-
+            scanning/configuring-advanced-setup-for-code-scanning>
+          + Customize advanced setup <https://docs.github.com/en/code-
+            security/code-scanning/creating-an-advanced-setup-for-code-
+            scanning/customizing-your-advanced-setup-for-code-scanning>
+          + CodeQL for compiled languages <https://docs.github.com/en/
+            code-security/code-scanning/creating-an-advanced-setup-for-
+            code-scanning/codeql-code-scanning-for-compiled-languages>
+          + CodeQL advanced setup at scale <https://docs.github.com/en/
+            code-security/code-scanning/creating-an-advanced-setup-for-
+            code-scanning/configuring-advanced-setup-for-code-scanning-
+            with-codeql-at-scale>
+          + Hardware resources for CodeQL <https://docs.github.com/en/
+            code-security/code-scanning/creating-an-advanced-setup-for-
+            code-scanning/recommended-hardware-resources-for-running-codeql>
+          + Code scanning in a container <https://docs.github.com/en/
+            code-security/code-scanning/creating-an-advanced-setup-for-
+            code-scanning/running-codeql-code-scanning-in-a-container>
+      o
+        Manage alerts
+
+          + About code scanning alerts <https://docs.github.com/en/code-
+            security/code-scanning/managing-code-scanning-alerts/about-
+            code-scanning-alerts>
+          + Copilot Autofix for code scanning <https://docs.github.com/
+            en/code-security/code-scanning/managing-code-scanning-
+            alerts/responsible-use-autofix-code-scanning>
+          + Disable Copilot Autofix <https://docs.github.com/en/code-
+            security/code-scanning/managing-code-scanning-alerts/
+            disabling-autofix-for-code-scanning>
+          + Assess alerts <https://docs.github.com/en/code-security/
+            code-scanning/managing-code-scanning-alerts/assessing-code-
+            scanning-alerts-for-your-repository>
+          + Resolve alerts <https://docs.github.com/en/code-security/
+            code-scanning/managing-code-scanning-alerts/resolving-code-
+            scanning-alerts>
+          + Best practices for campaigns <https://docs.github.com/en/
+            code-security/code-scanning/managing-code-scanning-alerts/
+            best-practices-for-participating-in-a-security-campaign>
+          + Fix alerts in campaign <https://docs.github.com/en/code-
+            security/code-scanning/managing-code-scanning-alerts/fixing-
+            alerts-in-security-campaign>
+          + Triage alerts in pull requests <https://docs.github.com/en/
+            code-security/code-scanning/managing-code-scanning-alerts/
+            triaging-code-scanning-alerts-in-pull-requests>
+      o
+        Manage code scanning
+
+          + Code scanning tool status <https://docs.github.com/en/code-
+            security/code-scanning/managing-your-code-scanning-
+            configuration/about-the-tool-status-page>
+          + Edit default setup <https://docs.github.com/en/code-
+            security/code-scanning/managing-your-code-scanning-
+            configuration/editing-your-configuration-of-default-setup>
+          + Set merge protection <https://docs.github.com/en/code-
+            security/code-scanning/managing-your-code-scanning-
+            configuration/set-code-scanning-merge-protection>
+          + Enable delegated alert dismissal <https://docs.github.com/
+            en/code-security/code-scanning/managing-your-code-scanning-
+            configuration/enabling-delegated-alert-dismissal-for-code-
+            scanning>
+          + CodeQL query suites <https://docs.github.com/en/code-
+            security/code-scanning/managing-your-code-scanning-
+            configuration/codeql-query-suites>
+          + Configure larger runners <https://docs.github.com/en/code-
+            security/code-scanning/managing-your-code-scanning-
+            configuration/configuring-larger-runners-for-default-setup>
+          + View code scanning logs <https://docs.github.com/en/code-
+            security/code-scanning/managing-your-code-scanning-
+            configuration/viewing-code-scanning-logs>
+          + Actions CodeQL queries <https://docs.github.com/en/code-
+            security/code-scanning/managing-your-code-scanning-
+            configuration/actions-built-in-queries>
+          + C and C++ CodeQL queries <https://docs.github.com/en/code-
+            security/code-scanning/managing-your-code-scanning-
+            configuration/c-cpp-built-in-queries>
+          + C# CodeQL queries <https://docs.github.com/en/code-security/
+            code-scanning/managing-your-code-scanning-configuration/
+            csharp-built-in-queries>
+          + GitHub Actions queries <https://docs.github.com/en/code-
+            security/code-scanning/managing-your-code-scanning-
+            configuration/github-actions-built-in-queries>
+          + Go CodeQL queries <https://docs.github.com/en/code-security/
+            code-scanning/managing-your-code-scanning-configuration/go-
+            built-in-queries>
+          + Java and Kotlin CodeQL queries <https://docs.github.com/en/
+            code-security/code-scanning/managing-your-code-scanning-
+            configuration/java-kotlin-built-in-queries>
+          + JavaScript and TypeScript queries <https://docs.github.com/
+            en/code-security/code-scanning/managing-your-code-scanning-
+            configuration/javascript-typescript-built-in-queries>
+          + Python CodeQL queries <https://docs.github.com/en/code-
+            security/code-scanning/managing-your-code-scanning-
+            configuration/python-built-in-queries>
+          + Ruby CodeQL queries <https://docs.github.com/en/code-
+            security/code-scanning/managing-your-code-scanning-
+            configuration/ruby-built-in-queries>
+          + Rust CodeQL queries <https://docs.github.com/en/code-
+            security/code-scanning/managing-your-code-scanning-
+            configuration/rust-built-in-queries>
+          + Swift CodeQL queries <https://docs.github.com/en/code-
+            security/code-scanning/managing-your-code-scanning-
+            configuration/swift-built-in-queries>
+      o
+        Integrate with code scanning
+
+          + About integration <https://docs.github.com/en/code-security/
+            code-scanning/integrating-with-code-scanning/about-
+            integration-with-code-scanning>
+          + Using code scanning with your existing CI system <https://
+            docs.github.com/en/code-security/code-scanning/integrating-
+            with-code-scanning/using-code-scanning-with-your-existing-
+            ci-system>
+          + Upload a SARIF file <https://docs.github.com/en/code-
+            security/code-scanning/integrating-with-code-scanning/
+            uploading-a-sarif-file-to-github>
+          + SARIF support <https://docs.github.com/en/code-security/
+            code-scanning/integrating-with-code-scanning/sarif-support-
+            for-code-scanning>
+      o
+        Troubleshooting code scanning
+
+          + Code Security must be enabled <https://docs.github.com/en/
+            code-security/code-scanning/troubleshooting-code-scanning/
+            advanced-security-must-be-enabled>
+          + Alerts in generated code <https://docs.github.com/en/code-
+            security/code-scanning/troubleshooting-code-scanning/alerts-
+            in-generated-code>
+          + Analysis takes too long <https://docs.github.com/en/code-
+            security/code-scanning/troubleshooting-code-scanning/
+            analysis-takes-too-long>
+          + Automatic build failed <https://docs.github.com/en/code-
+            security/code-scanning/troubleshooting-code-scanning/
+            automatic-build-failed>
+          + C# compiler failing <https://docs.github.com/en/code-
+            security/code-scanning/troubleshooting-code-scanning/c-
+            sharp-compiler-unexpectedly-failing>
+          + Cannot enable CodeQL in a private repository <https://
+            docs.github.com/en/code-security/code-scanning/
+            troubleshooting-code-scanning/cannot-enable-codeql-in-a-
+            private-repository>
+          + Enabling default setup takes too long <https://
+            docs.github.com/en/code-security/code-scanning/
+            troubleshooting-code-scanning/enabling-default-setup-takes-
+            too-long>
+          + Extraction errors in the database <https://docs.github.com/
+            en/code-security/code-scanning/troubleshooting-code-
+            scanning/extraction-errors-in-the-database>
+          + Fewer lines scanned than expected <https://docs.github.com/
+            en/code-security/code-scanning/troubleshooting-code-
+            scanning/fewer-lines-scanned-than-expected>
+          + Logs not detailed enough <https://docs.github.com/en/code-
+            security/code-scanning/troubleshooting-code-scanning/logs-
+            not-detailed-enough>
+          + No source code seen during build <https://docs.github.com/
+            en/code-security/code-scanning/troubleshooting-code-
+            scanning/no-source-code-seen-during-build>
+          + Not recognized <https://docs.github.com/en/code-security/
+            code-scanning/troubleshooting-code-scanning/not-recognized>
+          + Out of disk or memory <https://docs.github.com/en/code-
+            security/code-scanning/troubleshooting-code-scanning/out-of-
+            disk-or-memory>
+          + Resource not accessible <https://docs.github.com/en/code-
+            security/code-scanning/troubleshooting-code-scanning/
+            resource-not-accessible>
+          + Results different than expected <https://docs.github.com/en/
+            code-security/code-scanning/troubleshooting-code-scanning/
+            results-different-than-expected>
+          + Server error <https://docs.github.com/en/code-security/code-
+            scanning/troubleshooting-code-scanning/server-error>
+          + Some languages not analyzed <https://docs.github.com/en/
+            code-security/code-scanning/troubleshooting-code-scanning/
+            some-languages-not-analyzed>
+          + Two CodeQL workflows <https://docs.github.com/en/code-
+            security/code-scanning/troubleshooting-code-scanning/two-
+            codeql-workflows>
+          + Unclear what triggered a workflow <https://docs.github.com/
+            en/code-security/code-scanning/troubleshooting-code-
+            scanning/unclear-what-triggered-a-workflow>
+          + Unnecessary step found <https://docs.github.com/en/code-
+            security/code-scanning/troubleshooting-code-scanning/
+            unnecessary-step-found>
+          + Kotlin detected in no build <https://docs.github.com/en/
+            code-security/code-scanning/troubleshooting-code-scanning/
+            kotlin-detected-in-no-build>
+      o
+        Troubleshooting SARIF uploads
+
+          + GitHub Code Security disabled <https://docs.github.com/en/
+            code-security/code-scanning/troubleshooting-sarif-uploads/
+            ghas-required>
+          + Default setup is enabled <https://docs.github.com/en/code-
+            security/code-scanning/troubleshooting-sarif-uploads/
+            default-setup-enabled>
+          + GitHub token missing <https://docs.github.com/en/code-
+            security/code-scanning/troubleshooting-sarif-uploads/
+            missing-token>
+          + SARIF file invalid <https://docs.github.com/en/code-
+            security/code-scanning/troubleshooting-sarif-uploads/sarif-
+            invalid>
+          + Results file too large <https://docs.github.com/en/code-
+            security/code-scanning/troubleshooting-sarif-uploads/file-
+            too-large>
+          + Results exceed limits <https://docs.github.com/en/code-
+            security/code-scanning/troubleshooting-sarif-uploads/
+            results-exceed-limit>
+  *
+    CodeQL CLI
+
+      o
+        Getting started
+
+          + About the CodeQL CLI <https://docs.github.com/en/code-
+            security/codeql-cli/getting-started-with-the-codeql-cli/
+            about-the-codeql-cli>
+          + Setting up the CodeQL CLI <https://docs.github.com/en/code-
+            security/codeql-cli/getting-started-with-the-codeql-cli/
+            setting-up-the-codeql-cli>
+          + Preparing code for analysis <https://docs.github.com/en/
+            code-security/codeql-cli/getting-started-with-the-codeql-
+            cli/preparing-your-code-for-codeql-analysis>
+          + Analyzing code <https://docs.github.com/en/code-security/
+            codeql-cli/getting-started-with-the-codeql-cli/analyzing-
+            your-code-with-codeql-queries>
+          + Uploading results to GitHub <https://docs.github.com/en/
+            code-security/codeql-cli/getting-started-with-the-codeql-
+            cli/uploading-codeql-analysis-results-to-github>
+          + Customizing analysis <https://docs.github.com/en/code-
+            security/codeql-cli/getting-started-with-the-codeql-cli/
+            customizing-analysis-with-codeql-packs>
+      o
+        Advanced functionality
+
+          + Advanced setup of the CodeQL CLI <https://docs.github.com/
+            en/code-security/codeql-cli/using-the-advanced-
+            functionality-of-the-codeql-cli/advanced-setup-of-the-
+            codeql-cli>
+          + About CodeQL workspaces <https://docs.github.com/en/code-
+            security/codeql-cli/using-the-advanced-functionality-of-the-
+            codeql-cli/about-codeql-workspaces>
+          + Using custom queries with the CodeQL CLI <https://
+            docs.github.com/en/code-security/codeql-cli/using-the-
+            advanced-functionality-of-the-codeql-cli/using-custom-
+            queries-with-the-codeql-cli>
+          + Creating CodeQL query suites <https://docs.github.com/en/
+            code-security/codeql-cli/using-the-advanced-functionality-
+            of-the-codeql-cli/creating-codeql-query-suites>
+          + Testing custom queries <https://docs.github.com/en/code-
+            security/codeql-cli/using-the-advanced-functionality-of-the-
+            codeql-cli/testing-custom-queries>
+          + Testing query help files <https://docs.github.com/en/code-
+            security/codeql-cli/using-the-advanced-functionality-of-the-
+            codeql-cli/testing-query-help-files>
+          + Creating and working with CodeQL packs <https://
+            docs.github.com/en/code-security/codeql-cli/using-the-
+            advanced-functionality-of-the-codeql-cli/creating-and-
+            working-with-codeql-packs>
+          + Publishing and using CodeQL packs <https://docs.github.com/
+            en/code-security/codeql-cli/using-the-advanced-
+            functionality-of-the-codeql-cli/publishing-and-using-codeql-
+            packs>
+          + Specifying command options in a CodeQL configuration file
+            <https://docs.github.com/en/code-security/codeql-cli/using-
+            the-advanced-functionality-of-the-codeql-cli/specifying-
+            command-options-in-a-codeql-configuration-file>
+          + Query reference files <https://docs.github.com/en/code-
+            security/codeql-cli/using-the-advanced-functionality-of-the-
+            codeql-cli/query-reference-files>
+          + CodeQL CLI SARIF output <https://docs.github.com/en/code-
+            security/codeql-cli/using-the-advanced-functionality-of-the-
+            codeql-cli/sarif-output>
+          + CodeQL CLI CSV output <https://docs.github.com/en/code-
+            security/codeql-cli/using-the-advanced-functionality-of-the-
+            codeql-cli/csv-output>
+          + Extractor options <https://docs.github.com/en/code-security/
+            codeql-cli/using-the-advanced-functionality-of-the-codeql-
+            cli/extractor-options>
+          + Exit codes <https://docs.github.com/en/code-security/codeql-
+            cli/using-the-advanced-functionality-of-the-codeql-cli/exit-
+            codes>
+          + Creating CodeQL CLI database bundles <https://
+            docs.github.com/en/code-security/codeql-cli/using-the-
+            advanced-functionality-of-the-codeql-cli/creating-database-
+            bundle-for-troubleshooting>
+      o
+        CodeQL CLI manual
+
+          + bqrs decode <https://docs.github.com/en/code-security/
+            codeql-cli/codeql-cli-manual/bqrs-decode>
+          + bqrs diff <https://docs.github.com/en/code-security/codeql-
+            cli/codeql-cli-manual/bqrs-diff>
+          + bqrs hash <https://docs.github.com/en/code-security/codeql-
+            cli/codeql-cli-manual/bqrs-hash>
+          + bqrs info <https://docs.github.com/en/code-security/codeql-
+            cli/codeql-cli-manual/bqrs-info>
+          + bqrs interpret <https://docs.github.com/en/code-security/
+            codeql-cli/codeql-cli-manual/bqrs-interpret>
+          + database add-diagnostic <https://docs.github.com/en/code-
+            security/codeql-cli/codeql-cli-manual/database-add-diagnostic>
+          + database analyze <https://docs.github.com/en/code-security/
+            codeql-cli/codeql-cli-manual/database-analyze>
+          + database bundle <https://docs.github.com/en/code-security/
+            codeql-cli/codeql-cli-manual/database-bundle>
+          + database cleanup <https://docs.github.com/en/code-security/
+            codeql-cli/codeql-cli-manual/database-cleanup>
+          + database create <https://docs.github.com/en/code-security/
+            codeql-cli/codeql-cli-manual/database-create>
+          + database export-diagnostics <https://docs.github.com/en/
+            code-security/codeql-cli/codeql-cli-manual/database-export-
+            diagnostics>
+          + database finalize <https://docs.github.com/en/code-security/
+            codeql-cli/codeql-cli-manual/database-finalize>
+          + database import <https://docs.github.com/en/code-security/
+            codeql-cli/codeql-cli-manual/database-import>
+          + database index-files <https://docs.github.com/en/code-
+            security/codeql-cli/codeql-cli-manual/database-index-files>
+          + database init <https://docs.github.com/en/code-security/
+            codeql-cli/codeql-cli-manual/database-init>
+          + database interpret-results <https://docs.github.com/en/code-
+            security/codeql-cli/codeql-cli-manual/database-interpret-
+            results>
+          + database print-baseline <https://docs.github.com/en/code-
+            security/codeql-cli/codeql-cli-manual/database-print-baseline>
+          + database run-queries <https://docs.github.com/en/code-
+            security/codeql-cli/codeql-cli-manual/database-run-queries>
+          + database trace-command <https://docs.github.com/en/code-
+            security/codeql-cli/codeql-cli-manual/database-trace-command>
+          + database unbundle <https://docs.github.com/en/code-security/
+            codeql-cli/codeql-cli-manual/database-unbundle>
+          + database upgrade <https://docs.github.com/en/code-security/
+            codeql-cli/codeql-cli-manual/database-upgrade>
+          + dataset check <https://docs.github.com/en/code-security/
+            codeql-cli/codeql-cli-manual/dataset-check>
+          + dataset cleanup <https://docs.github.com/en/code-security/
+            codeql-cli/codeql-cli-manual/dataset-cleanup>
+          + dataset import <https://docs.github.com/en/code-security/
+            codeql-cli/codeql-cli-manual/dataset-import>
+          + dataset measure <https://docs.github.com/en/code-security/
+            codeql-cli/codeql-cli-manual/dataset-measure>
+          + dataset upgrade <https://docs.github.com/en/code-security/
+            codeql-cli/codeql-cli-manual/dataset-upgrade>
+          + diagnostic add <https://docs.github.com/en/code-security/
+            codeql-cli/codeql-cli-manual/diagnostic-add>
+          + diagnostic export <https://docs.github.com/en/code-security/
+            codeql-cli/codeql-cli-manual/diagnostic-export>
+          + execute cli-server <https://docs.github.com/en/code-
+            security/codeql-cli/codeql-cli-manual/execute-cli-server>
+          + execute language-server <https://docs.github.com/en/code-
+            security/codeql-cli/codeql-cli-manual/execute-language-server>
+          + execute queries <https://docs.github.com/en/code-security/
+            codeql-cli/codeql-cli-manual/execute-queries>
+          + execute query-server <https://docs.github.com/en/code-
+            security/codeql-cli/codeql-cli-manual/execute-query-server>
+          + execute query-server2 <https://docs.github.com/en/code-
+            security/codeql-cli/codeql-cli-manual/execute-query-server2>
+          + execute upgrades <https://docs.github.com/en/code-security/
+            codeql-cli/codeql-cli-manual/execute-upgrades>
+          + generate extensible-predicate-metadata <https://
+            docs.github.com/en/code-security/codeql-cli/codeql-cli-
+            manual/generate-extensible-predicate-metadata>
+          + generate log-summary <https://docs.github.com/en/code-
+            security/codeql-cli/codeql-cli-manual/generate-log-summary>
+          + generate query-help <https://docs.github.com/en/code-
+            security/codeql-cli/codeql-cli-manual/generate-query-help>
+          + github merge-results <https://docs.github.com/en/code-
+            security/codeql-cli/codeql-cli-manual/github-merge-results>
+          + github upload-results <https://docs.github.com/en/code-
+            security/codeql-cli/codeql-cli-manual/github-upload-results>
+          + pack add <https://docs.github.com/en/code-security/codeql-
+            cli/codeql-cli-manual/pack-add>
+          + pack bundle <https://docs.github.com/en/code-security/
+            codeql-cli/codeql-cli-manual/pack-bundle>
+          + pack ci <https://docs.github.com/en/code-security/codeql-
+            cli/codeql-cli-manual/pack-ci>
+          + pack create <https://docs.github.com/en/code-security/
+            codeql-cli/codeql-cli-manual/pack-create>
+          + pack download <https://docs.github.com/en/code-security/
+            codeql-cli/codeql-cli-manual/pack-download>
+          + pack init <https://docs.github.com/en/code-security/codeql-
+            cli/codeql-cli-manual/pack-init>
+          + pack install <https://docs.github.com/en/code-security/
+            codeql-cli/codeql-cli-manual/pack-install>
+          + pack ls <https://docs.github.com/en/code-security/codeql-
+            cli/codeql-cli-manual/pack-ls>
+          + pack packlist <https://docs.github.com/en/code-security/
+            codeql-cli/codeql-cli-manual/pack-packlist>
+          + pack publish <https://docs.github.com/en/code-security/
+            codeql-cli/codeql-cli-manual/pack-publish>
+          + pack resolve-dependencies <https://docs.github.com/en/code-
+            security/codeql-cli/codeql-cli-manual/pack-resolve-dependencies>
+          + pack upgrade <https://docs.github.com/en/code-security/
+            codeql-cli/codeql-cli-manual/pack-upgrade>
+          + query compile <https://docs.github.com/en/code-security/
+            codeql-cli/codeql-cli-manual/query-compile>
+          + query decompile <https://docs.github.com/en/code-security/
+            codeql-cli/codeql-cli-manual/query-decompile>
+          + query format <https://docs.github.com/en/code-security/
+            codeql-cli/codeql-cli-manual/query-format>
+          + query run <https://docs.github.com/en/code-security/codeql-
+            cli/codeql-cli-manual/query-run>
+          + resolve database <https://docs.github.com/en/code-security/
+            codeql-cli/codeql-cli-manual/resolve-database>
+          + resolve extensions <https://docs.github.com/en/code-
+            security/codeql-cli/codeql-cli-manual/resolve-extensions>
+          + resolve extensions-by-pack <https://docs.github.com/en/code-
+            security/codeql-cli/codeql-cli-manual/resolve-extensions-by-
+            pack>
+          + resolve extractor <https://docs.github.com/en/code-security/
+            codeql-cli/codeql-cli-manual/resolve-extractor>
+          + resolve files <https://docs.github.com/en/code-security/
+            codeql-cli/codeql-cli-manual/resolve-files>
+          + resolve languages <https://docs.github.com/en/code-security/
+            codeql-cli/codeql-cli-manual/resolve-languages>
+          + resolve library-path <https://docs.github.com/en/code-
+            security/codeql-cli/codeql-cli-manual/resolve-library-path>
+          + resolve metadata <https://docs.github.com/en/code-security/
+            codeql-cli/codeql-cli-manual/resolve-metadata>
+          + resolve ml-models <https://docs.github.com/en/code-security/
+            codeql-cli/codeql-cli-manual/resolve-ml-models>
+          + resolve packs <https://docs.github.com/en/code-security/
+            codeql-cli/codeql-cli-manual/resolve-packs>
+          + resolve qlpacks <https://docs.github.com/en/code-security/
+            codeql-cli/codeql-cli-manual/resolve-qlpacks>
+          + resolve qlref <https://docs.github.com/en/code-security/
+            codeql-cli/codeql-cli-manual/resolve-qlref>
+          + resolve queries <https://docs.github.com/en/code-security/
+            codeql-cli/codeql-cli-manual/resolve-queries>
+          + resolve ram <https://docs.github.com/en/code-security/
+            codeql-cli/codeql-cli-manual/resolve-ram>
+          + resolve tests <https://docs.github.com/en/code-security/
+            codeql-cli/codeql-cli-manual/resolve-tests>
+          + resolve upgrades <https://docs.github.com/en/code-security/
+            codeql-cli/codeql-cli-manual/resolve-upgrades>
+          + test accept <https://docs.github.com/en/code-security/
+            codeql-cli/codeql-cli-manual/test-accept>
+          + test extract <https://docs.github.com/en/code-security/
+            codeql-cli/codeql-cli-manual/test-extract>
+          + test run <https://docs.github.com/en/code-security/codeql-
+            cli/codeql-cli-manual/test-run>
+          + version <https://docs.github.com/en/code-security/codeql-
+            cli/codeql-cli-manual/version>
+  *
+    CodeQL for VS Code
+
+      o
+        Getting started
+
+          + About the extension <https://docs.github.com/en/code-
+            security/codeql-for-vs-code/getting-started-with-codeql-for-
+            vs-code/about-codeql-for-vs-code>
+          + Extension installation <https://docs.github.com/en/code-
+            security/codeql-for-vs-code/getting-started-with-codeql-for-
+            vs-code/installing-codeql-for-vs-code>
+          + Manage CodeQL databases <https://docs.github.com/en/code-
+            security/codeql-for-vs-code/getting-started-with-codeql-for-
+            vs-code/managing-codeql-databases>
+          + Run CodeQL queries <https://docs.github.com/en/code-
+            security/codeql-for-vs-code/getting-started-with-codeql-for-
+            vs-code/running-codeql-queries>
+          + Explore data flow <https://docs.github.com/en/code-security/
+            codeql-for-vs-code/getting-started-with-codeql-for-vs-code/
+            exploring-data-flow-with-path-queries>
+          + Queries at scale <https://docs.github.com/en/code-security/
+            codeql-for-vs-code/getting-started-with-codeql-for-vs-code/
+            running-codeql-queries-at-scale-with-multi-repository-
+            variant-analysis>
+      o
+        Advanced functionality
+
+          + CodeQL model editor <https://docs.github.com/en/code-
+            security/codeql-for-vs-code/using-the-advanced-
+            functionality-of-the-codeql-for-vs-code-extension/using-the-
+            codeql-model-editor>
+          + Custom query creation <https://docs.github.com/en/code-
+            security/codeql-for-vs-code/using-the-advanced-
+            functionality-of-the-codeql-for-vs-code-extension/creating-
+            a-custom-query>
+          + Manage CodeQL packs <https://docs.github.com/en/code-
+            security/codeql-for-vs-code/using-the-advanced-
+            functionality-of-the-codeql-for-vs-code-extension/managing-
+            codeql-packs>
+          + Explore code structure <https://docs.github.com/en/code-
+            security/codeql-for-vs-code/using-the-advanced-
+            functionality-of-the-codeql-for-vs-code-extension/exploring-
+            the-structure-of-your-source-code>
+          + Test CodeQL queries <https://docs.github.com/en/code-
+            security/codeql-for-vs-code/using-the-advanced-
+            functionality-of-the-codeql-for-vs-code-extension/testing-
+            codeql-queries-in-vs-code>
+          + Customize settings <https://docs.github.com/en/code-
+            security/codeql-for-vs-code/using-the-advanced-
+            functionality-of-the-codeql-for-vs-code-extension/
+            customizing-settings>
+          + CodeQL workspace setup <https://docs.github.com/en/code-
+            security/codeql-for-vs-code/using-the-advanced-
+            functionality-of-the-codeql-for-vs-code-extension/setting-
+            up-a-codeql-workspace>
+          + CodeQL CLI access <https://docs.github.com/en/code-security/
+            codeql-for-vs-code/using-the-advanced-functionality-of-the-
+            codeql-for-vs-code-extension/configuring-access-to-the-
+            codeql-cli>
+          + Telemetry <https://docs.github.com/en/code-security/codeql-
+            for-vs-code/using-the-advanced-functionality-of-the-codeql-
+            for-vs-code-extension/telemetry-in-codeql-for-visual-studio-
+            code>
+      o
+        Troubleshooting CodeQL for VS Code
+
+          + Access logs <https://docs.github.com/en/code-security/
+            codeql-for-vs-code/troubleshooting-codeql-for-vs-code/
+            accessing-logs>
+          + Problem with controller repository <https://docs.github.com/
+            en/code-security/codeql-for-vs-code/troubleshooting-codeql-
+            for-vs-code/warning-problem-with-controller-repository>
+  *
+    Security advisories
+
+      o
+        Global security advisories
+
+          + About the GitHub Advisory database <https://docs.github.com/
+            en/code-security/security-advisories/working-with-global-
+            security-advisories-from-the-github-advisory-database/about-
+            the-github-advisory-database>
+          + About global security advisories <https://docs.github.com/
+            en/code-security/security-advisories/working-with-global-
+            security-advisories-from-the-github-advisory-database/about-
+            global-security-advisories>
+          + Browse Advisory Database <https://docs.github.com/en/code-
+            security/security-advisories/working-with-global-security-
+            advisories-from-the-github-advisory-database/browsing-
+            security-advisories-in-the-github-advisory-database>
+          + Edit Advisory Database <https://docs.github.com/en/code-
+            security/security-advisories/working-with-global-security-
+            advisories-from-the-github-advisory-database/editing-
+            security-advisories-in-the-github-advisory-database>
+      o
+        Repository security advisories
+
+          + About repository security advisories <https://
+            docs.github.com/en/code-security/security-advisories/
+            working-with-repository-security-advisories/about-
+            repository-security-advisories>
+          + Permission levels <https://docs.github.com/en/code-security/
+            security-advisories/working-with-repository-security-
+            advisories/permission-levels-for-repository-security-advisories>
+          + Configure for a repository <https://docs.github.com/en/code-
+            security/security-advisories/working-with-repository-
+            security-advisories/configuring-private-vulnerability-
+            reporting-for-a-repository>
+          + Configure for an organization <https://docs.github.com/en/
+            code-security/security-advisories/working-with-repository-
+            security-advisories/configuring-private-vulnerability-
+            reporting-for-an-organization>
+          + Create repository advisories <https://docs.github.com/en/
+            code-security/security-advisories/working-with-repository-
+            security-advisories/creating-a-repository-security-advisory>
+          + Edit repository advisories <https://docs.github.com/en/code-
+            security/security-advisories/working-with-repository-
+            security-advisories/editing-a-repository-security-advisory>
+          + Evaluate repository security <https://docs.github.com/en/
+            code-security/security-advisories/working-with-repository-
+            security-advisories/evaluating-the-security-settings-of-a-
+            repository>
+          + Temporary private forks <https://docs.github.com/en/code-
+            security/security-advisories/working-with-repository-
+            security-advisories/collaborating-in-a-temporary-private-
+            fork-to-resolve-a-repository-security-vulnerability>
+          + Publish repository advisories <https://docs.github.com/en/
+            code-security/security-advisories/working-with-repository-
+            security-advisories/publishing-a-repository-security-advisory>
+          + Add collaborators <https://docs.github.com/en/code-security/
+            security-advisories/working-with-repository-security-
+            advisories/adding-a-collaborator-to-a-repository-security-
+            advisory>
+          + Remove collaborators <https://docs.github.com/en/code-
+            security/security-advisories/working-with-repository-
+            security-advisories/removing-a-collaborator-from-a-
+            repository-security-advisory>
+          + Delete repository advisories <https://docs.github.com/en/
+            code-security/security-advisories/working-with-repository-
+            security-advisories/deleting-a-repository-security-advisory>
+      o
+        Guidance on reporting and writing
+
+          + Coordinated disclosure <https://docs.github.com/en/code-
+            security/security-advisories/guidance-on-reporting-and-
+            writing-information-about-vulnerabilities/about-coordinated-
+            disclosure-of-security-vulnerabilities>
+          + Best practices <https://docs.github.com/en/code-security/
+            security-advisories/guidance-on-reporting-and-writing-
+            information-about-vulnerabilities/best-practices-for-
+            writing-repository-security-advisories>
+          + Privately reporting <https://docs.github.com/en/code-
+            security/security-advisories/guidance-on-reporting-and-
+            writing-information-about-vulnerabilities/privately-
+            reporting-a-security-vulnerability>
+          + Manage vulnerability reports <https://docs.github.com/en/
+            code-security/security-advisories/guidance-on-reporting-and-
+            writing-information-about-vulnerabilities/managing-
+            privately-reported-security-vulnerabilities>
+  *
+    Supply chain security
+
+      o
+        Understand your supply chain
+
+          + Supply chain security <https://docs.github.com/en/code-
+            security/supply-chain-security/understanding-your-software-
+            supply-chain/about-supply-chain-security>
+          + Dependency graph <https://docs.github.com/en/code-security/
+            supply-chain-security/understanding-your-software-supply-
+            chain/about-the-dependency-graph>
+          + Dependency graph ecosystem support <https://docs.github.com/
+            en/code-security/supply-chain-security/understanding-your-
+            software-supply-chain/dependency-graph-supported-package-
+            ecosystems>
+          + Configure dependency graph <https://docs.github.com/en/code-
+            security/supply-chain-security/understanding-your-software-
+            supply-chain/configuring-the-dependency-graph>
+          + Automatic dependency submission <https://docs.github.com/en/
+            code-security/supply-chain-security/understanding-your-
+            software-supply-chain/configuring-automatic-dependency-
+            submission-for-your-repository>
+          + Export dependencies as SBOM <https://docs.github.com/en/
+            code-security/supply-chain-security/understanding-your-
+            software-supply-chain/exporting-a-software-bill-of-
+            materials-for-your-repository>
+          + Dependency submission API <https://docs.github.com/en/code-
+            security/supply-chain-security/understanding-your-software-
+            supply-chain/using-the-dependency-submission-api>
+          + Dependency review <https://docs.github.com/en/code-security/
+            supply-chain-security/understanding-your-software-supply-
+            chain/about-dependency-review>
+          + Configure dependency review action <https://docs.github.com/
+            en/code-security/supply-chain-security/understanding-your-
+            software-supply-chain/configuring-the-dependency-review-action>
+          + Customize dependency review action <https://docs.github.com/
+            en/code-security/supply-chain-security/understanding-your-
+            software-supply-chain/customizing-your-dependency-review-
+            action-configuration>
+          + Enforce dependency review <https://docs.github.com/en/code-
+            security/supply-chain-security/understanding-your-software-
+            supply-chain/enforcing-dependency-review-across-an-organization>
+          + Explore dependencies <https://docs.github.com/en/code-
+            security/supply-chain-security/understanding-your-software-
+            supply-chain/exploring-the-dependencies-of-a-repository>
+          + Troubleshoot dependency graph <https://docs.github.com/en/
+            code-security/supply-chain-security/understanding-your-
+            software-supply-chain/troubleshooting-the-dependency-graph>
+          + Immutable releases <https://docs.github.com/en/code-
+            security/supply-chain-security/understanding-your-software-
+            supply-chain/immutable-releases>
+          + Prevent release changes <https://docs.github.com/en/code-
+            security/supply-chain-security/understanding-your-software-
+            supply-chain/preventing-changes-to-your-releases>
+          + Verify release integrity <https://docs.github.com/en/code-
+            security/supply-chain-security/understanding-your-software-
+            supply-chain/verifying-the-integrity-of-a-release>
+      o
+        End-to-end supply chain
+
+          + Overview <https://docs.github.com/en/code-security/supply-
+            chain-security/end-to-end-supply-chain/end-to-end-supply-
+            chain-overview>
+          + Securing accounts <https://docs.github.com/en/code-security/
+            supply-chain-security/end-to-end-supply-chain/securing-accounts>
+          + Securing code <https://docs.github.com/en/code-security/
+            supply-chain-security/end-to-end-supply-chain/securing-code>
+          + Securing builds <https://docs.github.com/en/code-security/
+            supply-chain-security/end-to-end-supply-chain/securing-builds>
+  *
+    Dependabot
+
+      o
+        Dependabot ecosystems
+
+          + Dependabot ecosystem support <https://docs.github.com/en/
+            code-security/dependabot/ecosystems-supported-by-dependabot/
+            supported-ecosystems-and-repositories>
+          + Optimize Java packages <https://docs.github.com/en/code-
+            security/dependabot/ecosystems-supported-by-dependabot/
+            optimizing-java-packages-dependabot>
+      o
+        Dependabot alerts
+
+          + Dependabot alerts <https://docs.github.com/en/code-security/
+            dependabot/dependabot-alerts/about-dependabot-alerts>
+          + Configure Dependabot alerts <https://docs.github.com/en/
+            code-security/dependabot/dependabot-alerts/configuring-
+            dependabot-alerts>
+          + View Dependabot alerts <https://docs.github.com/en/code-
+            security/dependabot/dependabot-alerts/viewing-and-updating-
+            dependabot-alerts>
+          + Configure notifications <https://docs.github.com/en/code-
+            security/dependabot/dependabot-alerts/configuring-
+            notifications-for-dependabot-alerts>
+      o
+        Dependabot auto-triage rules
+
+          + About auto-triage rules <https://docs.github.com/en/code-
+            security/dependabot/dependabot-auto-triage-rules/about-
+            dependabot-auto-triage-rules>
+          + GitHub preset rules <https://docs.github.com/en/code-
+            security/dependabot/dependabot-auto-triage-rules/using-
+            github-preset-rules-to-prioritize-dependabot-alerts>
+          + Custom auto-triage rules <https://docs.github.com/en/code-
+            security/dependabot/dependabot-auto-triage-rules/
+            customizing-auto-triage-rules-to-prioritize-dependabot-alerts>
+          + Manage auto-dismissed alerts <https://docs.github.com/en/
+            code-security/dependabot/dependabot-auto-triage-rules/
+            managing-automatically-dismissed-alerts>
+      o
+        Dependabot security updates
+
+          + Dependabot security updates <https://docs.github.com/en/
+            code-security/dependabot/dependabot-security-updates/about-
+            dependabot-security-updates>
+          + Configure security updates <https://docs.github.com/en/code-
+            security/dependabot/dependabot-security-updates/configuring-
+            dependabot-security-updates>
+          + Customize Dependabot PRs <https://docs.github.com/en/code-
+            security/dependabot/dependabot-security-updates/customizing-
+            dependabot-security-prs>
+      o
+        Dependabot version updates
+
+          + Dependabot version updates <https://docs.github.com/en/code-
+            security/dependabot/dependabot-version-updates/about-
+            dependabot-version-updates>
+          + Configure version updates <https://docs.github.com/en/code-
+            security/dependabot/dependabot-version-updates/configuring-
+            dependabot-version-updates>
+          + Optimize PR creation <https://docs.github.com/en/code-
+            security/dependabot/dependabot-version-updates/optimizing-
+            pr-creation-version-updates>
+          + Customize Dependabot PRs <https://docs.github.com/en/code-
+            security/dependabot/dependabot-version-updates/customizing-
+            dependabot-prs>
+          + Control dependency update <https://docs.github.com/en/code-
+            security/dependabot/dependabot-version-updates/controlling-
+            dependencies-updated>
+      o
+        Work with Dependabot
+
+          + Manage Dependabot PRs <https://docs.github.com/en/code-
+            security/dependabot/working-with-dependabot/managing-pull-
+            requests-for-dependency-updates>
+          + About Dependabot on Actions <https://docs.github.com/en/
+            code-security/dependabot/working-with-dependabot/about-
+            dependabot-on-github-actions-runners>
+          + Use Dependabot with Actions <https://docs.github.com/en/
+            code-security/dependabot/working-with-dependabot/automating-
+            dependabot-with-github-actions>
+          + Auto-update actions <https://docs.github.com/en/code-
+            security/dependabot/working-with-dependabot/keeping-your-
+            actions-up-to-date-with-dependabot>
+          + Configure access to private registries <https://
+            docs.github.com/en/code-security/dependabot/working-with-
+            dependabot/configuring-access-to-private-registries-for-
+            dependabot>
+          + Guidance for configuring private registries <https://
+            docs.github.com/en/code-security/dependabot/working-with-
+            dependabot/guidance-for-the-configuration-of-private-
+            registries-for-dependabot>
+          + Multi-ecosystem updates <https://docs.github.com/en/code-
+            security/dependabot/working-with-dependabot/configuring-
+            multi-ecosystem-updates>
+          + Dependabot options reference <https://docs.github.com/en/
+            code-security/dependabot/working-with-dependabot/dependabot-
+            options-reference>
+          + Configure ARC <https://docs.github.com/en/code-security/
+            dependabot/working-with-dependabot/setting-dependabot-to-
+            run-on-self-hosted-runners-using-arc>
+          + Configure VNET <https://docs.github.com/en/code-security/
+            dependabot/working-with-dependabot/setting-dependabot-to-
+            run-on-github-hosted-runners-using-vnet>
+      o
+        Maintain dependencies at scale
+
+          + Dependency management best practices <https://
+            docs.github.com/en/code-security/dependabot/maintain-
+            dependencies/best-practices-for-maintaining-dependencies>
+          + Manage Dependabot on self-hosted runners <https://
+            docs.github.com/en/code-security/dependabot/maintain-
+            dependencies/managing-dependabot-on-self-hosted-runners>
+          + Remove access to public registries <https://docs.github.com/
+            en/code-security/dependabot/maintain-dependencies/removing-
+            dependabot-access-to-public-registries>
+      o
+        Troubleshoot Dependabot
+
+          + List configured dependencies <https://docs.github.com/en/
+            code-security/dependabot/troubleshooting-dependabot/listing-
+            dependencies-configured-for-version-updates>
+          + Viewing Dependabot logs <https://docs.github.com/en/code-
+            security/dependabot/troubleshooting-dependabot/viewing-
+            dependabot-job-logs>
+          + Dependabot stopped working <https://docs.github.com/en/code-
+            security/dependabot/troubleshooting-dependabot/dependabot-
+            updates-stopped>
+          + Troubleshoot errors <https://docs.github.com/en/code-
+            security/dependabot/troubleshooting-dependabot/
+            troubleshooting-dependabot-errors>
+          + Troubleshoot Dependabot on Actions <https://docs.github.com/
+            en/code-security/dependabot/troubleshooting-dependabot/
+            troubleshooting-dependabot-on-github-actions>
+          + Troubleshoot vulnerability detection <https://
+            docs.github.com/en/code-security/dependabot/troubleshooting-
+            dependabot/troubleshooting-the-detection-of-vulnerable-
+            dependencies>
+  *
+    Security overview
+
+      o About security overview <https://docs.github.com/en/code-
+        security/security-overview/about-security-overview>
+      o View security insights <https://docs.github.com/en/code-
+        security/security-overview/viewing-security-insights>
+      o Assess adoption of features <https://docs.github.com/en/code-
+        security/security-overview/assessing-adoption-code-security>
+      o Assess security risk of code <https://docs.github.com/en/code-
+        security/security-overview/assessing-code-security-risk>
+      o Filter security overview <https://docs.github.com/en/code-
+        security/security-overview/filtering-alerts-in-security-overview>
+      o Export data <https://docs.github.com/en/code-security/security-
+        overview/exporting-data-from-security-overview>
+      o View Dependabot metrics <https://docs.github.com/en/code-
+        security/security-overview/viewing-metrics-for-dependabot-alerts>
+      o View secret scanning metrics <https://docs.github.com/en/code-
+        security/security-overview/viewing-metrics-for-secret-scanning-
+        push-protection>
+      o View PR alert metrics <https://docs.github.com/en/code-security/
+        security-overview/viewing-metrics-for-pull-request-alerts>
+      o Review bypass requests <https://docs.github.com/en/code-
+        security/security-overview/reviewing-requests-to-bypass-push-
+        protection>
+
+  * Secure coding <https://docs.github.com/en/code-security>/
+  * Code scanning <https://docs.github.com/en/code-security/code-scanning>/
+  * Create advanced setup <https://docs.github.com/en/code-security/
+    code-scanning/creating-an-advanced-setup-for-code-scanning>/
+  * Customize advanced setup <https://docs.github.com/en/code-security/
+    code-scanning/creating-an-advanced-setup-for-code-scanning/
+    customizing-your-advanced-setup-for-code-scanning>
+
+
+  Customizing your advanced setup for code scanning
+
+You can customize how your advanced setup scans the code in your project
+for vulnerabilities and errors.
+
+
+    Who can use this feature?
+
+Users with *write* access if advanced setup <https://docs.github.com/en/
+code-security/code-scanning/creating-an-advanced-setup-for-code-
+scanning/configuring-advanced-setup-for-code-scanning> is already enabled
+
+
+    In this article
+
+  * About code scanning configuration <#about-code-scanning-configuration>
+  * Editing a code scanning workflow <#editing-a-code-scanning-workflow>
+  * Configuring frequency <#configuring-frequency>
+  * Specifying an operating system <#specifying-an-operating-system>
+  * Specifying the location for CodeQL databases <#specifying-the-
+    location-for-codeql-databases>
+  * Changing the languages that are analyzed <#changing-the-languages-
+    that-are-analyzed>
+  * Defining the alert severities that cause a check failure for a pull
+    request <#defining-the-alert-severities-that-cause-a-check-failure-
+    for-a-pull-request>
+  * Configuring a category for the analysis <#configuring-a-category-
+    for-the-analysis>
+  * Extending CodeQL coverage with CodeQL model packs <#extending-
+    codeql-coverage-with-codeql-model-packs>
+  * Running additional queries <#running-additional-queries>
+  * Using a custom configuration file <#using-a-custom-configuration-file>
+  * Specifying configuration details using the config input
+    <#specifying-configuration-details-using-the-config-input>
+  * Configuring code scanning for compiled languages <#configuring-code-
+    scanning-for-compiled-languages>
+  * Uploading code scanning data to GitHub <#uploading-code-scanning-
+    data-to-github>
+
+
+    About code scanning configuration<#about-code-scanning-configuration>
+
+You can run code scanning on GitHub, using GitHub Actions, or from your
+continuous integration (CI) system. For more information, see Writing
+workflows <https://docs.github.com/en/actions/learn-github-actions> or
+Using code scanning with your existing CI system <https://
+docs.github.com/en/code-security/code-scanning/integrating-with-code-
+scanning/using-code-scanning-with-your-existing-ci-system>.
+
+With advanced setup for code scanning, you can customize a code scanning
+workflow for granular control over your configuration. For more
+information, see Configuring advanced setup for code scanning <https://
+docs.github.com/en/code-security/code-scanning/creating-an-advanced-
+setup-for-code-scanning/configuring-advanced-setup-for-code-scanning>.
+
+CodeQL analysis is just one type of code scanning you can do in GitHub.
+GitHub Marketplace contains other code scanning workflows you can use.
+You can find a selection of these on the "Get started with code
+scanning" page, which you can access from the *Security* tab. The
+specific examples given in this article relate to the CodeQL analysis
+workflow file.
+
+
+    Editing a code scanning workflow<#editing-a-code-scanning-workflow>
+
+GitHub saves workflow files in the /.github/workflows/ directory of your
+repository. You can find a workflow you have added by searching for its
+file name. For example, by default, the workflow file for CodeQL code
+scanning is called /codeql-analysis.yml/.
+
+ 1. In your repository, browse to the workflow file you want to edit.
+ 2. In the upper right corner of the file view, to open the workflow
+    editor, click .
+ 3. After you have edited the file, click *Start commit* and complete
+    the "Commit changes" form. You can choose to commit directly to the
+    current branch, or create a new branch and start a pull request.
+
+For more information about editing workflow files, see Writing workflows
+<https://docs.github.com/en/actions/learn-github-actions>.
+
+
+    Configuring frequency<#configuring-frequency>
+
+You can configure the CodeQL analysis workflow to scan code on a
+schedule or when specific events occur in a repository.
+
+Scanning code when someone pushes a change, and whenever a pull request
+is created, prevents developers from introducing new vulnerabilities and
+errors into the code. Scanning code on a schedule informs you about the
+latest vulnerabilities and errors that GitHub, security researchers, and
+the community discover, even when developers aren't actively maintaining
+the repository.
+
+
+      Scanning on push<#scanning-on-push>
+
+By default, the CodeQL analysis workflow uses the |on:push| event to trigger a code scan on every push to the default branch of
+the repository and any protected branches. For code scanning to be
+triggered on a specified branch, the workflow must exist in that branch.
+For more information, see Workflow syntax for GitHub Actions <https://
+docs.github.com/en/actions/using-workflows/workflow-syntax-for-github-
+actions#on>.
+
+If you scan on push, then the results appear in the *Security* tab for
+your repository. For more information, see Assessing code scanning
+alerts for your repository <https://docs.github.com/en/code-security/
+code-scanning/managing-code-scanning-alerts/assessing-code-scanning-
+alerts-for-your-repository#viewing-the-alerts-for-a-repository>.
+
+Additionally, when an |on:push| scan returns results that can be mapped to an open pull request, these
+alerts will automatically appear on the pull request in the same places
+as other pull request alerts. The alerts are identified by comparing the
+existing analysis of the head of the branch to the analysis for the
+target branch. For more information on code scanning alerts in pull
+requests, see Triaging code scanning alerts in pull requests <https://
+docs.github.com/en/code-security/code-scanning/managing-code-scanning-
+alerts/triaging-code-scanning-alerts-in-pull-requests>.
+
+
+      Scanning pull requests<#scanning-pull-requests>
+
+The default CodeQL analysis workflow uses the |pull_request| event to trigger a code scan on pull requests targeted against the
+default branch. If a pull request is from a private fork, the |pull_request| event will only be triggered if you've selected the "Run workflows
+from fork pull requests" option in the repository settings. For more
+information, see Managing GitHub Actions settings for a repository
+<https://docs.github.com/en/repositories/managing-your-repositorys-
+settings-and-features/enabling-features-for-your-repository/managing-
+github-actions-settings-for-a-repository#enabling-workflows-for-private-
+repository-forks>.
+
+For more information about the |pull_request| event, see Events that trigger workflows <https://docs.github.com/en/
+actions/using-workflows/events-that-trigger-workflows#pull_request>.
+
+If you scan pull requests, then the results appear as alerts in a pull
+request check. For more information, see Triaging code scanning alerts
+in pull requests <https://docs.github.com/en/code-security/code-
+scanning/managing-code-scanning-alerts/triaging-code-scanning-alerts-in-
+pull-requests>.
+
+Using the |pull_request| trigger, configured to scan the pull request's merge commit rather
+than the head commit, will produce more efficient and accurate results
+than scanning the head of the branch on each push. However, if you use a
+CI/CD system that cannot be configured to trigger on pull requests, you
+can still use the |on:push| trigger and code scanning will map the results to open pull requests
+on the branch and add the alerts as annotations on the pull request. For
+more information, see Scanning on push <#scanning-on-push>.
+
+Note
+
+If your repository is configured with a merge queue, you need to include
+the |merge_group| event as an additional trigger for code scanning. This will ensure
+that pull requests are also scanned when they are added to a merge
+queue. For more information, see Managing a merge queue <https://
+docs.github.com/en/repositories/configuring-branches-and-merges-in-your-
+repository/configuring-pull-request-merges/managing-a-merge-queue>.
+
+
+      Avoiding unnecessary scans of pull requests<#avoiding-unnecessary-
+      scans-of-pull-requests>
+
+You might want to avoid a code scan being triggered on specific pull
+requests targeted against the default branch, irrespective of which
+files have been changed. You can configure this by specifying |on:pull_request:paths-ignore| or |on:pull_request:paths| in the code scanning workflow. For example, if the only changes in a
+pull request are to files with the file extensions |.md| or |.txt| you can use the following |paths-ignore| array.
+
+YAML
+
+on:
+  push:
+    branches: [main, protected]
+  pull_request:
+    branches: [main]
+    paths-ignore:
+      - '**/*.md'
+      - '**/*.txt'
+
+|on:
+  push:
+    branches: [main, protected]
+  pull_request:
+    branches: [main]
+    paths-ignore:
+      - '**/*.md'
+      - '**/*.txt'
+|
+
+Note
+
+|on:pull_request:paths-ignore| and |on:pull_request:paths| set conditions that determine whether the actions in the workflow will
+run on a pull request. They don't determine what files will be analyzed
+when the actions /are/ run. When a pull request contains any files that
+are not matched by |on:pull_request:paths-ignore| or |on:pull_request:paths|, the workflow runs the actions and scans all of the files changed in
+the pull request, including those matched by |on:pull_request:paths-ignore| or |on:pull_request:paths|, unless the files have been excluded. For information on how to
+exclude files from analysis, see Specifying directories to scan
+<#specifying-directories-to-scan>.
+
+For more information about using |on:pull_request:paths-ignore| and |on:pull_request:paths| to determine when a workflow will run for a pull request, see Workflow
+syntax for GitHub Actions <https://docs.github.com/en/actions/using-
+workflows/workflow-syntax-for-github-
+actions#onpushpull_requestpull_request_targetpathspaths-ignore>.
+
+
+      Scanning on a schedule<#scanning-on-a-schedule>
+
+If you use the default CodeQL analysis workflow, the workflow will scan
+the code in your repository once a week, in addition to the scans
+triggered by events. To adjust this schedule, edit the |cron| value for the |on.schedule| event in the workflow. For more information, see Workflow syntax for
+GitHub Actions <https://docs.github.com/en/actions/reference/workflows-
+and-actions/workflow-syntax#onschedule>.
+
+Note
+
+This event will only trigger a workflow run if the workflow file exists
+on the default branch.
+
+
+      Example<#example>
+
+The following example shows a CodeQL analysis workflow for a particular
+repository that has a default branch called |main| and one protected branch called |protected|.
+
+YAML
+
+on:
+  push:
+    branches: [main, protected]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: '20 14 * * 1'
+
+|on:
+  push:
+    branches: [main, protected]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: '20 14 * * 1'
+|
+
+This workflow scans:
+
+  * Every push to the default branch and the protected branch
+  * Every pull request to the default branch
+  * The default branch every Monday at 14:20 UTC
+
+
+    Specifying an operating system<#specifying-an-operating-system>
+
+Note
+
+  *
+
+    Code scanning of Swift code uses macOS runners by default. GitHub-
+    hosted macOS runners are more expensive than Linux and Windows
+    runners, so you should consider only scanning the build step. For
+    more information about configuring code scanning for Swift, see
+    CodeQL code scanning for compiled languages <https://
+    docs.github.com/en/code-security/code-scanning/creating-an-advanced-
+    setup-for-code-scanning/codeql-code-scanning-for-compiled-
+    languages#considerations-for-building-swift>. For more information
+    about pricing for GitHub-hosted runners, see GitHub Actions billing
+    <https://docs.github.com/en/billing/managing-billing-for-github-
+    actions/about-billing-for-github-actions>.
+
+  *
+
+    Code scanning of Swift code is not supported for runners that are
+    part of an Actions Runner Controller (ARC), because ARC runners only
+    use Linux and Swift requires macOS runners. However, you can have a
+    mixture of both ARC runners and self-hosted macOS runners. For more
+    information, see Actions Runner Controller <https://docs.github.com/
+    en/actions/hosting-your-own-runners/managing-self-hosted-runners-
+    with-actions-runner-controller/about-actions-runner-controller>.
+
+If your code requires a specific operating system to compile, you can
+configure the operating system in your CodeQL analysis workflow. Edit
+the value of |jobs.analyze.runs-on| to specify the operating system for the machine that runs your code
+scanning actions.
+
+YAML
+
+jobs:
+  analyze:
+    name: Analyze
+    runs-on: [ubuntu-latest]
+
+|jobs:
+  analyze:
+    name: Analyze
+    runs-on: [ubuntu-latest]
+|
+
+If you choose to use a self-hosted runner for code scanning, you can
+specify an operating system by using an appropriate label as the second
+element in a two-element array, after |self-hosted|.
+
+YAML
+
+jobs:
+  analyze:
+    name: Analyze
+    runs-on: [self-hosted, ubuntu-latest]
+
+|jobs:
+  analyze:
+    name: Analyze
+    runs-on: [self-hosted, ubuntu-latest]
+|
+
+CodeQL code scanning supports the latest versions of Ubuntu, Windows,
+and macOS. Typical values for this setting are therefore: |ubuntu-latest|, |windows-latest|, and |macos-latest|. For more information, see Choosing the runner for a job <https://
+docs.github.com/en/actions/using-jobs/choosing-the-runner-for-a-job> and
+Using labels with self-hosted runners <https://docs.github.com/en/
+actions/hosting-your-own-runners/managing-self-hosted-runners/using-
+labels-with-self-hosted-runners>.
+
+If you use a self-hosted runner, you must ensure that Git is in the PATH
+variable. For more information, see Self-hosted runners <https://
+docs.github.com/en/actions/hosting-your-own-runners/managing-self-
+hosted-runners/about-self-hosted-runners> and Adding self-hosted runners
+<https://docs.github.com/en/actions/hosting-your-own-runners/managing-
+self-hosted-runners/adding-self-hosted-runners>.
+
+For recommended specifications (RAM, CPU cores, and disk) for running
+CodeQL analysis on self-hosted machines, see Recommended hardware
+resources for running CodeQL <https://docs.github.com/en/code-security/
+code-scanning/creating-an-advanced-setup-for-code-scanning/recommended-
+hardware-resources-for-running-codeql>.
+
+
+    Specifying the location for CodeQL databases<#specifying-the-
+    location-for-codeql-databases>
+
+In general, you do not need to worry about where the CodeQL analysis
+workflow places CodeQL databases since later steps will automatically
+find databases created by previous steps. However, if you are writing a
+custom workflow step that requires the CodeQL database to be in a
+specific disk location, for example to upload the database as a workflow
+artifact, you can specify that location using the |db-location| parameter under the |init| action.
+
+YAML
+
+- uses: github/codeql-action/init@v3
+  with:
+    db-location: '${{ github.runner_temp }}/my_location'
+
+|- uses: github/codeql-action/init@v3
+  with:
+    db-location: '${{ github.runner_temp }}/my_location'
+|
+
+The CodeQL analysis workflow will expect the path provided in |db-location| to be writable, and either not exist, or be an empty directory. When
+using this parameter in a job running on a self-hosted runner or using a
+Docker container, it's the responsibility of the user to ensure that the
+chosen directory is cleared between runs, or that the databases are
+removed once they are no longer needed. This is not necessary for jobs
+running on GitHub-hosted runners, which obtain a fresh instance and a
+clean filesystem each time they run. For more information, see GitHub-
+hosted runners <https://docs.github.com/en/actions/using-github-hosted-
+runners/about-github-hosted-runners>.
+
+If this parameter is not used, the CodeQL analysis workflow will create
+databases in a temporary location of its own choice. Currently the
+default value is |${{ github.runner_temp }}/codeql_databases|.
+
+
+    Changing the languages that are analyzed<#changing-the-languages-
+    that-are-analyzed>
+
+CodeQL code scanning automatically detects code written in the supported
+languages.
+
+  * C/C++
+  * C#
+  * Go
+  * Java/Kotlin
+  * JavaScript/TypeScript
+  * Python
+  * Ruby
+  * Rust (public preview)
+  * Swift
+  * GitHub Actions workflows
+
+Note
+
+  * Use |java-kotlin| to analyze code written in Java, Kotlin or both.
+  * Use |javascript-typescript| to analyze code written in JavaScript, TypeScript or both.
+
+For more information, see the documentation on the CodeQL website:
+Supported languages and frameworks <https://codeql.github.com/docs/
+codeql-overview/supported-languages-and-frameworks/>.
+
+CodeQL uses the following language identifiers:
+
+Language	Identifier	Optional alternative identifiers (if any)
+C/C++	|c-cpp|	|c| or |cpp|
+C#	|csharp|	
+Go	|go|	
+Java/Kotlin	|java-kotlin|	|java| or |kotlin|
+JavaScript/TypeScript	|javascript-typescript|	|javascript| or |typescript|
+Python	|python|	
+Ruby	|ruby|	
+Swift	|swift|	
+GitHub Actions workflows	|actions|	
+
+Note
+
+If you specify one of the alternative identifiers, this is equivalent to
+using the standard language identifier. For example, specifying |javascript| instead of |javascript-typescript| will not exclude analysis of TypeScript code. You can do this in an
+advanced setup workflow with the |--paths-ignore| option. For more information, see Customizing your advanced setup for
+code scanning <https://docs.github.com/en/code-security/code-scanning/
+creating-an-advanced-setup-for-code-scanning/customizing-your-advanced-
+setup-for-code-scanning#specifying-directories-to-scan>.
+
+The default CodeQL analysis workflow file contains a matrix called |language| which lists the languages in your repository that are analyzed. CodeQL
+automatically populates this matrix when you add code scanning to a
+repository. Using the |language| matrix optimizes CodeQL to run each analysis in parallel. We recommend
+that all workflows adopt this configuration due to the performance
+benefits of parallelizing builds. For more information about matrices,
+see Running variations of jobs in a workflow <https://docs.github.com/
+en/actions/using-jobs/using-a-matrix-for-your-jobs>.
+
+If your repository contains code in more than one of the supported
+languages, you can choose which languages you want to analyze. There are
+several reasons you might want to prevent a language being analyzed. For
+example, the project might have dependencies in a different language to
+the main body of your code, and you might prefer not to see alerts for
+those dependencies.
+
+If your workflow uses the |language| matrix then CodeQL is hardcoded to analyze only the languages in the
+matrix. To change the languages you want to analyze, edit the value of
+the matrix variable. You can remove a language to prevent it being
+analyzed or you can add a language that was not present in the
+repository when code scanning was configured. For example, if the
+repository initially only contained JavaScript when code scanning was
+configured, and you later added Python code, you will need to add |python| to the matrix.
+
+YAML
+
+jobs:
+  analyze:
+    name: Analyze
+    ...
+    strategy:
+      fail-fast: false
+      matrix:
+        language: ['javascript-typescript', 'python']
+
+|jobs:
+  analyze:
+    name: Analyze
+    ...
+    strategy:
+      fail-fast: false
+      matrix:
+        language: ['javascript-typescript', 'python']
+|
+
+If your workflow does not contain a matrix called |language|, then CodeQL is configured to run analysis sequentially. If you don't
+specify languages in the workflow, CodeQL automatically detects, and
+attempts to analyze, any supported languages in the repository. If you
+want to choose which languages to analyze, without using a matrix, you
+can use the |languages| parameter under the |init| action.
+
+YAML
+
+- uses: github/codeql-action/init@v3
+  with:
+    languages: c-cpp, csharp, python
+
+|- uses: github/codeql-action/init@v3
+  with:
+    languages: c-cpp, csharp, python
+|
+
+Note
+
+When analyzing languages sequentially, the default build-mode for every
+language will be used. Alternatively, if you provide an explicit |autobuild| step, then every language that supports the |autobuild| mode will use it while other languages use their default mode. If a
+more complex build-mode configuration than this is required, then you
+will need to use a |language| matrix.
+
+
+    Defining the alert severities that cause a check failure for a pull
+    request<#defining-the-alert-severities-that-cause-a-check-failure-
+    for-a-pull-request>
+
+You can use rulesets to prevent pull requests from being merged when one
+of the following conditions is met:
+
+  *
+
+    A required tool found a code scanning alert of a severity that is
+    defined in a ruleset.
+
+  *
+
+    A required code scanning tool's analysis is still in progress.
+
+  *
+
+    A required code scanning tool is not configured for the repository.
+
+For more information, see Set code scanning merge protection <https://
+docs.github.com/en/code-security/code-scanning/managing-your-code-
+scanning-configuration/set-code-scanning-merge-protection>. For more
+general information about rulesets, see About rulesets <https://
+docs.github.com/en/repositories/configuring-branches-and-merges-in-your-
+repository/managing-rulesets/about-rulesets>.
+
+
+    Configuring a category for the analysis<#configuring-a-category-for-
+    the-analysis>
+
+Use |category| to distinguish between multiple analyses for the same tool and commit,
+but performed on different languages or different parts of the code. The
+category you specify in your workflow will be included in the SARIF
+results file.
+
+This parameter is particularly useful if you work with monorepos and
+have multiple SARIF files for different components of the monorepo.
+
+YAML
+
+    - name: Perform CodeQL Analysis
+      uses: github/codeql-action/analyze@v3
+      with:
+        # Optional. Specify a category to distinguish between multiple analyses
+        # for the same tool and ref. If you don't use `category` in your workflow,
+        # GitHub will generate a default category name for you
+        category: "my_category"
+
+|    - name: Perform CodeQL Analysis
+      uses: github/codeql-action/analyze@v3
+      with:
+        # Optional. Specify a category to distinguish between multiple analyses
+        # for the same tool and ref. If you don't use `category` in your workflow,
+        # GitHub will generate a default category name for you
+        category: "my_category"
+|
+
+If you don't specify a |category| parameter in your workflow, GitHub will generate a category name for
+you, based on the name of the workflow file triggering the action, the
+action name, and any matrix variables. For example:
+
+  * The |.github/workflows/codeql-analysis.yml| workflow and the |analyze| action will produce the category |.github/workflows/codeql.yml:analyze|.
+  * The |.github/workflows/codeql-analysis.yml| workflow, the |analyze| action, and the |{language: javascript-typescript, os: linux}| matrix variables will produce the category |.github/workflows/codeql-analysis.yml:analyze/language:javascript-typescript/os:linux|.
+
+The |category| value will appear as the |<run>.automationDetails.id| property in SARIF v2.1.0. For more information, see SARIF support for
+code scanning <https://docs.github.com/en/code-security/code-scanning/
+integrating-with-code-scanning/sarif-support-for-code-
+scanning#runautomationdetails-object>.
+
+Your specified category will not overwrite the details of the |runAutomationDetails| object in the SARIF file, if included.
+
+
+    Extending CodeQL coverage with CodeQL model packs<#extending-codeql-
+    coverage-with-codeql-model-packs>
+
+If your codebase depends on a library or framework that is not
+recognized by the standard queries in CodeQL, you can extend the CodeQL
+coverage in your code scanning workflow by specifying published CodeQL
+model packs. For more information about creating your own model packs,
+see Creating and working with CodeQL packs <https://docs.github.com/en/
+code-security/codeql-cli/using-the-advanced-functionality-of-the-codeql-
+cli/creating-and-working-with-codeql-packs#creating-a-model-pack>.
+
+Note
+
+CodeQL model packs are currently in public preview and subject to
+change. Model packs are supported for C/C++, C#, Java/Kotlin, Python,
+and Ruby analysis.
+
+The CodeQL model editor in the CodeQL extension for Visual Studio Code
+supports modeling dependencies for C#, Java/Kotlin, Python, and Ruby.
+
+
+      Using CodeQL model packs<#using-codeql-model-packs>
+
+To add one or more published CodeQL model packs, specify them inside the |with: packs:| entry within the |uses: github/codeql-action/init@v3| section of the workflow. Within |packs| you specify one or more packages to use and, optionally, which version
+to download. Where you don't specify a version, the latest version is
+downloaded. If you want to use packages that are not publicly available,
+you need to set the |GITHUB_TOKEN| environment variable to a secret that has access to the packages. For
+more information, see Use GITHUB_TOKEN for authentication in workflows
+<https://docs.github.com/en/actions/security-guides/automatic-token-
+authentication> and Using secrets in GitHub Actions <https://
+docs.github.com/en/actions/security-guides/encrypted-secrets>.
+
+YAML
+
+- uses: github/codeql-action/init@v3
+  with:
+    config-file: ./.github/codeql/codeql-config.yml
+    queries: security-extended
+    packs: my-company/my-java-queries@~7.8.9,my-repo/my-java-model-pack
+
+|- uses: github/codeql-action/init@v3
+  with:
+    config-file: ./.github/codeql/codeql-config.yml
+    queries: security-extended
+    packs: my-company/my-java-queries@~7.8.9,my-repo/my-java-model-pack
+|
+
+In this example, the default queries will be run for Java, as well as
+the queries from a version greater than or equal to |7.8.9| and less than |7.9.0| of the query pack |my-company/my-java-queries|. The dependencies modeled in the latest version of the model pack |my-repo/my-java-model-pack| will be available to both the default queries and those in |my-company/my-java-queries|.
+
+
+    Running additional queries<#running-additional-queries>
+
+When you use CodeQL to scan code, the CodeQL analysis engine generates a
+database from the code and runs queries on it. CodeQL analysis uses a
+default set of queries, but you can specify more queries to run, in
+addition to the default queries.
+
+Tip
+
+You can also specify the queries you want to exclude from analysis, or
+include in the analysis. This requires the use of a custom configuration
+file. For more information, see Using a custom configuration file
+<#using-a-custom-configuration-file> and Excluding specific queries from
+analysis <#excluding-specific-queries-from-analysis> below.
+
+You can run extra queries if they are part of a CodeQL pack published to
+the GitHub Container registry or a CodeQL pack stored in a repository.
+For more information, see About code scanning with CodeQL <https://
+docs.github.com/en/code-security/code-scanning/introduction-to-code-
+scanning/about-code-scanning-with-codeql#about-codeql-queries>.
+
+The options available to specify the additional queries you want to run are:
+
+  * |packs| to install one or more CodeQL query packs and run the default
+    query suite or queries for those packs.
+  * |queries| to specify a single /.ql/ file, a directory containing
+    multiple /.ql/ files, a /.qls/ query suite definition file, or any
+    combination. For more information about query suite definitions, see
+    Creating CodeQL query suites <https://codeql.github.com/docs/codeql-
+    cli/creating-codeql-query-suites/>.
+
+You can use both |packs| and |queries| in the same workflow.
+
+We don't recommend referencing query suites directly from the |github/codeql| repository, for example, |github/codeql/cpp/ql/src@main|. Such queries would have to be recompiled, and may not be compatible
+with the version of CodeQL currently active on GitHub Actions, which
+could lead to errors during analysis.
+
+
+      Using query packs<#using-query-packs>
+
+To add one or more CodeQL query packs, add a |with: packs:| entry within the |uses: github/codeql-action/init@v3| section of the workflow. Within |packs| you specify one or more packages to use and, optionally, which version
+to download. Where you don't specify a version, the latest version is
+downloaded. If you want to use packages that are not publicly available,
+you need to set the |GITHUB_TOKEN| environment variable to a secret that has access to the packages. For
+more information, see Use GITHUB_TOKEN for authentication in workflows
+<https://docs.github.com/en/actions/security-guides/automatic-token-
+authentication> and Using secrets in GitHub Actions <https://
+docs.github.com/en/actions/security-guides/encrypted-secrets>.
+
+Note
+
+For workflows that generate CodeQL databases for multiple languages, you
+must instead specify the CodeQL query packs in a configuration file. For
+more information, see Specifying CodeQL query packs <#specifying-codeql-
+query-packs> below.
+
+In the example below, |scope| is the organization or personal account that published the package.
+When the workflow runs, the four CodeQL query packs are downloaded from
+GitHub and the default queries or query suite for each pack run:
+
+  * The latest version of |pack1| is downloaded and all default queries are run.
+  * Version 1.2.3 of |pack2| is downloaded and all default queries are run.
+  * The latest version of |pack3| that is compatible with version 3.2.1 is downloaded and all
+    queries are run.
+  * Version 4.5.6 of |pack4| is downloaded and only the queries found in |path/to/queries| are run.
+
+YAML
+
+- uses: github/codeql-action/init@v3
+  with:
+    # Comma-separated list of packs to download
+    packs: scope/pack1,scope/pack2@1.2.3,scope/pack3@~3.2.1,scope/pack4@4.5.6:path/to/queries
+
+|- uses: github/codeql-action/init@v3
+  with:
+    # Comma-separated list of packs to download
+    packs: scope/pack1,scope/pack2@1.2.3,scope/pack3@~3.2.1,scope/pack4@4.5.6:path/to/queries
+|
+
+Note
+
+If you specify a particular version of a query pack to use, beware that
+the version you specify may eventually become too old to be used
+efficiently by the default CodeQL engine used by the CodeQL action. To
+ensure optimal performance, if you need to specify exact query pack
+versions, you should consider reviewing periodically whether the pinned
+version of the query pack needs to be moved forward.
+
+For more information about pack compatibility, see Publishing and using
+CodeQL packs <https://docs.github.com/en/code-security/codeql-cli/using-
+the-advanced-functionality-of-the-codeql-cli/publishing-and-using-
+codeql-packs#about-codeql-pack-compatibility>.
+
+
+      Downloading CodeQL packs from GitHub Enterprise
+      Server<#downloading-codeql-packs-from-github-enterprise-server>
+
+If your workflow uses packs that are published on a GitHub Enterprise
+Server installation, you need to tell your workflow where to find them.
+You can do this by using the |registries| input of the github/codeql-action/init@v3 action. This input accepts a
+list of |url|, |packages|, and |token| properties as shown below.
+
+YAML
+
+- uses: github/codeql-action/init@v3
+  with:
+    registries: |
+      # URL to the container registry, usually in this format
+      - url: https://containers.GHEHOSTNAME1/v2/
+
+        # List of package glob patterns to be found at this registry
+        packages:
+          - my-company/*
+          - my-company2/*
+
+        # Token, which should be stored as a secret
+        token: ${{ secrets.GHEHOSTNAME1_TOKEN }}
+
+      # URL to the default container registry
+      - url: https://ghcr.io/v2/
+        # Packages can also be a string
+        packages: "*/*"
+        token: ${{ secrets.GHCR_TOKEN }}
+
+    
+
+|- uses: github/codeql-action/init@v3
+  with:
+    registries: |
+      # URL to the container registry, usually in this format
+      - url: https://containers.GHEHOSTNAME1/v2/
+
+        # List of package glob patterns to be found at this registry
+        packages:
+          - my-company/*
+          - my-company2/*
+
+        # Token, which should be stored as a secret
+        token: ${{ secrets.GHEHOSTNAME1_TOKEN }}
+
+      # URL to the default container registry
+      - url: https://ghcr.io/v2/
+        # Packages can also be a string
+        packages: "*/*"
+        token: ${{ secrets.GHCR_TOKEN }}
+
+    
+|
+
+The package patterns in the registries list are examined in order, so
+you should generally place the most specific package patterns first. The
+values for |token| must be a personal access token (classic) generated by the GitHub
+instance you are downloading from with the |read:packages| permission.
+
+Notice the ||| after the |registries| property name. This is important since GitHub Actions inputs can only
+accept strings. Using the ||| converts the subsequent text to a string, which is parsed later by the
+github/codeql-action/init@v3 action.
+
+
+      Using queries in QL packs<#using-queries-in-ql-packs>
+
+To add one or more queries, add a |with: queries:| entry within the |uses: github/codeql-action/init@v3| section of the workflow. If the queries are in a private repository,
+use the |external-repository-token| parameter to specify a token that has access to checkout the private
+repository.
+
+You can also specify query suites in the value of |queries|. Query suites are collections of queries, usually grouped by purpose
+or language.
+
+YAML
+
+- uses: github/codeql-action/init@v3
+  with:
+    # Comma-separated list of queries / packs / suites to run.
+    # This may include paths or a built in suite, for example:
+    # security-extended or security-and-quality.
+    queries: security-extended
+    # Optional. Provide a token to access queries stored in private repositories.
+    external-repository-token: ${{ secrets.ACCESS_TOKEN }}
+
+|- uses: github/codeql-action/init@v3
+  with:
+    # Comma-separated list of queries / packs / suites to run.
+    # This may include paths or a built in suite, for example:
+    # security-extended or security-and-quality.
+    queries: security-extended
+    # Optional. Provide a token to access queries stored in private repositories.
+    external-repository-token: ${{ secrets.ACCESS_TOKEN }}
+|
+
+The following query suites are built into CodeQL code scanning and are
+available for use.
+
+Query suite	Description
+|security-extended|	Queries from the default suite, plus lower severity and precision queries
+|security-and-quality|	Queries from |security-extended|, plus maintainability and reliability queries
+
+For more information, see: CodeQL query suites <https://docs.github.com/
+en/code-security/code-scanning/managing-your-code-scanning-
+configuration/built-in-codeql-query-suites>.
+
+Each of these query suites contains a different subset of the queries
+included in the built-in CodeQL query pack for that language. The query
+suites are automatically generated using the metadata for each query.
+For more information, see Metadata for CodeQL queries <https://
+codeql.github.com/docs/writing-codeql-queries/metadata-for-codeql-queries/>.
+
+When you specify a query suite, the CodeQL analysis engine will run the
+default set of queries and any extra queries defined in the additional
+query suite.
+
+
+      Working with custom configuration files<#working-with-custom-
+      configuration-files>
+
+If you also use a configuration file for custom settings, any additional
+packs or queries specified in your workflow are used instead of those
+specified in the configuration file. If you want to run the combined set
+of additional packs or queries, prefix the value of |packs| or |queries| in the workflow with the |+| symbol. For more information, see Using a custom configuration file
+<#using-a-custom-configuration-file>.
+
+In the following example, the |+| symbol ensures that the specified additional packs and queries are
+used together with any specified in the referenced configuration file.
+
+YAML
+
+- uses: github/codeql-action/init@v3
+  with:
+    config-file: ./.github/codeql/codeql-config.yml
+    queries: +security-and-quality,octo-org/python-qlpack/show_ifs.ql@main
+    packs: +scope/pack1,scope/pack2@1.2.3,scope/pack3@4.5.6:path/to/queries
+
+|- uses: github/codeql-action/init@v3
+  with:
+    config-file: ./.github/codeql/codeql-config.yml
+    queries: +security-and-quality,octo-org/python-qlpack/show_ifs.ql@main
+    packs: +scope/pack1,scope/pack2@1.2.3,scope/pack3@4.5.6:path/to/queries
+|
+
+
+    Using a custom configuration file<#using-a-custom-configuration-file>
+
+A custom configuration file is an alternative way to specify additional
+packs and queries to run. You can also use the file to disable the
+default queries, exclude or include specific queries, and to specify
+which directories to scan during analysis.
+
+In the workflow file, use the |config-file| parameter of the |init| action to specify the path to the configuration file you want to use.
+This example loads the configuration file /./.github/codeql/codeql-
+config.yml/.
+
+YAML
+
+- uses: github/codeql-action/init@v3
+  with:
+    config-file: ./.github/codeql/codeql-config.yml
+
+|- uses: github/codeql-action/init@v3
+  with:
+    config-file: ./.github/codeql/codeql-config.yml
+|
+
+The configuration file can be located within the repository you are
+analyzing, or in an external repository. Using an external repository
+allows you to specify configuration options for multiple repositories in
+a single place. When you reference a configuration file located in an
+external repository, you can use the /OWNER/REPOSITORY/FILENAME@BRANCH/
+syntax. For example, /octo-org/shared/codeql-config.yml@main/.
+
+If the configuration file is located in an external private repository,
+use the |external-repository-token| parameter of the |init| action to specify a token that has access to the private repository.
+
+YAML
+
+- uses: github/codeql-action/init@v3
+  with:
+    external-repository-token: ${{ secrets.ACCESS_TOKEN }}
+
+|- uses: github/codeql-action/init@v3
+  with:
+    external-repository-token: ${{ secrets.ACCESS_TOKEN }}
+|
+
+The settings in the configuration file are written in YAML format.
+
+
+      Specifying CodeQL query packs<#specifying-codeql-query-packs>
+
+You specify CodeQL query packs in an array. Note that the format is
+different from the format used by the workflow file.
+
+YAML
+
+packs:
+  # Use the latest version of 'pack1' published by 'scope'
+  - scope/pack1
+  # Use version 1.2.3 of 'pack2'
+  - scope/pack2@1.2.3
+  # Use the latest version of 'pack3' compatible with 3.2.1
+  - scope/pack3@~3.2.1
+  # Use pack4 and restrict it to queries found in the 'path/to/queries' directory
+  - scope/pack4:path/to/queries
+  # Use pack5 and restrict it to the query 'path/to/single/query.ql'
+  - scope/pack5:path/to/single/query.ql
+  # Use pack6 and restrict it to the query suite 'path/to/suite.qls'
+  - scope/pack6:path/to/suite.qls
+
+|packs:
+  # Use the latest version of 'pack1' published by 'scope'
+  - scope/pack1
+  # Use version 1.2.3 of 'pack2'
+  - scope/pack2@1.2.3
+  # Use the latest version of 'pack3' compatible with 3.2.1
+  - scope/pack3@~3.2.1
+  # Use pack4 and restrict it to queries found in the 'path/to/queries' directory
+  - scope/pack4:path/to/queries
+  # Use pack5 and restrict it to the query 'path/to/single/query.ql'
+  - scope/pack5:path/to/single/query.ql
+  # Use pack6 and restrict it to the query suite 'path/to/suite.qls'
+  - scope/pack6:path/to/suite.qls
+|
+
+The full format for specifying a query pack is |scope/name[@version][:path]|. Both |version| and |path| are optional. |version| is semver version range. If it is missing, the latest version is used.
+For more information about semver ranges, see the semver docs on npm
+<https://docs.npmjs.com/cli/v6/using-npm/semver#ranges>.
+
+If you have a workflow that generates more than one CodeQL database, you
+can specify any CodeQL query packs to run in a custom configuration file
+using a nested map of packs.
+
+YAML
+
+packs:
+  # Use these packs for JavaScript and TypeScript analysis
+  javascript:
+    - scope/js-pack1
+    - scope/js-pack2
+  # Use these packs for Java and Kotlin analysis
+  java:
+    - scope/java-pack1
+    - scope/java-pack2@v1.0.0
+
+|packs:
+  # Use these packs for JavaScript and TypeScript analysis
+  javascript:
+    - scope/js-pack1
+    - scope/js-pack2
+  # Use these packs for Java and Kotlin analysis
+  java:
+    - scope/java-pack1
+    - scope/java-pack2@v1.0.0
+|
+
+
+      Extending CodeQL coverage with threat models<#extending-codeql-
+      coverage-with-threat-models>
+
+Note
+
+Threat models are currently in public preview and subject to change.
+During the public preview, threat models are supported only by analysis
+for Java/Kotlin and C#.
+
+The default threat model includes remote sources of untrusted data. You
+can extend the CodeQL threat model to include local sources of untrusted
+data (for example: command-line arguments, environment variables, file
+systems, and databases) by specifying |threat-models: local| in a custom configuration file. If you extend the threat model, the
+default threat model will also be used.
+
+
+      Specifying additional queries<#specifying-additional-queries>
+
+You specify additional queries in a |queries| array. Each element of the array contains a |uses| parameter with a value that identifies a single query file, a
+directory containing query files, or a query suite definition file.
+
+YAML
+
+queries:
+  - uses: ./my-basic-queries/example-query.ql
+  - uses: ./my-advanced-queries
+  - uses: ./query-suites/my-security-queries.qls
+
+|queries:
+  - uses: ./my-basic-queries/example-query.ql
+  - uses: ./my-advanced-queries
+  - uses: ./query-suites/my-security-queries.qls
+|
+
+Optionally, you can give each array element a name, as shown in the
+example configuration files below. For more information about additional
+queries, see Running additional queries <#running-additional-queries> above.
+
+
+      Disabling the default queries<#disabling-the-default-queries>
+
+If you only want to run custom queries, you can disable the default
+security queries by using |disable-default-queries: true|.
+
+
+      Excluding specific queries from analysis<#excluding-specific-
+      queries-from-analysis>
+
+You can add |exclude| and |include| filters to your custom configuration file, to specify the queries you
+want to exclude or include in the analysis.
+
+This is useful if you want to exclude, for example:
+
+  * Specific queries from the default suites (|security|, |security-extended| and |security-and-quality|).
+  * Specific queries whose results do not interest you.
+  * All the queries that generate warnings and recommendations.
+
+You can use |exclude| filters similar to those in the configuration file below to exclude
+queries that you want to remove from the default analysis. In the
+example of configuration file below, both the |js/redundant-assignment| and the |js/useless-assignment-to-local| queries are excluded from analysis.
+
+YAML
+
+query-filters:
+  - exclude:
+      id: js/redundant-assignment
+  - exclude:
+      id: js/useless-assignment-to-local
+
+|query-filters:
+  - exclude:
+      id: js/redundant-assignment
+  - exclude:
+      id: js/useless-assignment-to-local
+|
+
+To find the id of a query, you can click the alert in the list of alerts
+in the *Security* tab. This opens the alert details page. The |Rule ID| field contains the query id. For more information about the alert
+details page, see About code scanning alerts <https://docs.github.com/
+en/code-security/code-scanning/managing-code-scanning-alerts/about-code-
+scanning-alerts#about-alert-details>.
+
+Tip
+
+  * The order of the filters is important. The first filter instruction
+    that appears after the instructions about the queries and query
+    packs determines whether the queries are included or excluded by
+    default.
+  * Subsequent instructions are executed in order and the instructions
+    that appear later in the file take precedence over the earlier
+    instructions.
+
+You can find another example illustrating the use of these filters in
+the Example configuration files <#example-configuration-files> section.
+
+For more information about using |exclude| and |include| filters in your custom configuration file, see Creating CodeQL query
+suites <https://docs.github.com/en/code-security/codeql-cli/using-the-
+advanced-functionality-of-the-codeql-cli/creating-codeql-query-
+suites#filtering-the-queries-in-a-query-suite>. For information on the
+query metadata you can filter on, see Metadata for CodeQL queries
+<https://codeql.github.com/docs/writing-codeql-queries/metadata-for-
+codeql-queries/>.
+
+
+      Specifying directories to scan<#specifying-directories-to-scan>
+
+When codebases are analyzed without building the code, you can restrict
+code scanning to files in specific directories by adding a |paths| array to the configuration file. You can also exclude the files in
+specific directories from analysis by adding a |paths-ignore| array. You can use this option when you run the CodeQL actions on an
+interpreted language (Python, Ruby, and JavaScript/TypeScript) or when
+you analyze a compiled language without building the code (currently
+supported for C/C++, C# and Java).
+
+YAML
+
+paths:
+  - src
+paths-ignore:
+  - src/node_modules
+  - '**/*.test.js'
+
+|paths:
+  - src
+paths-ignore:
+  - src/node_modules
+  - '**/*.test.js'
+|
+
+Note
+
+  * The |paths| and |paths-ignore| keywords, used in the context of the code scanning configuration
+    file, should not be confused with the same keywords when used for |on.<push|pull_request>.paths| in a workflow. When they are used to modify |on.<push|pull_request>| in a workflow, they determine whether the actions will be run when
+    someone modifies code in the specified directories. For more
+    information, see Workflow syntax for GitHub Actions <https://
+    docs.github.com/en/actions/using-workflows/workflow-syntax-for-
+    github-actions#onpushpull_requestpull_request_targetpathspaths-ignore>.
+  * The filter pattern characters |?|, |+|, |[|, |]|, and |!| are not supported and will be matched literally.
+  * |**| characters can only be at the start or end of a line, or
+    surrounded by slashes, and you can't mix |**| and other characters. For example, |foo/**|, |**/foo|, and |foo/**/bar| are all allowed syntax, but |**foo| isn't. However you can use single stars along with other
+    characters, as shown in the example. You'll need to quote anything
+    that contains a |*| character.
+
+For analysis where code is built, if you want to limit code scanning to
+specific directories in your project, you must specify appropriate build
+steps in the workflow. The commands you need to use to exclude a
+directory from the build will depend on your build system. For more
+information, see CodeQL code scanning for compiled languages <https://
+docs.github.com/en/code-security/code-scanning/creating-an-advanced-
+setup-for-code-scanning/codeql-code-scanning-for-compiled-
+languages#adding-build-steps-for-a-compiled-language>.
+
+You can quickly analyze small portions of a monorepo when you modify
+code in specific directories. You'll need to both exclude directories in
+your build steps and use the |paths-ignore| and |paths| keywords for |on.<push|pull_request>| <https://docs.github.com/en/actions/using-workflows/workflow-syntax-
+for-github-actions#onpushpull_requestpull_request_targetpathspaths-
+ignore> in your workflow.
+
+
+      Example configuration files<#example-configuration-files>
+
+This configuration file adds the |security-and-quality| query suite to the list of queries run by CodeQL when scanning your
+code. For more information about the query suites available for use, see
+Running additional queries <#running-additional-queries>.
+
+|name: "My CodeQL config"
+
+queries:
+  - uses: security-and-quality
+|
+
+The following configuration file disables the default queries and
+specifies a set of custom queries to run instead. It also configures
+CodeQL to scan files in the /src/ directory (relative to the root),
+except for the /src/node_modules/ directory, and except for files whose
+name ends in /.test.js/. Files in /src/node_modules/ and files with
+names ending /.test.js/ are therefore excluded from analysis.
+
+|name: "My CodeQL config"
+
+disable-default-queries: true
+
+queries:
+  - name: Use an in-repository CodeQL pack (run queries in the my-queries directory)
+    uses: ./my-queries
+  - name: Use an external JavaScript CodeQL pack (run queries from an external repo)
+    uses: octo-org/javascript-codeql-pack@main
+  - name: Use an external query (run a single query from an external CodeQL pack)
+    uses: octo-org/python-codeql-pack/show_ifs.ql@main
+  - name: Use a query suite file (run queries from a query suite in this repo)
+    uses: ./codeql-packs/complex-python-codeql-pack/rootAndBar.qls
+
+paths:
+  - src
+paths-ignore:
+  - src/node_modules
+  - '**/*.test.js'
+|
+
+The following configuration file only runs queries that generate alerts
+of severity error. The configuration first selects all the default
+queries, all queries in |./my-queries|, and the default suite in |codeql/java-queries|, then excludes all the queries that generate warnings or recommendations.
+
+|queries:
+  - name: Use an in-repository CodeQL query pack (run queries in the my-queries directory)
+    uses: ./my-queries
+packs:
+  - codeql/java-queries
+query-filters:
+- exclude:
+    problem.severity:
+      - warning
+      - recommendation
+|
+
+
+    Specifying configuration details using the |config| input<#specifying-configuration-details-using-the-config-input>
+
+If you'd prefer to specify additional configuration details in the
+workflow file, you can use the |config| input of the |init| command of the CodeQL action. The value of this input must be a YAML
+string that follows the configuration file format documented at Using a
+custom configuration file <#using-a-custom-configuration-file> above.
+
+
+      Example configuration<#example-configuration>
+
+This step in a GitHub Actions workflow file uses a |config| input to disable the default queries, add the |security-extended| query suite, and exclude queries that are tagged with |cwe-020|.
+
+|- uses: github/codeql-action/init@v3
+  with:
+    languages: ${{ matrix.language }}
+    config: |
+      disable-default-queries: true
+      threat-models: local
+      queries:
+        - uses: security-extended
+      query-filters:
+        - exclude:
+            tags: /cwe-020/
+|
+
+You can use the same approach to specify any valid configuration options
+in the workflow file.
+
+Tip
+
+You can share one configuration across multiple repositories using
+GitHub Actions variables. One benefit of this approach is that you can
+update the configuration in a single place without editing the workflow
+file.
+
+In the following example, |vars.CODEQL_CONF| is a GitHub Actions variable. Its value can be the contents of any
+valid configuration file. For more information, see Store information in
+variables <https://docs.github.com/en/actions/learn-github-actions/
+variables#defining-configuration-variables-for-multiple-workflows>.
+
+|- uses: github/codeql-action/init@v3
+  with:
+    languages: ${{ matrix.language }}
+    config: ${{ vars.CODEQL_CONF }}
+|
+
+
+    Configuring code scanning for compiled languages<#configuring-code-
+    scanning-for-compiled-languages>
+
+For compiled languages, you can decide how the CodeQL action creates a
+CodeQL database for analysis. For information about the build options
+available, see CodeQL code scanning for compiled languages <https://
+docs.github.com/en/code-security/code-scanning/creating-an-advanced-
+setup-for-code-scanning/codeql-code-scanning-for-compiled-languages>.
+
+
+    Uploading code scanning data to GitHub<#uploading-code-scanning-
+    data-to-github>
+
+GitHub can display code analysis data generated externally by a third-
+party tool. You can upload code analysis data with the |upload-sarif| action. For more information, see Uploading a SARIF file to GitHub
+<https://docs.github.com/en/code-security/code-scanning/integrating-
+with-code-scanning/uploading-a-sarif-file-to-github>.
+
+
+    Help and support
+
+The Copilot Icon in front of an explosion of color.
+
+
+    Get quick answers!
+
+Ask Copilot your question.
+Ask Copilot
+
+
+      Did you find what you needed?
+
+YesNo
+Privacy policy <https://docs.github.com/en/site-policy/privacy-policies/
+github-privacy-statement>
+
+
+      Help us make these docs great!
+
+All GitHub docs are open source. See something that's wrong or unclear?
+Submit a pull request.
+
+Make a contribution <https://github.com/github/docs/blob/main/content/
+code-security/code-scanning/creating-an-advanced-setup-for-code-
+scanning/customizing-your-advanced-setup-for-code-scanning.md>
+
+Learn how to contribute <https://docs.github.com/contributing>
+
+
+      Still need help?
+
+Ask the GitHub community <https://github.com/orgs/community/discussions>
+Contact support <https://support.github.com/>
+
+
+    Legal
+
+  * © 2025 GitHub, Inc.
+  * Terms <https://docs.github.com/en/site-policy/github-terms/github-
+    terms-of-service>
+  * Privacy <https://docs.github.com/en/site-policy/privacy-policies/
+    github-privacy-statement>
+  * Status <https://www.githubstatus.com/>
+  * Pricing <https://github.com/pricing>
+  * Expert services <https://services.github.com/>
+  * Blog <https://github.blog/>
+
+
+      Secure coding <https://docs.github.com/en/code-security/>
+
+
+        Uploading a SARIF file to GitHub <https://docs.github.com/en/
+        code-security/code-scanning/integrating-with-code-scanning/
+        uploading-a-sarif-file-to-github>
+
+You can upload SARIF files generated outside GitHub and see code
+scanning alerts from third-party tools in your repository.
+

@@ -169,8 +169,8 @@ function canCacheRoot(root: unknown): boolean {
   if (root === null || typeof root !== "object") return false;
   if (!Object.isFrozen(root)) return false;
   if (Array.isArray(root)) {
-    const arr = root as readonly unknown[];
-    for (const v of arr) {
+    const array = root as readonly unknown[];
+    for (const v of array) {
       if (v === null) continue;
       const t = typeof v;
       if (t === "string" || t === "boolean") continue;
@@ -183,12 +183,12 @@ function canCacheRoot(root: unknown): boolean {
     }
     return true;
   }
-  const obj = root as Record<string, unknown>;
-  const keys = Object.keys(obj);
+  const object = root as Record<string, unknown>;
+  const keys = Object.keys(object);
   for (const k of keys) {
-    const d = Object.getOwnPropertyDescriptor(obj, k);
+    const d = Object.getOwnPropertyDescriptor(object, k);
     if (!d || !d.enumerable || !("value" in d)) return false;
-    const v = (d as PropertyDescriptor & { value: unknown }).value;
+    const v = (d as PropertyDescriptor & { readonly value: unknown }).value;
     if (v === null) continue;
     const t = typeof v;
     if (t === "string" || t === "boolean") continue;

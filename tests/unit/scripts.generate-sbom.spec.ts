@@ -13,10 +13,17 @@ describe("scripts/generate-sbom helpers", () => {
     const repoTmp = fs.mkdtempSync(path.join(process.cwd(), "tmp-gensbom-"));
     try {
       const filePath = path.join(repoTmp, "pkg.json");
-      fs.writeFileSync(filePath, JSON.stringify({ name: "x", version: "1.0.0" }));
+      fs.writeFileSync(
+        filePath,
+        JSON.stringify({ name: "x", version: "1.0.0" }),
+      );
 
       // Absolute path inside repo root should resolve cleanly
-      const resolved = resolveAndValidateUserPath(filePath, repoTmp, "test-path");
+      const resolved = resolveAndValidateUserPath(
+        filePath,
+        repoTmp,
+        "test-path",
+      );
       expect(path.resolve(resolved)).toBe(path.resolve(filePath));
 
       // A path outside the provided repo root must be rejected

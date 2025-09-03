@@ -91,13 +91,19 @@ export function makeHostilePayload(
     try {
       Object.setPrototypeOf(o.a, { poisoned: true });
     } catch (err) {
-      console.warn("setPrototypeOf failed during fuzz harness", (err as Error).message);
+      console.warn(
+        "setPrototypeOf failed during fuzz harness",
+        (err as Error).message,
+      );
     }
     return o;
   }
 
   // long key names
-  const key = new Array(512).fill(0).map(() => randomString(4, rnd)).join(":");
+  const key = new Array(512)
+    .fill(0)
+    .map(() => randomString(4, rnd))
+    .join(":");
   const obj: any = {};
   obj[key] = { huge: i };
   return obj;
@@ -114,12 +120,18 @@ export async function runStandaloneFuzzHarness(iterations = 100) {
       try {
         sanitizer.getSanitizedString(JSON.stringify(p), "strict");
       } catch (err) {
-        console.warn("sanitizer error during fuzz iteration:", (err as Error).message);
+        console.warn(
+          "sanitizer error during fuzz iteration:",
+          (err as Error).message,
+        );
       }
       try {
         postMessageMod._validatePayload?.(p, (_d: any) => true as any);
       } catch (err) {
-        console.warn("postMessage validator error during fuzz iteration:", (err as Error).message);
+        console.warn(
+          "postMessage validator error during fuzz iteration:",
+          (err as Error).message,
+        );
       }
     } catch (e) {
       console.error("Unexpected crash", e);
@@ -131,6 +143,8 @@ export async function runStandaloneFuzzHarness(iterations = 100) {
       return 2;
     }
   }
-  console.info(`Fuzz finished: no prototype pollution detected in ${iterations} iterations`);
+  console.info(
+    `Fuzz finished: no prototype pollution detected in ${iterations} iterations`,
+  );
   return 0;
 }

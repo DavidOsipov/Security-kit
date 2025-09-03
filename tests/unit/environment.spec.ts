@@ -22,7 +22,7 @@ describe("environment utils", () => {
   it("detects private 172 ranges correctly", () => {
     // Ensure process.env does not short-circuit browser detection
     delete process.env.NODE_ENV;
-  (globalThis as any).location = { hostname: "172.16.0.1" };
+    (globalThis as any).location = { hostname: "172.16.0.1" };
     environment.clearCache();
     expect(environment.isDevelopment).toBe(true);
 

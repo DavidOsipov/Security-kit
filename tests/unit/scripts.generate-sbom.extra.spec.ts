@@ -5,7 +5,12 @@ import * as os from "os";
 
 import { __test_helpers as _genHelpers } from "../../scripts/generate-sbom";
 const helpers = _genHelpers as any;
-const { generateUUID, collectFilesRecursively, safeVersionLookup, extractRegistryMeta } = helpers;
+const {
+  generateUUID,
+  collectFilesRecursively,
+  safeVersionLookup,
+  extractRegistryMeta,
+} = helpers;
 
 // The module exports internal helpers via __test_helpers for unit tests.
 

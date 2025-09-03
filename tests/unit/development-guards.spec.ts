@@ -20,7 +20,9 @@ describe("development-guards", () => {
       // Restore any global flags we might have set
       delete (globalThis as any).__SECURITY_KIT_ALLOW_TEST_APIS;
       // Reset environment
-      environment.setExplicitEnv(originalIsProduction ? "production" : "development");
+      environment.setExplicitEnv(
+        originalIsProduction ? "production" : "development",
+      );
     });
 
     it("does not throw when not in production", () => {

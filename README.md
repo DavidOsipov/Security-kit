@@ -46,7 +46,6 @@ Preventing regressions:
   recommend adding a CI check (or an eslint rule) that scans for short literal
   secrets in test code to avoid accidental reintroduction of weak test keys.
 
-
 ## Table of Contents
 
 - [Security-Kit](#security-kit)
@@ -186,7 +185,7 @@ const secretToken = "a-very-secret-token-from-server";
 const areTokensEqual = await SIMPLE_API.secureCompareAsync(
   userInput,
   secretToken,
-  { requireCrypto: true } // Fails loudly if SubtleCrypto is unavailable
+  { requireCrypto: true }, // Fails loudly if SubtleCrypto is unavailable
 );
 
 console.log("Tokens are equal (timing-safe):", areTokensEqual);
@@ -203,7 +202,7 @@ const url = createSecureURL(
   "https://api.example.com",
   ["users", "search"], // Path segments are safely encoded
   { q: "John Doe", filter: "active+premium" }, // Query params are safely encoded
-  "results" // Fragment
+  "results", // Fragment
 );
 
 // Returns: "https://api.example.com/users/search?q=John%20Doe&filter=active%2Bpremium#results"
@@ -259,12 +258,12 @@ import { SecureLRUCache, VerifiedByteCache } from "@david-osipov/security-kit";
 
 // Option 1: Use the singleton for simple global caching
 const scriptBytes = new TextEncoder().encode('console.log("trusted script");');
-VerifiedByteCache.set('https://cdn.example.com/script.js', scriptBytes);
+VerifiedByteCache.set("https://cdn.example.com/script.js", scriptBytes);
 
 // Later, retrieve for TOCTOU-safe execution
-const cachedBytes = VerifiedByteCache.get('https://cdn.example.com/script.js');
+const cachedBytes = VerifiedByteCache.get("https://cdn.example.com/script.js");
 if (cachedBytes) {
-  const blob = new Blob([cachedBytes], { type: 'application/javascript' });
+  const blob = new Blob([cachedBytes], { type: "application/javascript" });
   const worker = new Worker(URL.createObjectURL(blob));
 }
 
@@ -277,23 +276,28 @@ const cache = new SecureLRUCache({
   copyOnSet: true, // Store defensive copies (default: true)
   rejectSharedBuffers: true, // Security: reject SharedArrayBuffer views
   onEvict: (entry) => {
-    console.log(`Evicted ${entry.url} (${entry.bytesLength} bytes, reason: ${entry.reason})`);
+    console.log(
+      `Evicted ${entry.url} (${entry.bytesLength} bytes, reason: ${entry.reason})`,
+    );
   },
 });
 
 // Store sensitive data with automatic expiration and memory management
-const tokenData = new TextEncoder().encode('eyJ0eXAiOiJKV1QiLCJhbGc...');
-cache.set('user:123:token', tokenData, { ttlMs: 600_000 }); // 10 minutes
+const tokenData = new TextEncoder().encode("eyJ0eXAiOiJKV1QiLCJhbGc...");
+cache.set("user:123:token", tokenData, { ttlMs: 600_000 }); // 10 minutes
 
 // Retrieve data (returns undefined if expired or not found)
-const retrievedToken = cache.get('user:123:token');
+const retrievedToken = cache.get("user:123:token");
 
 // Monitor cache performance and health
 const stats = cache.getStats();
-console.log(`Cache: ${stats.size} entries, ${stats.totalBytes} bytes, ${stats.hits}/${stats.hits + stats.misses} hit rate`);
+console.log(
+  `Cache: ${stats.size} entries, ${stats.totalBytes} bytes, ${stats.hits}/${stats.hits + stats.misses} hit rate`,
+);
 ```
 
 **Security Features:**
+
 - **TOCTOU Protection:** Ensures cached bytes are identical to originally validated content
 - **Memory Safety:** Automatic zeroization of evicted byte arrays to minimize data lifetime
 - **DoS Prevention:** Strict capacity limits prevent memory exhaustion attacks
@@ -304,6 +308,7 @@ console.log(`Cache: ${stats.size} entries, ${stats.totalBytes} bytes, ${stats.hi
 ## The Constitutions & Methodology
 
 This library is more than just code; it's an architecture.
+
 - The **[Security Constitution](./Security%20Consitution.md)** is a mandatory read for any team using this library. It serves as a single source of truth for the non-negotiable rules and principles that this library enforces.
 - The **[Development Methodology](./docs/METHODOLOGY.md)** document outlines the rigorous, AI-assisted workflow used to create, validate, and harden this toolkit with full transparency.
 
@@ -362,12 +367,12 @@ Implementation note: the library build excludes these optional packages from the
 
 If you want a single-file bundle that includes fallbacks, install the optional deps in your project or contact the maintainers about publishing a "full" build variant.
 
-
 ### Content Security Policy (CSP) and Blob Workers
 
 Blob-based Web Workers (created via URL.createObjectURL(new Blob(...))) can be a useful mitigation to avoid TOCTOU when loading remote worker scripts, because you can create the worker from bytes you verified locally. However, strict Content Security Policy (CSP) headers can prevent Blob creation or worker loading. To use Blob workers reliably, ensure your application's CSP allows blob: for worker-src (and optionally for script-src when module workers are used).
 
 Minimum recommended directives:
+
 - worker-src 'self' blob:;
 - script-src 'self' 'wasm-unsafe-eval' blob:; # if loading module workers from Blobs in some browsers
 
@@ -408,7 +413,10 @@ reportProdError(new Error("Payment failed"), { module: "billing" });
 The library exposes a `Sanitizer` class that manages named `DOMPurify` configurations and can create Trusted Types policies. `DOMPurify` is a peer dependency, allowing you to provide the instance that matches your environment (browser, JSDOM, etc.).
 
 ```typescript
-import { Sanitizer, STRICT_HTML_POLICY_CONFIG } from "@david-osipov/security-kit";
+import {
+  Sanitizer,
+  STRICT_HTML_POLICY_CONFIG,
+} from "@david-osipov/security-kit";
 import DOMPurify from "dompurify";
 
 // In a browser environment
@@ -418,7 +426,7 @@ const sanitizer = new Sanitizer(DOMPurify, {
 
 const safeHtml = sanitizer.getSanitizedString(
   "<img src=x onerror=alert(1)>",
-  "strict"
+  "strict",
 );
 // => "<img src="x">"
 ```

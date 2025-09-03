@@ -1,6 +1,12 @@
 import { expect, test, afterEach } from "vitest";
-import { __test_getPayloadFingerprint, __test_resetForUnitTests } from "../../src/postMessage";
-import { __test_resetCryptoStateForUnitTests, _setCrypto } from "../../src/state";
+import {
+  __test_getPayloadFingerprint,
+  __test_resetForUnitTests,
+} from "../../src/postMessage";
+import {
+  __test_resetCryptoStateForUnitTests,
+  _setCrypto,
+} from "../../src/state";
 
 // Ensure global state is cleaned between tests
 afterEach(() => {

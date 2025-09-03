@@ -93,7 +93,7 @@ const result = await signer.sign({ foo: 'bar' });
 Server (Node/edge):
 
 ```ts
-import { verifyApiRequestSignature } from '../server/verify-api-request-signature';
+import { verifyApiRequestSignature } from "../server/verify-api-request-signature";
 
 const ok = await verifyApiRequestSignature({
   secret: serverKnownSecretForKid, // ArrayBuffer/Uint8Array or base64
@@ -104,7 +104,7 @@ const ok = await verifyApiRequestSignature({
   kid: requestKid,
   method: request.method,
   path: request.path,
-  bodyBytes: requestBodyBytes // optional
+  bodyBytes: requestBodyBytes, // optional
 });
 
 if (!ok) return respondWithUnauthorized();
@@ -142,7 +142,10 @@ The library prefers bundler-friendly worker emission (recommended):
 - Pass an explicit worker URL:
 
 ```ts
-const signer = await SecureApiSigner.create({ secret, workerUrl: new URL('./worker/signing-worker.ts', import.meta.url) });
+const signer = await SecureApiSigner.create({
+  secret,
+  workerUrl: new URL("./worker/signing-worker.ts", import.meta.url),
+});
 ```
 
 - Or rely on bundler rewriting `new URL('./worker/signing-worker.ts', import.meta.url)` which many bundlers (Vite, Rollup) support.
@@ -157,4 +160,3 @@ Recommended approaches:
 
 - Prefer bundler emission: use `new URL('./worker/signing-worker.ts', import.meta.url)` and let your bundler (Vite, Rollup, etc.) emit the worker asset.
 - Or serve/host the worker as a separate file and pass its URL via `workerUrl` to `SecureApiSigner.create()`.
-

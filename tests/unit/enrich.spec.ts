@@ -5,9 +5,7 @@ import * as path from "path";
 const modPromise = import("../../scripts/generate-sbom");
 
 describe("createSBOMAsync enrichment", () => {
-  it(
-    "enriches components from npm registry (mocked)",
-    async () => {
+  it("enriches components from npm registry (mocked)", async () => {
     // Mock global.fetch
     const fakeResp = {
       ok: true,
@@ -48,7 +46,5 @@ describe("createSBOMAsync enrichment", () => {
     expect(dep!.externalReferences!.some((r: any) => r.type === "vcs")).toBe(
       true,
     );
-  },
-  20000,
-  );
+  }, 20000);
 });

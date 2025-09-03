@@ -33,8 +33,16 @@ describe("normalizeOrigin extra cases", () => {
 
   it("validateURL allowlist matches normalized origins", () => {
     const allowlist = ["https://example.com"];
-    expect(validateURL("https://example.com:443/path", { allowedOrigins: allowlist }).ok).toBe(true);
-    expect(validateURL("https://example.com/", { allowedOrigins: allowlist }).ok).toBe(true);
-    expect(validateURL("https://example.com:8443/", { allowedOrigins: allowlist }).ok).toBe(false);
+    expect(
+      validateURL("https://example.com:443/path", { allowedOrigins: allowlist })
+        .ok,
+    ).toBe(true);
+    expect(
+      validateURL("https://example.com/", { allowedOrigins: allowlist }).ok,
+    ).toBe(true);
+    expect(
+      validateURL("https://example.com:8443/", { allowedOrigins: allowlist })
+        .ok,
+    ).toBe(false);
   });
 });

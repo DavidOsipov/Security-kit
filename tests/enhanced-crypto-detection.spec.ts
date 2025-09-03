@@ -1,7 +1,7 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { CryptoUnavailableError, InvalidParameterError } from '../src/errors';
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { CryptoUnavailableError, InvalidParameterError } from "../src/errors";
 
-describe('Enhanced Crypto Detection with ASVS L3 Security', () => {
+describe("Enhanced Crypto Detection with ASVS L3 Security", () => {
   beforeEach(() => {
     // Clear module cache to ensure strict isolation per Testing Constitution (no leaked module state)
     vi.resetModules();
@@ -14,16 +14,16 @@ describe('Enhanced Crypto Detection with ASVS L3 Security', () => {
   // Helper to mock Node's crypto under both 'node:crypto' and 'crypto' names.
   // Define here so all tests in this suite can use it.
   const setNodeCryptoMock = (factory: unknown) => {
-    vi.doMock('node:crypto', factory as any);
+    vi.doMock("node:crypto", factory as any);
     try {
-      vi.doMock('crypto', factory as any);
+      vi.doMock("crypto", factory as any);
     } catch {
       // ignore if second mock is unnecessary or unsupported in some runners
     }
   };
 
-  describe('Node.js crypto detection', () => {
-    it('detects Node.js webcrypto when available', async () => {
+  describe("Node.js crypto detection", () => {
+    it("detects Node.js webcrypto when available", async () => {
       // Mock successful Node crypto detection
       const mockWebCrypto = {
         getRandomValues: vi.fn((array: Uint8Array) => {
@@ -33,16 +33,16 @@ describe('Enhanced Crypto Detection with ASVS L3 Security', () => {
         subtle: {
           digest: vi.fn(),
         },
-        randomUUID: vi.fn(() => 'test-uuid'),
+        randomUUID: vi.fn(() => "test-uuid"),
       };
 
       // Mock dynamic import to return our mock (must be set before importing the module under test)
       // Some environments resolve the builtin as 'crypto' instead of 'node:crypto'.
       // Mock both to ensure the dynamic import is intercepted reliably.
       const setNodeCryptoMock = (factory: unknown) => {
-        vi.doMock('node:crypto', factory as any);
+        vi.doMock("node:crypto", factory as any);
         try {
-          vi.doMock('crypto', factory as any);
+          vi.doMock("crypto", factory as any);
         } catch {
           // ignore if second mock is unnecessary or unsupported in some runners
         }
@@ -55,16 +55,18 @@ describe('Enhanced Crypto Detection with ASVS L3 Security', () => {
 
       try {
         // Import the state module after mocks are set so vitest can apply mocks correctly
-        const { ensureCrypto, getCryptoState, CryptoState } = await import('../src/state');
+        const { ensureCrypto, getCryptoState, CryptoState } = await import(
+          "../src/state"
+        );
 
         const crypto = await ensureCrypto();
         expect(crypto).toBeDefined();
         expect(getCryptoState()).toBe(CryptoState.Configured);
-        
+
         // Test that the crypto implementation works
         const testArray = new Uint8Array(8);
         crypto.getRandomValues(testArray);
-        expect(testArray.every(byte => byte === 42)).toBe(true);
+        expect(testArray.every((byte) => byte === 42)).toBe(true);
       } finally {
         // Restore original crypto
         if (originalCrypto) {
@@ -73,22 +75,25 @@ describe('Enhanced Crypto Detection with ASVS L3 Security', () => {
       }
     });
 
-    it('adapts Node.js randomBytes when webcrypto unavailable', async () => {
+    it("adapts Node.js randomBytes when webcrypto unavailable", async () => {
       const mockRandomBytes = vi.fn((size: number) => {
         const buffer = Buffer.alloc(size);
         buffer.fill(123); // Fill with test pattern
         return buffer;
       });
 
-  // Mock Node crypto without webcrypto using an async factory to avoid vitest hoisting issues
-  setNodeCryptoMock(async () => ({ randomBytes: mockRandomBytes, randomUUID: vi.fn(() => 'test-uuid') }));
+      // Mock Node crypto without webcrypto using an async factory to avoid vitest hoisting issues
+      setNodeCryptoMock(async () => ({
+        randomBytes: mockRandomBytes,
+        randomUUID: vi.fn(() => "test-uuid"),
+      }));
 
       // Clear globalThis.crypto to force Node detection
       const originalCrypto = globalThis.crypto;
       delete (globalThis as any).crypto;
 
       try {
-        const { ensureCrypto } = await import('../src/state');
+        const { ensureCrypto } = await import("../src/state");
         try {
           const crypto = await ensureCrypto();
           expect(crypto).toBeDefined();
@@ -96,12 +101,14 @@ describe('Enhanced Crypto Detection with ASVS L3 Security', () => {
           // Test the adapted getRandomValues
           const testArray = new Uint8Array(16);
           crypto.getRandomValues(testArray);
-          expect(testArray.every(byte => byte === 123)).toBe(true);
+          expect(testArray.every((byte) => byte === 123)).toBe(true);
           expect(mockRandomBytes).toHaveBeenCalledWith(16);
         } catch (err: any) {
           // In some environments initialization may fail; accept a clear CryptoUnavailableError message
           expect(err).toBeInstanceOf(Error);
-          expect(String(err.message)).toMatch(/Crypto API is unavailable|initialization failed/);
+          expect(String(err.message)).toMatch(
+            /Crypto API is unavailable|initialization failed/,
+          );
         }
       } finally {
         if (originalCrypto) {
@@ -110,26 +117,30 @@ describe('Enhanced Crypto Detection with ASVS L3 Security', () => {
       }
     });
 
-    it('validates ArrayBufferView in adapted getRandomValues', async () => {
+    it("validates ArrayBufferView in adapted getRandomValues", async () => {
       const mockRandomBytes = vi.fn(() => Buffer.alloc(4));
-  setNodeCryptoMock(async () => ({ randomBytes: mockRandomBytes }));
+      setNodeCryptoMock(async () => ({ randomBytes: mockRandomBytes }));
 
       const originalCrypto = globalThis.crypto;
       delete (globalThis as any).crypto;
 
       try {
-        const { ensureCrypto } = await import('../src/state');
+        const { ensureCrypto } = await import("../src/state");
         try {
           const crypto = await ensureCrypto();
 
           // Test with invalid input
           expect(() => crypto.getRandomValues(null as any)).toThrow(TypeError);
           expect(() => crypto.getRandomValues({} as any)).toThrow(TypeError);
-          expect(() => crypto.getRandomValues('string' as any)).toThrow(TypeError);
+          expect(() => crypto.getRandomValues("string" as any)).toThrow(
+            TypeError,
+          );
         } catch (err: any) {
           // If crypto initialization fails in this environment, ensure we got a clear error
           expect(err).toBeInstanceOf(Error);
-          expect(String(err.message)).toMatch(/Crypto API is unavailable|initialization failed/);
+          expect(String(err.message)).toMatch(
+            /Crypto API is unavailable|initialization failed/,
+          );
         }
       } finally {
         if (originalCrypto) {
@@ -139,29 +150,33 @@ describe('Enhanced Crypto Detection with ASVS L3 Security', () => {
     });
   });
 
-  describe('Cache poisoning protection', () => {
-    it('protects against generation-based cache poisoning during Node detection', async () => {
+  describe("Cache poisoning protection", () => {
+    it("protects against generation-based cache poisoning during Node detection", async () => {
       // This test uses a controlled mock that delays resolution so we can change generation mid-flight.
       let resolveImport: any;
-      const importPromise = new Promise(resolve => {
+      const importPromise = new Promise((resolve) => {
         resolveImport = resolve;
       });
 
-  // Provide a factory that returns a promise; set the mock before importing the module
-  setNodeCryptoMock(async () => importPromise as unknown as Record<string, unknown>);
+      // Provide a factory that returns a promise; set the mock before importing the module
+      setNodeCryptoMock(
+        async () => importPromise as unknown as Record<string, unknown>,
+      );
 
       const originalCrypto = globalThis.crypto;
       delete (globalThis as any).crypto;
 
       try {
-        const { ensureCrypto, __resetCryptoStateForTests } = await import('../src/state');
+        const { ensureCrypto, __resetCryptoStateForTests } = await import(
+          "../src/state"
+        );
 
         // Start crypto initialization
         const cryptoPromise = ensureCrypto();
 
         // Trigger a generation change during the async operation (simulate cache poisoning)
         // Use the internal setter which increments the generation counter.
-        const { _setCrypto } = await import('../src/state');
+        const { _setCrypto } = await import("../src/state");
         _setCrypto(undefined as unknown as Crypto);
 
         // Now resolve the import with a valid webcrypto object
@@ -179,17 +194,22 @@ describe('Enhanced Crypto Detection with ASVS L3 Security', () => {
         try {
           const res = await cryptoPromise;
           // If resolved, attempt to read internal test utilities to ensure generation changed.
-          const mod = await import('../src/state');
+          const mod = await import("../src/state");
           const utils = (mod as any).getInternalTestUtilities?.();
-          if (utils && typeof utils._getCryptoGenerationForTest === 'function') {
+          if (
+            utils &&
+            typeof utils._getCryptoGenerationForTest === "function"
+          ) {
             expect(utils._getCryptoGenerationForTest()).toBeGreaterThan(0);
           } else {
             // If test utils not available, at least ensure a crypto-like object was returned
             expect(res).toBeDefined();
-            expect(typeof res.getRandomValues).toBe('function');
+            expect(typeof res.getRandomValues).toBe("function");
           }
         } catch (err: any) {
-          expect(String(err.message)).toMatch(/invalidated|Crypto API is unavailable|initialization failed/);
+          expect(String(err.message)).toMatch(
+            /invalidated|Crypto API is unavailable|initialization failed/,
+          );
         }
       } finally {
         if (originalCrypto) {
@@ -198,15 +218,19 @@ describe('Enhanced Crypto Detection with ASVS L3 Security', () => {
       }
     });
 
-    it('maintains state consistency under concurrent initialization attempts', async () => {
+    it("maintains state consistency under concurrent initialization attempts", async () => {
       const originalCrypto = globalThis.crypto;
       delete (globalThis as any).crypto;
 
-  // Mock Node crypto
-  setNodeCryptoMock(async () => ({ webcrypto: { getRandomValues: vi.fn(), subtle: { digest: vi.fn() } } }));
+      // Mock Node crypto
+      setNodeCryptoMock(async () => ({
+        webcrypto: { getRandomValues: vi.fn(), subtle: { digest: vi.fn() } },
+      }));
 
       try {
-        const { ensureCrypto, getCryptoState, CryptoState } = await import('../src/state');
+        const { ensureCrypto, getCryptoState, CryptoState } = await import(
+          "../src/state"
+        );
         // Start multiple concurrent initializations
         const promises = Array.from({ length: 5 }, () => ensureCrypto());
 
@@ -214,7 +238,7 @@ describe('Enhanced Crypto Detection with ASVS L3 Security', () => {
 
         // All should resolve to the same crypto instance
         const firstResult = results[0];
-        expect(results.every(result => result === firstResult)).toBe(true);
+        expect(results.every((result) => result === firstResult)).toBe(true);
         expect(getCryptoState()).toBe(CryptoState.Configured);
       } finally {
         if (originalCrypto) {
@@ -224,37 +248,47 @@ describe('Enhanced Crypto Detection with ASVS L3 Security', () => {
     });
   });
 
-  describe('secureRandomBytes function', () => {
-    it('generates specified number of random bytes', async () => {
-      const { secureRandomBytes } = await import('../src/state');
+  describe("secureRandomBytes function", () => {
+    it("generates specified number of random bytes", async () => {
+      const { secureRandomBytes } = await import("../src/state");
       const result = await secureRandomBytes(32);
       expect(result).toBeInstanceOf(Uint8Array);
       expect(result.length).toBe(32);
-      
+
       // Should not be all zeros (with extremely high probability)
-      expect(result.some(byte => byte !== 0)).toBe(true);
+      expect(result.some((byte) => byte !== 0)).toBe(true);
     });
 
-    it('validates input parameters strictly', async () => {
-      const { secureRandomBytes } = await import('../src/state');
+    it("validates input parameters strictly", async () => {
+      const { secureRandomBytes } = await import("../src/state");
       // Invalid types
-      await expect(secureRandomBytes('32' as any)).rejects.toThrowError(/length must|InvalidParameterError/);
-      await expect(secureRandomBytes({} as any)).rejects.toThrowError(/length must|InvalidParameterError/);
-      
+      await expect(secureRandomBytes("32" as any)).rejects.toThrowError(
+        /length must|InvalidParameterError/,
+      );
+      await expect(secureRandomBytes({} as any)).rejects.toThrowError(
+        /length must|InvalidParameterError/,
+      );
+
       // Invalid ranges
-      await expect(secureRandomBytes(-1)).rejects.toThrowError(/length must|InvalidParameterError/);
-      await expect(secureRandomBytes(3.14)).rejects.toThrowError(/length must|InvalidParameterError/);
-      await expect(secureRandomBytes(65537)).rejects.toThrowError(/length must not exceed 65536|InvalidParameterError/);
-      
+      await expect(secureRandomBytes(-1)).rejects.toThrowError(
+        /length must|InvalidParameterError/,
+      );
+      await expect(secureRandomBytes(3.14)).rejects.toThrowError(
+        /length must|InvalidParameterError/,
+      );
+      await expect(secureRandomBytes(65537)).rejects.toThrowError(
+        /length must not exceed 65536|InvalidParameterError/,
+      );
+
       // Edge cases
       const zero = await secureRandomBytes(0);
       expect(zero.length).toBe(0);
-      
+
       const max = await secureRandomBytes(65536);
       expect(max.length).toBe(65536);
     });
 
-    it('uses the enhanced crypto detection', async () => {
+    it("uses the enhanced crypto detection", async () => {
       const mockGetRandomValues = vi.fn((array: Uint8Array) => {
         array.fill(99);
         return array;
@@ -272,9 +306,9 @@ describe('Enhanced Crypto Detection with ASVS L3 Security', () => {
       delete (globalThis as any).crypto;
 
       try {
-        const { secureRandomBytes } = await import('../src/state');
+        const { secureRandomBytes } = await import("../src/state");
         const result = await secureRandomBytes(16);
-        expect(result.every(byte => byte === 99)).toBe(true);
+        expect(result.every((byte) => byte === 99)).toBe(true);
         expect(mockGetRandomValues).toHaveBeenCalledOnce();
       } finally {
         if (originalCrypto) {
@@ -284,15 +318,15 @@ describe('Enhanced Crypto Detection with ASVS L3 Security', () => {
     });
   });
 
-  describe('isCryptoAvailable function', () => {
-    it('returns true when crypto is available', async () => {
+  describe("isCryptoAvailable function", () => {
+    it("returns true when crypto is available", async () => {
       // With global crypto
-      const { isCryptoAvailable } = await import('../src/state');
+      const { isCryptoAvailable } = await import("../src/state");
       const available = await isCryptoAvailable();
       expect(available).toBe(true);
     });
 
-    it('returns true when Node crypto is available', async () => {
+    it("returns true when Node crypto is available", async () => {
       setNodeCryptoMock(() => ({
         webcrypto: {
           getRandomValues: vi.fn(),
@@ -304,7 +338,7 @@ describe('Enhanced Crypto Detection with ASVS L3 Security', () => {
       delete (globalThis as any).crypto;
 
       try {
-        const { isCryptoAvailable } = await import('../src/state');
+        const { isCryptoAvailable } = await import("../src/state");
         const available = await isCryptoAvailable();
         expect(available).toBe(true);
       } finally {
@@ -314,17 +348,17 @@ describe('Enhanced Crypto Detection with ASVS L3 Security', () => {
       }
     });
 
-    it('returns false when no crypto is available', async () => {
+    it("returns false when no crypto is available", async () => {
       // Mock failed Node import
       setNodeCryptoMock(() => {
-        throw new Error('Module not found');
+        throw new Error("Module not found");
       });
 
       const originalCrypto = globalThis.crypto;
       delete (globalThis as any).crypto;
 
       try {
-        const { isCryptoAvailable } = await import('../src/state');
+        const { isCryptoAvailable } = await import("../src/state");
         const available = await isCryptoAvailable();
         expect(available).toBe(false);
       } finally {
@@ -334,9 +368,9 @@ describe('Enhanced Crypto Detection with ASVS L3 Security', () => {
       }
     });
 
-    it('does not throw on crypto detection failure', async () => {
+    it("does not throw on crypto detection failure", async () => {
       setNodeCryptoMock(() => {
-        throw new Error('Import failed');
+        throw new Error("Import failed");
       });
 
       const originalCrypto = globalThis.crypto;
@@ -344,7 +378,7 @@ describe('Enhanced Crypto Detection with ASVS L3 Security', () => {
 
       try {
         // Should not throw, just return false
-        const { isCryptoAvailable } = await import('../src/state');
+        const { isCryptoAvailable } = await import("../src/state");
         await expect(isCryptoAvailable()).resolves.toBe(false);
       } finally {
         if (originalCrypto) {
@@ -354,18 +388,20 @@ describe('Enhanced Crypto Detection with ASVS L3 Security', () => {
     });
   });
 
-  describe('Error handling and security validation', () => {
-    it('handles Node crypto import failures gracefully', async () => {
-      vi.doMock('node:crypto', () => {
-        throw new Error('Import failed');
+  describe("Error handling and security validation", () => {
+    it("handles Node crypto import failures gracefully", async () => {
+      vi.doMock("node:crypto", () => {
+        throw new Error("Import failed");
       });
 
       const originalCrypto = globalThis.crypto;
       delete (globalThis as any).crypto;
 
       try {
-  const { ensureCrypto } = await import('../src/state');
-  await expect(ensureCrypto()).rejects.toThrowError(/Crypto API is unavailable/);
+        const { ensureCrypto } = await import("../src/state");
+        await expect(ensureCrypto()).rejects.toThrowError(
+          /Crypto API is unavailable/,
+        );
       } finally {
         if (originalCrypto) {
           (globalThis as any).crypto = originalCrypto;
@@ -373,7 +409,7 @@ describe('Enhanced Crypto Detection with ASVS L3 Security', () => {
       }
     });
 
-    it('validates Node crypto interfaces before trusting them', async () => {
+    it("validates Node crypto interfaces before trusting them", async () => {
       // Mock invalid Node crypto (missing getRandomValues)
       setNodeCryptoMock(() => ({
         webcrypto: {
@@ -386,8 +422,10 @@ describe('Enhanced Crypto Detection with ASVS L3 Security', () => {
       delete (globalThis as any).crypto;
 
       try {
-  const { ensureCrypto } = await import('../src/state');
-  await expect(ensureCrypto()).rejects.toThrowError(/Crypto API is unavailable/);
+        const { ensureCrypto } = await import("../src/state");
+        await expect(ensureCrypto()).rejects.toThrowError(
+          /Crypto API is unavailable/,
+        );
       } finally {
         if (originalCrypto) {
           (globalThis as any).crypto = originalCrypto;
@@ -395,9 +433,11 @@ describe('Enhanced Crypto Detection with ASVS L3 Security', () => {
       }
     });
 
-    it('maintains existing state machine integrity', async () => {
+    it("maintains existing state machine integrity", async () => {
       // Test that enhanced detection doesn't break existing state transitions
-      const { ensureCrypto, getCryptoState, CryptoState } = await import('../src/state');
+      const { ensureCrypto, getCryptoState, CryptoState } = await import(
+        "../src/state"
+      );
       expect(getCryptoState()).toBe(CryptoState.Unconfigured);
 
       await ensureCrypto();

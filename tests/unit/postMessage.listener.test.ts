@@ -21,7 +21,11 @@ describe("createSecurePostMessageListener basic hardening", () => {
       validate: { x: "number" },
     });
     // dispatch a message from disallowed origin
-    const ev = new MessageEvent("message", { data: JSON.stringify({ x: 1 }), origin: "https://evil.com", source: window });
+    const ev = new MessageEvent("message", {
+      data: JSON.stringify({ x: 1 }),
+      origin: "https://evil.com",
+      source: window,
+    });
     window.dispatchEvent(ev);
     expect(onMessage).not.toHaveBeenCalled();
     listener.destroy();
@@ -39,7 +43,11 @@ describe("createSecurePostMessageListener basic hardening", () => {
     // attach __proto__ maliciously in stringified payload
     const malicious = JSON.parse(JSON.stringify(payload));
     (malicious as any).__proto__ = { hacked: true };
-    const ev = new MessageEvent("message", { data: JSON.stringify(malicious), origin: "http://localhost", source: window });
+    const ev = new MessageEvent("message", {
+      data: JSON.stringify(malicious),
+      origin: "http://localhost",
+      source: window,
+    });
     window.dispatchEvent(ev);
     expect(onMessage).toHaveBeenCalled();
     // ensure prototype was not polluted
@@ -51,7 +59,11 @@ describe("createSecurePostMessageListener basic hardening", () => {
       cur.next = {};
       cur = cur.next;
     }
-    const ev2 = new MessageEvent("message", { data: JSON.stringify(deep), origin: "http://localhost", source: window });
+    const ev2 = new MessageEvent("message", {
+      data: JSON.stringify(deep),
+      origin: "http://localhost",
+      source: window,
+    });
     // should not throw; listener should drop due to depth
     window.dispatchEvent(ev2);
     listener.destroy();

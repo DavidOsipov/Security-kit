@@ -23,13 +23,19 @@ describe("crypto module (unit)", () => {
   });
 
   it("generateSecureStringSync throws for invalid alphabet", () => {
-    expect(() => generateSecureStringSync("", 4)).toThrow(InvalidParameterError);
-    expect(() => generateSecureStringSync("aa", 4)).toThrow(InvalidParameterError);
+    expect(() => generateSecureStringSync("", 4)).toThrow(
+      InvalidParameterError,
+    );
+    expect(() => generateSecureStringSync("aa", 4)).toThrow(
+      InvalidParameterError,
+    );
   });
 
   it("getSecureRandomInt handles min===max and invalid ranges", async () => {
     expect(await getSecureRandomInt(5, 5)).toBe(5);
-    await expect(getSecureRandomInt(10, 1)).rejects.toBeInstanceOf(InvalidParameterError);
+    await expect(getSecureRandomInt(10, 1)).rejects.toBeInstanceOf(
+      InvalidParameterError,
+    );
   });
 
   it("generateSRI accepts string input and returns expected prefix", async () => {

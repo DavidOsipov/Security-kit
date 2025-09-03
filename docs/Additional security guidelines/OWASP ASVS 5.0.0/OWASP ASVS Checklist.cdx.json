@@ -15,9 +15,7 @@
     ],
     "supplier": {
       "name": "OWASP Foundation",
-      "url": [
-        "https://owasp.org"
-      ]
+      "url": ["https://owasp.org"]
     }
   },
   "declarations": {

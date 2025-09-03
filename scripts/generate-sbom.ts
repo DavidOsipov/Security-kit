@@ -85,7 +85,7 @@ function safeReadJSON<T>(filePath: string, allowedBase?: string): T {
   assertPathAllowed(safePath, base);
   // safePath is validated above to reside inside allowedBase
   // Explicitly allowed: reading a validated path inside repository root
-   
+
   // NOSONAR: safePath was resolved and containment-checked via resolveAndValidateUserPath + assertPathAllowed
   // eslint-disable-next-line security/detect-non-literal-fs-filename -- safePath validated above
   const raw = fs.readFileSync(safePath, { encoding: "utf8" });
@@ -187,10 +187,10 @@ export function resolveAndValidateUserPath(
   let realRepo: string;
   try {
     // abs is derived from userPath and normalized above; resolve symlinks
-   
-  // NOSONAR: realpathSync on an already-normalized path; we validate containment below.
-  // eslint-disable-next-line security/detect-non-literal-fs-filename
-  realAbs = fs.realpathSync(abs);
+
+    // NOSONAR: realpathSync on an already-normalized path; we validate containment below.
+    // eslint-disable-next-line security/detect-non-literal-fs-filename
+    realAbs = fs.realpathSync(abs);
   } catch (e: any) {
     // If realpath fails because the path doesn't exist, attempt to resolve the parent directory.
     // Only handle ENOENT; other errors should be rethrown to avoid hiding unexpected failures.
@@ -204,8 +204,7 @@ export function resolveAndValidateUserPath(
   }
 
   try {
-   
-  // NOSONAR: realpathSync on repository root; used only for containment checks.
+    // NOSONAR: realpathSync on repository root; used only for containment checks.
     // eslint-disable-next-line security/detect-non-literal-fs-filename
     realRepo = fs.realpathSync(repoRoot);
   } catch {
@@ -279,11 +278,11 @@ export function atomicWriteFileSync(
   }
   // Make checks explicit before writing to satisfy static analyzers
   assertPathAllowed(tmpPath, realBase);
-   
+
   // NOSONAR: tmpPath is validated to be inside the repository root (assertPathAllowed + realpath checks).
   // eslint-disable-next-line security/detect-non-literal-fs-filename -- tmpPath validated above
   fs.writeFileSync(tmpPath, data, { encoding: "utf8", mode: 0o600 });
-   
+
   // NOSONAR: renaming a temp file to a validated destination inside the repository root is intentional and safe.
   // eslint-disable-next-line security/detect-non-literal-fs-filename -- tmpPath and safeTarget validated above
   fs.renameSync(tmpPath, safeTarget);
@@ -594,10 +593,10 @@ function computeHashesForPath(targetPath: string, allowedBase?: string) {
   if (isFileSync(p)) {
     // Explicitly assert path is allowed for static analyzers
     assertPathAllowed(p, base);
-   
-  // NOSONAR: p is validated and contained within allowedBase by helpers above.
-  // eslint-disable-next-line security/detect-non-literal-fs-filename
-  const content = fs.readFileSync(p);
+
+    // NOSONAR: p is validated and contained within allowedBase by helpers above.
+    // eslint-disable-next-line security/detect-non-literal-fs-filename
+    const content = fs.readFileSync(p);
     return [
       { alg: "SHA-512", content: sha512Hex(content) },
       { alg: "SHA-256", content: sha256Hex(content) },
@@ -616,10 +615,10 @@ function computeHashesForPath(targetPath: string, allowedBase?: string) {
       const fpath = path.join(p, rel);
       // Make explicit to static analyzers that fpath is under allowed base
       assertPathAllowed(fpath, base);
-   
-  // NOSONAR: fpath is validated by assertPathAllowed to be inside allowedBase.
-  // eslint-disable-next-line security/detect-non-literal-fs-filename
-  const data = fs.readFileSync(fpath);
+
+      // NOSONAR: fpath is validated by assertPathAllowed to be inside allowedBase.
+      // eslint-disable-next-line security/detect-non-literal-fs-filename
+      const data = fs.readFileSync(fpath);
       h512.update(data);
       h512.update("\0");
       h256.update(data);
@@ -661,10 +660,9 @@ function computeHashForPath(targetPath: string, allowedBase?: string): string {
   const p = resolveAndValidateUserPath(targetPath, base, "hash target path");
   assertPathAllowed(p, base);
   if (isFileSync(p)) {
-   
-  // NOSONAR: p validated above via resolveAndValidateUserPath + assertPathAllowed
-  // eslint-disable-next-line security/detect-non-literal-fs-filename
-  const content = fs.readFileSync(p);
+    // NOSONAR: p validated above via resolveAndValidateUserPath + assertPathAllowed
+    // eslint-disable-next-line security/detect-non-literal-fs-filename
+    const content = fs.readFileSync(p);
     return sha512Hex(content);
   }
 
@@ -921,10 +919,10 @@ function parseLockfileDeps(
   if (!isFileSync(lockPath)) return undefined;
   try {
     assertPathAllowed(lockPath, repoRoot);
-   
-  // NOSONAR: lockPath is resolved and containment-checked before reading.
-  // eslint-disable-next-line security/detect-non-literal-fs-filename
-  const lock = JSON.parse(fs.readFileSync(lockPath, "utf8")) as any;
+
+    // NOSONAR: lockPath is resolved and containment-checked before reading.
+    // eslint-disable-next-line security/detect-non-literal-fs-filename
+    const lock = JSON.parse(fs.readFileSync(lockPath, "utf8")) as any;
     const pairs: Array<[string, string]> = [];
     const traverse = (obj: any) => {
       if (!obj || typeof obj !== "object") return;

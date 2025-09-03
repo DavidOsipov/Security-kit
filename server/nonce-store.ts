@@ -1,25 +1,26 @@
 /**
  * @fileoverview Simple NonceStore implementation for testing
- * 
+ *
  * This is a simplified wrapper around InMemoryNonceStore that provides
  * synchronous methods for testing purposes. The full async interface
  * is available in verify-api-request-signature.ts.
- * 
+ *
  * ⚠️ WARNING: This implementation is NOT suitable for production:
  * - Not distributed: works only with single server instance
  * - Not persistent: lost on restart
  * - Not atomic: race conditions possible with high concurrency
- * 
+ *
  * For production, use Redis, DynamoDB, or another distributed store.
  */
 
-import { InvalidParameterError } from '../src/errors';
+import { InvalidParameterError } from "../src/errors";
 
 /**
  * Simple in-memory nonce store for testing.
  * This class provides synchronous methods that wrap the async functionality
  * needed for testing scenarios.
  */
+/* eslint-disable functional/immutable-data -- Justification: This in-memory nonce store mutates a private Map to track reservation and expiry state. This implementation is for testing (not production), and Map#set/delete mutations are the intended, encapsulated behavior. */
 export class NonceStore {
   #map = new Map<string, number>(); // key = `${kid}:${nonce}`, value = expiry unix ms
 
@@ -47,8 +48,8 @@ export class NonceStore {
    */
   store(kid: string, nonce: string, ttlMs: number): void {
     this.#validateStoreParams(kid, nonce);
-    if (typeof ttlMs !== 'number' || ttlMs < 1 || ttlMs > 86400000) {
-      throw new InvalidParameterError('ttlMs must be between 1 and 86400000');
+    if (typeof ttlMs !== "number" || ttlMs < 1 || ttlMs > 86400000) {
+      throw new InvalidParameterError("ttlMs must be between 1 and 86400000");
     }
     const key = `${kid}:${nonce}`;
     const exp = Date.now() + Math.max(0, Math.floor(ttlMs));
@@ -87,13 +88,14 @@ export class NonceStore {
   }
 
   #validateStoreParams(kid: string, nonce: string): void {
-    if (typeof kid !== 'string' || kid.length === 0 || kid.length > 128) {
-      throw new InvalidParameterError('kid must be a non-empty string');
+    if (typeof kid !== "string" || kid.length === 0 || kid.length > 128) {
+      throw new InvalidParameterError("kid must be a non-empty string");
     }
-    if (typeof nonce !== 'string' || nonce.length === 0 || nonce.length > 256) {
-      throw new InvalidParameterError('nonce must be a non-empty string');
+    if (typeof nonce !== "string" || nonce.length === 0 || nonce.length > 256) {
+      throw new InvalidParameterError("nonce must be a non-empty string");
     }
     // For testing, we're more lenient on nonce format validation
     // The full base64 validation happens in the verify function
   }
 }
+/* eslint-enable functional/immutable-data */

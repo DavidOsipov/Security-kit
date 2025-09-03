@@ -25,7 +25,9 @@ describe("canonical", () => {
 
     it("throws InvalidParameterError for BigInt values", () => {
       expect(() => toCanonicalValue(42n)).toThrow(InvalidParameterError);
-      expect(() => toCanonicalValue(BigInt(123))).toThrow(InvalidParameterError);
+      expect(() => toCanonicalValue(BigInt(123))).toThrow(
+        InvalidParameterError,
+      );
     });
 
     it("converts functions and symbols to undefined", () => {
@@ -62,12 +64,12 @@ describe("canonical", () => {
         __proto__: "forbidden",
         constructor: "forbidden",
         prototype: "forbidden",
-        anotherKey: "anotherValue"
+        anotherKey: "anotherValue",
       };
       const result = toCanonicalValue(obj);
       expect(result).toEqual({
         anotherKey: "anotherValue",
-        normalKey: "value"
+        normalKey: "value",
       });
     });
 
@@ -82,20 +84,20 @@ describe("canonical", () => {
       const complex = {
         users: [
           { id: 1, name: "Alice", active: true },
-          { id: 2, name: "Bob", active: false }
+          { id: 2, name: "Bob", active: false },
         ],
         metadata: {
           version: "1.0",
           timestamp: new Date("2023-01-01T00:00:00.000Z"),
           config: {
             debug: true,
-            features: ["auth", "crypto"]
-          }
+            features: ["auth", "crypto"],
+          },
         },
         stats: {
           total: 100,
-          processed: 75
-        }
+          processed: 75,
+        },
       };
 
       const result = toCanonicalValue(complex);
@@ -103,19 +105,19 @@ describe("canonical", () => {
         metadata: {
           config: {
             debug: true,
-            features: ["auth", "crypto"]
+            features: ["auth", "crypto"],
           },
           timestamp: "2023-01-01T00:00:00.000Z",
-          version: "1.0"
+          version: "1.0",
         },
         stats: {
           processed: 75,
-          total: 100
+          total: 100,
         },
         users: [
           { active: true, id: 1, name: "Alice" },
-          { active: false, id: 2, name: "Bob" }
-        ]
+          { active: false, id: 2, name: "Bob" },
+        ],
       });
     });
 
@@ -127,7 +129,15 @@ describe("canonical", () => {
     it("handles mixed types in arrays", () => {
       const mixed = [1, "string", true, null, undefined, { a: 1 }, [2, 3]];
       const result = toCanonicalValue(mixed);
-      expect(result).toEqual([1, "string", true, null, undefined, { a: 1 }, [2, 3]]);
+      expect(result).toEqual([
+        1,
+        "string",
+        true,
+        null,
+        undefined,
+        { a: 1 },
+        [2, 3],
+      ]);
     });
 
     it("handles RegExp and other objects", () => {
@@ -155,14 +165,19 @@ describe("canonical", () => {
     it("handles very large numbers", () => {
       expect(toCanonicalValue(Number.MAX_VALUE)).toBe(Number.MAX_VALUE);
       expect(toCanonicalValue(Number.MIN_VALUE)).toBe(Number.MIN_VALUE);
-      expect(toCanonicalValue(Number.MAX_SAFE_INTEGER)).toBe(Number.MAX_SAFE_INTEGER);
-      expect(toCanonicalValue(Number.MIN_SAFE_INTEGER)).toBe(Number.MIN_SAFE_INTEGER);
+      expect(toCanonicalValue(Number.MAX_SAFE_INTEGER)).toBe(
+        Number.MAX_SAFE_INTEGER,
+      );
+      expect(toCanonicalValue(Number.MIN_SAFE_INTEGER)).toBe(
+        Number.MIN_SAFE_INTEGER,
+      );
     });
 
     it("handles exotic objects that should become empty", () => {
       // Test various built-in objects that should canonicalize to empty objects
       expect(toCanonicalValue(new RegExp("test"))).toEqual({});
-      expect(toCanonicalValue(new Date())).toBe(new Date().toISOString()); // Date is special-cased
+      const now = new Date();
+      expect(toCanonicalValue(now)).toBe(now.toISOString()); // Date is special-cased
       expect(toCanonicalValue(new Error("test"))).toEqual({});
       expect(toCanonicalValue(new Promise(() => {}))).toEqual({});
       expect(toCanonicalValue(new WeakMap())).toEqual({});
@@ -198,8 +213,12 @@ describe("canonical", () => {
     it("handles objects with getters and setters", () => {
       const obj = {
         normalProp: "value",
-        get computed() { return "computed"; },
-        set computed(value) { /* setter */ }
+        get computed() {
+          return "computed";
+        },
+        set computed(value) {
+          /* setter */
+        },
       };
       const result = toCanonicalValue(obj);
       expect(result).toEqual({ normalProp: "value" }); // getters/setters should be ignored
@@ -209,9 +228,9 @@ describe("canonical", () => {
       const target = { a: 1 };
       const proxy = new Proxy(target, {
         get(target, prop) {
-          if (prop === 'b') return 2;
+          if (prop === "b") return 2;
           return Reflect.get(target, prop);
-        }
+        },
       });
       const result = toCanonicalValue(proxy);
       expect(result).toEqual({ a: 1, b: 2 }); // Should work through proxy
@@ -245,11 +264,11 @@ describe("canonical", () => {
           ref3: {
             name: "obj3",
             ref1: { __circular: true },
-            ref2: { __circular: true }
+            ref2: { __circular: true },
           },
-          ref1: { __circular: true }
+          ref1: { __circular: true },
         },
-        ref3: { __circular: true }
+        ref3: { __circular: true },
       });
     });
 
@@ -266,18 +285,18 @@ describe("canonical", () => {
         nested: {
           __proto__: "forbidden",
           constructor: "forbidden",
-          normal: "nested_value"
+          normal: "nested_value",
         },
         another: {
           prototype: "also_forbidden",
-          normal: "another_value"
-        }
+          normal: "another_value",
+        },
       };
       const result = toCanonicalValue(obj);
       expect(result).toEqual({
         another: { normal: "another_value" },
         nested: { normal: "nested_value" },
-        normal: "value"
+        normal: "value",
       });
     });
 
@@ -287,18 +306,20 @@ describe("canonical", () => {
         undefined: undefined,
         null: null,
         function: () => {},
-        symbol: Symbol("test")
+        symbol: Symbol("test"),
       };
       const result = toCanonicalValue(obj);
       expect(result).toEqual({
         defined: "value",
-        null: null
+        null: null,
         // undefined, function, and symbol should be filtered out
       });
     });
 
     it("handles BigInt in nested structures", () => {
-      expect(() => toCanonicalValue({ value: 42n })).toThrow(InvalidParameterError);
+      expect(() => toCanonicalValue({ value: 42n })).toThrow(
+        InvalidParameterError,
+      );
       expect(() => toCanonicalValue([1, 2n, 3])).toThrow(InvalidParameterError);
     });
 
@@ -306,7 +327,7 @@ describe("canonical", () => {
       const obj = { enumerable: "value" };
       Object.defineProperty(obj, "nonEnumerable", {
         value: "hidden",
-        enumerable: false
+        enumerable: false,
       });
       const result = toCanonicalValue(obj);
       expect(result).toEqual({ enumerable: "value" }); // non-enumerable should be ignored
@@ -335,30 +356,30 @@ describe("canonical", () => {
 
     it("handles primitive values", () => {
       expect(safeStableStringify("string")).toBe('"string"');
-      expect(safeStableStringify(42)).toBe('42');
-      expect(safeStableStringify(true)).toBe('true');
-      expect(safeStableStringify(null)).toBe('null');
+      expect(safeStableStringify(42)).toBe("42");
+      expect(safeStableStringify(true)).toBe("true");
+      expect(safeStableStringify(null)).toBe("null");
     });
 
     it("returns 'null' for undefined values", () => {
-      expect(safeStableStringify(undefined)).toBe('null');
+      expect(safeStableStringify(undefined)).toBe("null");
     });
 
     it("handles arrays", () => {
-      expect(safeStableStringify([1, 2, 3])).toBe('[1,2,3]');
-      expect(safeStableStringify([3, 1, 2])).toBe('[3,1,2]'); // order preserved
+      expect(safeStableStringify([1, 2, 3])).toBe("[1,2,3]");
+      expect(safeStableStringify([3, 1, 2])).toBe("[3,1,2]"); // order preserved
     });
 
     it("handles complex nested structures", () => {
       const complex = {
         users: [
           { name: "Alice", id: 1 },
-          { name: "Bob", id: 2 }
+          { name: "Bob", id: 2 },
         ],
         metadata: {
           version: "1.0",
-          features: ["auth", "crypto"]
-        }
+          features: ["auth", "crypto"],
+        },
       };
 
       const result = safeStableStringify(complex);
@@ -373,7 +394,9 @@ describe("canonical", () => {
 
     it("throws InvalidParameterError for BigInt values", () => {
       expect(() => safeStableStringify(42n)).toThrow(InvalidParameterError);
-      expect(() => safeStableStringify({ value: 123n })).toThrow(InvalidParameterError);
+      expect(() => safeStableStringify({ value: 123n })).toThrow(
+        InvalidParameterError,
+      );
     });
 
     it("handles circular references", () => {
@@ -388,7 +411,7 @@ describe("canonical", () => {
       const obj = {
         normalKey: "value",
         __proto__: "forbidden",
-        constructor: "forbidden"
+        constructor: "forbidden",
       };
 
       const result = safeStableStringify(obj);
@@ -402,8 +425,8 @@ describe("canonical", () => {
     });
 
     it("handles empty structures", () => {
-      expect(safeStableStringify({})).toBe('{}');
-      expect(safeStableStringify([])).toBe('[]');
+      expect(safeStableStringify({})).toBe("{}");
+      expect(safeStableStringify([])).toBe("[]");
     });
 
     it("handles undefined values in nested structures", () => {
@@ -412,8 +435,8 @@ describe("canonical", () => {
         undefined: undefined,
         nested: {
           also_undefined: undefined,
-          defined: "nested"
-        }
+          defined: "nested",
+        },
       };
       const result = safeStableStringify(obj);
       expect(result).toBe('{"defined":"value","nested":{"defined":"nested"}}');
@@ -423,7 +446,7 @@ describe("canonical", () => {
       const obj = {
         null_value: null,
         undefined_value: undefined,
-        array: [null, undefined, "string"]
+        array: [null, undefined, "string"],
       };
       const result = safeStableStringify(obj);
       expect(result).toBe('{"array":["string"],"null_value":null}');
@@ -433,7 +456,7 @@ describe("canonical", () => {
       const obj = {
         "1": "one",
         "2": "two",
-        "10": "ten"
+        "10": "ten",
       };
       const result = safeStableStringify(obj);
       // Numeric keys should be sorted as strings
@@ -448,15 +471,15 @@ describe("canonical", () => {
 
     it("handles special JSON characters", () => {
       const obj = {
-        quotes: '"double" \'single\'',
+        quotes: "\"double\" 'single'",
         backslash: "path\\to\\file",
         newline: "line1\nline2",
         tab: "col1\tcol2",
-        unicode: "café"
+        unicode: "café",
       };
       const result = safeStableStringify(obj);
       const parsed = JSON.parse(result);
-      expect(parsed.quotes).toBe('"double" \'single\'');
+      expect(parsed.quotes).toBe("\"double\" 'single'");
       expect(parsed.backslash).toBe("path\\to\\file");
       expect(parsed.newline).toBe("line1\nline2");
       expect(parsed.tab).toBe("col1\tcol2");
@@ -482,17 +505,21 @@ describe("canonical", () => {
         "string",
         null,
         undefined,
-        { z: 1, a: 2 }
+        { z: 1, a: 2 },
       ];
       const result = safeStableStringify(arr);
-      expect(result).toBe('[{"type":"object","value":1},[1,2,3],"string",null,null,{"a":2,"z":1}]');
+      expect(result).toBe(
+        '[{"type":"object","value":1},[1,2,3],"string",null,null,{"a":2,"z":1}]',
+      );
     });
 
     it("handles Date objects in arrays", () => {
       const date = new Date("2023-01-01T00:00:00.000Z");
       const arr = [date, { timestamp: date }];
       const result = safeStableStringify(arr);
-      expect(result).toBe('["2023-01-01T00:00:00.000Z",{"timestamp":"2023-01-01T00:00:00.000Z"}]');
+      expect(result).toBe(
+        '["2023-01-01T00:00:00.000Z",{"timestamp":"2023-01-01T00:00:00.000Z"}]',
+      );
     });
 
     it("handles circular references in stringify", () => {
@@ -511,11 +538,13 @@ describe("canonical", () => {
         constructor: "forbidden",
         nested: {
           __proto__: "nested_forbidden",
-          normal: "nested_normal"
-        }
+          normal: "nested_normal",
+        },
       };
       const result = safeStableStringify(obj);
-      expect(result).toBe('{"nested":{"normal":"nested_normal"},"normal":"value"}');
+      expect(result).toBe(
+        '{"nested":{"normal":"nested_normal"},"normal":"value"}',
+      );
     });
 
     it("handles very large objects", () => {
@@ -534,7 +563,7 @@ describe("canonical", () => {
       const obj = {
         z: "same",
         a: "same",
-        m: "different"
+        m: "different",
       };
       const result = safeStableStringify(obj);
       expect(result).toBe('{"a":"same","m":"different","z":"same"}');
@@ -544,23 +573,25 @@ describe("canonical", () => {
       const shared = { value: "shared" };
       const arr = [shared, shared, { different: "value" }];
       const result = safeStableStringify(arr);
-      expect(result).toBe('[{"value":"shared"},{"value":"shared"},{"different":"value"}]');
+      expect(result).toBe(
+        '[{"value":"shared"},{"value":"shared"},{"different":"value"}]',
+      );
     });
 
     it("handles undefined at top level", () => {
-      expect(safeStableStringify(undefined)).toBe('null');
+      expect(safeStableStringify(undefined)).toBe("null");
     });
 
     it("handles null at top level", () => {
-      expect(safeStableStringify(null)).toBe('null');
+      expect(safeStableStringify(null)).toBe("null");
     });
 
     it("handles empty array", () => {
-      expect(safeStableStringify([])).toBe('[]');
+      expect(safeStableStringify([])).toBe("[]");
     });
 
     it("handles empty object", () => {
-      expect(safeStableStringify({})).toBe('{}');
+      expect(safeStableStringify({})).toBe("{}");
     });
   });
 });

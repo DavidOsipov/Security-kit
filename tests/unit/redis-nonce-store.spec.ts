@@ -54,7 +54,7 @@ describe("RedisNonceStore", () => {
     } as any;
     const store = new RedisNonceStore(redis, "x");
     await expect(store.finalize("k", "n", 1000)).rejects.toThrow(
-      /RedisNonceStore.finalize: key missing during finalize/
+      /RedisNonceStore.finalize: key missing during finalize/,
     );
   });
 });

@@ -1,12 +1,12 @@
-import { test, expect } from 'vitest';
+import { test, expect } from "vitest";
 import {
   __test_ensureFingerprintSalt,
   __test_getSaltFailureTimestamp,
   __test_setSaltFailureTimestamp,
   __test_resetForUnitTests,
-} from '../../src/postMessage';
+} from "../../src/postMessage";
 
-test('test helpers: ensureFingerprintSalt and salt timestamp manipulation', async () => {
+test("test helpers: ensureFingerprintSalt and salt timestamp manipulation", async () => {
   (globalThis as any).__SECURITY_KIT_ALLOW_TEST_APIS = true;
   try {
     // reset first

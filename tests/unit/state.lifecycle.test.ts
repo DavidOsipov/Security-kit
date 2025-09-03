@@ -1,9 +1,12 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import * as state from "../../src/state";
 import { setCrypto, sealSecurityKit } from "../../src/config";
-import { CryptoUnavailableError, InvalidConfigurationError } from "../../src/errors";
+import {
+  CryptoUnavailableError,
+  InvalidConfigurationError,
+} from "../../src/errors";
 
-const { __test_resetCryptoStateForUnitTests, CryptoState } = (state as any);
+const { __test_resetCryptoStateForUnitTests, CryptoState } = state as any;
 
 describe("state lifecycle and configuration", () => {
   beforeEach(() => {
@@ -17,9 +20,13 @@ describe("state lifecycle and configuration", () => {
       typeof (globalThis as any).crypto.getRandomValues === "function"
     );
     if (globalCryptoAvailable) {
-      await expect(state.ensureCrypto()).resolves.toHaveProperty("getRandomValues");
+      await expect(state.ensureCrypto()).resolves.toHaveProperty(
+        "getRandomValues",
+      );
     } else {
-      await expect(state.ensureCrypto()).rejects.toThrow(CryptoUnavailableError);
+      await expect(state.ensureCrypto()).rejects.toThrow(
+        CryptoUnavailableError,
+      );
     }
   });
 

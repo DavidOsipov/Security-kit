@@ -1,6 +1,10 @@
 import { describe, it, expect } from "vitest";
 import { sanitizeErrorForLogs, getStackFingerprint } from "../../src/errors";
-import { reportProdError, setProdErrorHook, __test_resetProdErrorReporter } from "../../src/reporting";
+import {
+  reportProdError,
+  setProdErrorHook,
+  __test_resetProdErrorReporter,
+} from "../../src/reporting";
 import { environment } from "../../src/environment";
 
 describe("stack fingerprinting for errors", () => {
@@ -8,10 +12,10 @@ describe("stack fingerprinting for errors", () => {
     const e = new Error("boom");
     // Create a fake stack to normalize
     e.stack = "Error: boom\n at foo (file.js:10:5)\n at bar (file.js:20:7)";
-  const s = sanitizeErrorForLogs(e) as any;
-  expect(s.stackHash).toBeDefined();
-  const f = getStackFingerprint(e.stack);
-  expect(s.stackHash).toBe(f);
+    const s = sanitizeErrorForLogs(e) as any;
+    expect(s.stackHash).toBeDefined();
+    const f = getStackFingerprint(e.stack);
+    expect(s.stackHash).toBe(f);
   });
 
   it("reportProdError includes stackHash in redacted context", () => {

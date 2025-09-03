@@ -22,10 +22,12 @@ JavaScript strings are immutable and cannot be reliably wiped. Do not store secr
 Abort semantics: synchronous APIs are cooperative and only check `AbortSignal.aborted` at defined points.
 
 Supported runtimes:
+
 - Node: LTS (>= 18) with WebCrypto enabled (globalThis.crypto), recommended Node >= 20.
 - Browsers: modern evergreen with `crypto.getRandomValues`; `randomUUID` and BigUint64Array are optional. Use `getCryptoCapabilities()` for feature detection.
 
 Limits (exported as constants):
+
 - `MAX_RANDOM_BYTES_SYNC` = 4096
 - `MAX_ID_STRING_LENGTH` = 256
 - `MAX_ID_BYTES_LENGTH` = 256

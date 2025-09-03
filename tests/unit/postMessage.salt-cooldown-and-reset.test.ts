@@ -1,19 +1,22 @@
-import { expect, test, afterEach } from 'vitest';
-import * as postMessage from '../../src/postMessage';
-import { __test_resetCryptoStateForUnitTests, _setCrypto } from '../../src/state';
+import { expect, test, afterEach } from "vitest";
+import * as postMessage from "../../src/postMessage";
+import {
+  __test_resetCryptoStateForUnitTests,
+  _setCrypto,
+} from "../../src/state";
 
 afterEach(() => {
   try {
     postMessage.__test_resetForUnitTests();
   } catch {}
   try {
-    if (typeof __test_resetCryptoStateForUnitTests === 'function')
+    if (typeof __test_resetCryptoStateForUnitTests === "function")
       __test_resetCryptoStateForUnitTests();
   } catch {}
   delete (globalThis as any).__SECURITY_KIT_ALLOW_TEST_APIS;
 });
 
-test('reset clears salt and failure timestamp', () => {
+test("reset clears salt and failure timestamp", () => {
   (globalThis as any).__SECURITY_KIT_ALLOW_TEST_APIS = true;
   postMessage.__test_setSaltFailureTimestamp(9999);
   expect(postMessage.__test_getSaltFailureTimestamp()).toBe(9999);
@@ -21,7 +24,7 @@ test('reset clears salt and failure timestamp', () => {
   expect(postMessage.__test_getSaltFailureTimestamp()).toBe(undefined);
 });
 
-test('ensureFingerprintSalt rejects when crypto unavailable and cooldown active', async () => {
+test("ensureFingerprintSalt rejects when crypto unavailable and cooldown active", async () => {
   (globalThis as any).__SECURITY_KIT_ALLOW_TEST_APIS = true;
   // simulate crypto state that will reject when requested by ensureCrypto
   try {
@@ -47,14 +50,18 @@ test('ensureFingerprintSalt rejects when crypto unavailable and cooldown active'
   expect(threw).toBe(true);
 });
 
-test('computeFingerprintFromString uses fallback when subtle.digest unavailable', async () => {
+test("computeFingerprintFromString uses fallback when subtle.digest unavailable", async () => {
   (globalThis as any).__SECURITY_KIT_ALLOW_TEST_APIS = true;
   try {
     // Install a fake crypto with no subtle.digest to force fallback
     const fakeCrypto: Partial<Crypto> = {
       // Use any to bypass strict typing for the test stub
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      getRandomValues: ((arr: any) => arr) as unknown as <T extends ArrayBufferView>(array: T) => T,
+      getRandomValues: ((arr: any) => arr) as unknown as <
+        T extends ArrayBufferView,
+      >(
+        array: T,
+      ) => T,
       // subtle missing or incomplete to force fallback
     };
     _setCrypto(fakeCrypto as unknown as Crypto, { allowInProduction: true });
@@ -68,6 +75,6 @@ test('computeFingerprintFromString uses fallback when subtle.digest unavailable'
   postMessage.__test_resetForUnitTests();
   const fp = await (postMessage as any).__test_getPayloadFingerprint({ z: 1 });
   // The fallback produces a short hex-ish string; assert it's non-empty
-  expect(typeof fp).toBe('string');
+  expect(typeof fp).toBe("string");
   expect(fp.length).toBeGreaterThan(0);
 });

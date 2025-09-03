@@ -1,13 +1,21 @@
-import { expect, test } from 'vitest';
-import { isLikelyBase64, isLikelyBase64Url, base64ToBytes, bytesToBase64 } from '../../src/encoding-utils';
+import { expect, test } from "vitest";
+import {
+  isLikelyBase64,
+  isLikelyBase64Url,
+  base64ToBytes,
+  bytesToBase64,
+} from "../../src/encoding-utils";
 
-test('padded base64 is accepted and decodes to same bytes as unpadded base64url', () => {
+test("padded base64 is accepted and decodes to same bytes as unpadded base64url", () => {
   // Example bytes for "hello world"
-  const raw = new TextEncoder().encode('hello world');
+  const raw = new TextEncoder().encode("hello world");
   const padded = bytesToBase64(raw); // standard base64, padded
 
   // create base64url variant (unpadded)
-  const url = padded.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
+  const url = padded
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/g, "");
 
   // validators
   expect(isLikelyBase64(padded)).toBe(true);
@@ -19,7 +27,11 @@ test('padded base64 is accepted and decodes to same bytes as unpadded base64url'
   expect(Array.from(fromPadded)).toEqual(Array.from(fromUrl));
 });
 import { test, expect } from "vitest";
-import { isLikelyBase64, isLikelyBase64Url, base64ToBytes } from "../../src/encoding-utils";
+import {
+  isLikelyBase64,
+  isLikelyBase64Url,
+  base64ToBytes,
+} from "../../src/encoding-utils";
 
 test("base64 vs base64url padding behavior", () => {
   const padded = "YWJjZA=="; // 'abcd' padded base64

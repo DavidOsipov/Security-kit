@@ -15,7 +15,9 @@ afterEach(() => {
     __test_resetForUnitTests();
   } catch {}
   try {
-    if (typeof (state as any).__test_resetCryptoStateForUnitTests === "function")
+    if (
+      typeof (state as any).__test_resetCryptoStateForUnitTests === "function"
+    )
       (state as any).__test_resetCryptoStateForUnitTests();
   } catch {}
 });
@@ -51,7 +53,9 @@ test("falls back when subtle is undefined on crypto object", async () => {
 
 // Test: subtle exists but digest rejects -> fallback hash used
 test("falls back when subtle.digest rejects", async () => {
-  vi.spyOn(state, "ensureCrypto").mockResolvedValue(cryptoSubtleReject as Crypto);
+  vi.spyOn(state, "ensureCrypto").mockResolvedValue(
+    cryptoSubtleReject as Crypto,
+  );
   const fp = await __test_getPayloadFingerprint({ x: 2 });
   expect(fp).toMatch(/^[0-9a-f]{8}$/);
 });

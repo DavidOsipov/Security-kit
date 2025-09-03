@@ -11,7 +11,10 @@ const mockClose = vi.fn();
 
 // Mock MessageEvent and MessagePort
 class MockMessageEvent {
-  constructor(public data: any, public origin: string = "https://example.com") {}
+  constructor(
+    public data: any,
+    public origin: string = "https://example.com",
+  ) {}
 }
 
 class MockMessagePort {
@@ -56,7 +59,8 @@ const __hoisted = vi.hoisted(() => ({
 
 // Mock the postMessage module to capture the listener setup
 vi.mock("../../src/postMessage", () => ({
-  createSecurePostMessageListener: __hoisted.mockCreateSecurePostMessageListener,
+  createSecurePostMessageListener:
+    __hoisted.mockCreateSecurePostMessageListener,
   computeInitialAllowedOrigin: __hoisted.mockComputeInitialAllowedOrigin,
   isEventAllowedWithLock: __hoisted.mockIsEventAllowedWithLock,
 }));
@@ -71,7 +75,9 @@ describe("signing-worker", () => {
     mockImportKey.mockResolvedValue({} as CryptoKey);
     mockSign.mockResolvedValue(new ArrayBuffer(32));
     mockVerify.mockResolvedValue(true);
-    __hoisted.mockCreateSecurePostMessageListener.mockReturnValue({ destroy: vi.fn() });
+    __hoisted.mockCreateSecurePostMessageListener.mockReturnValue({
+      destroy: vi.fn(),
+    });
 
     // Ensure the worker module executes and registers the listener fresh for each test
     vi.resetModules();
@@ -117,13 +123,16 @@ describe("signing-worker", () => {
     }
     expect(mockPostMessage).toHaveBeenCalledWith({
       type: "error",
-      reason: "invalid-message-format"
+      reason: "invalid-message-format",
     });
   });
 
   it("rejects oversized payloads", async () => {
     const largePayload = "x".repeat(10 * 1024 * 1024); // 10MB
-    const event = new MockMessageEvent({ type: "sign", canonical: largePayload });
+    const event = new MockMessageEvent({
+      type: "sign",
+      canonical: largePayload,
+    });
     const msgListener = getMessageListener();
     if (msgListener) {
       await msgListener(event.data, { event });
@@ -141,7 +150,7 @@ describe("signing-worker", () => {
     const event = new MockMessageEvent({
       type: "sign",
       __proto__: { type: "init" },
-      canonical: "test"
+      canonical: "test",
     });
     const msgListener = getMessageListener();
     if (msgListener) {
@@ -172,7 +181,7 @@ describe("signing-worker", () => {
   it("validates input encoding and characters", async () => {
     const event = new MockMessageEvent({
       type: "sign",
-      canonical: "test\x00null\x01byte"
+      canonical: "test\x00null\x01byte",
     });
     const msgListener = getMessageListener();
     if (msgListener) {
@@ -190,7 +199,7 @@ describe("signing-worker", () => {
     const initMessage = {
       type: "init",
       secretBuffer: new ArrayBuffer(32),
-      workerOptions: {}
+      workerOptions: {},
     };
 
     const event = new MockMessageEvent(initMessage);
@@ -205,7 +214,7 @@ describe("signing-worker", () => {
   it("rejects init message without secret buffer", async () => {
     const initMessage = {
       type: "init",
-      options: {}
+      options: {},
     };
 
     const event = new MockMessageEvent(initMessage);
@@ -216,7 +225,7 @@ describe("signing-worker", () => {
 
     expect(mockPostMessage).toHaveBeenCalledWith({
       type: "error",
-      reason: "missing-secret"
+      reason: "missing-secret",
     });
   });
 
@@ -224,7 +233,7 @@ describe("signing-worker", () => {
     const initMessage = {
       type: "init",
       secretBuffer: new ArrayBuffer(32),
-      workerOptions: {}
+      workerOptions: {},
     };
 
     const event = new MockMessageEvent(initMessage);
@@ -236,7 +245,7 @@ describe("signing-worker", () => {
 
     expect(mockPostMessage).toHaveBeenCalledWith({
       type: "error",
-      reason: "already-initialized"
+      reason: "already-initialized",
     });
   });
 
@@ -245,7 +254,7 @@ describe("signing-worker", () => {
     const initMessage = {
       type: "init",
       secretBuffer: new ArrayBuffer(32),
-      workerOptions: {}
+      workerOptions: {},
     };
     const initEvent = new MockMessageEvent(initMessage);
     const msgListenerD = getMessageListener();
@@ -258,7 +267,7 @@ describe("signing-worker", () => {
     const handshakeMessage = {
       type: "handshake",
       nonce: "test-nonce-123",
-      replyPort: mockReplyPort
+      replyPort: mockReplyPort,
     };
 
     const handshakeEvent = new MockMessageEvent(handshakeMessage);
@@ -273,14 +282,14 @@ describe("signing-worker", () => {
       expect.objectContaining({
         type: "handshake",
         signature: expect.any(String),
-      })
+      }),
     );
   });
 
   it("rejects handshake without reply port", async () => {
     const handshakeMessage = {
       type: "handshake",
-      nonce: "test-nonce-123"
+      nonce: "test-nonce-123",
     };
 
     const event = new MockMessageEvent(handshakeMessage);
@@ -291,7 +300,7 @@ describe("signing-worker", () => {
 
     expect(mockPostMessage).toHaveBeenCalledWith({
       type: "error",
-      reason: "invalid-handshake"
+      reason: "invalid-handshake",
     });
   });
 
@@ -300,7 +309,7 @@ describe("signing-worker", () => {
     const handshakeMessage = {
       type: "handshake",
       nonce: "invalid-nonce-format!",
-      replyPort: mockReplyPort
+      replyPort: mockReplyPort,
     };
 
     const event = new MockMessageEvent(handshakeMessage);
@@ -312,14 +321,14 @@ describe("signing-worker", () => {
 
     expect(mockReplyPort.postMessage).toHaveBeenCalledWith({
       type: "error",
-      reason: "nonce-format-invalid"
+      reason: "nonce-format-invalid",
     });
   });
 
   it("rejects handshake without reply port", async () => {
     const handshakeMessage = {
       type: "handshake",
-      nonce: "test-nonce-123"
+      nonce: "test-nonce-123",
     };
 
     const event = new MockMessageEvent(handshakeMessage);
@@ -330,7 +339,7 @@ describe("signing-worker", () => {
 
     expect(mockPostMessage).toHaveBeenCalledWith({
       type: "error",
-      reason: "invalid-handshake"
+      reason: "invalid-handshake",
     });
   });
 
@@ -339,7 +348,7 @@ describe("signing-worker", () => {
     const handshakeMessage = {
       type: "handshake",
       nonce: "invalid-nonce-format!",
-      replyPort: mockReplyPort
+      replyPort: mockReplyPort,
     };
 
     const event = new MockMessageEvent(handshakeMessage);
@@ -351,7 +360,7 @@ describe("signing-worker", () => {
 
     expect(mockReplyPort.postMessage).toHaveBeenCalledWith({
       type: "error",
-      reason: "nonce-format-invalid"
+      reason: "nonce-format-invalid",
     });
   });
 
@@ -360,7 +369,7 @@ describe("signing-worker", () => {
     const initMessage = {
       type: "init",
       secretBuffer: new ArrayBuffer(32),
-      options: {}
+      options: {},
     };
     const initEvent = new MockMessageEvent(initMessage);
     const msgListenerI = getMessageListener();
@@ -372,7 +381,7 @@ describe("signing-worker", () => {
     const signMessage = {
       type: "sign",
       requestId: 123,
-      canonical: "test-canonical-string"
+      canonical: "test-canonical-string",
     };
 
     const signEvent = new MockMessageEvent(signMessage);
@@ -385,8 +394,8 @@ describe("signing-worker", () => {
     expect(mockPostMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         type: "signed",
-        requestId: 123
-      })
+        requestId: 123,
+      }),
     );
   });
 
@@ -394,7 +403,7 @@ describe("signing-worker", () => {
     const signMessage = {
       type: "sign",
       requestId: "invalid",
-      canonical: null
+      canonical: null,
     };
 
     const event = new MockMessageEvent(signMessage);
@@ -406,7 +415,7 @@ describe("signing-worker", () => {
     expect(mockPostMessage).toHaveBeenCalledWith({
       type: "error",
       requestId: undefined,
-      reason: "invalid-params"
+      reason: "invalid-params",
     });
   });
 
@@ -415,7 +424,7 @@ describe("signing-worker", () => {
     const initMessage = {
       type: "init",
       secretBuffer: new ArrayBuffer(32),
-      workerOptions: { rateLimitPerMinute: 1 }
+      workerOptions: { rateLimitPerMinute: 1 },
     };
     const initEvent = new MockMessageEvent(initMessage);
     const msgListenerL = getMessageListener();
@@ -427,7 +436,7 @@ describe("signing-worker", () => {
     const signMessage1 = {
       type: "sign",
       requestId: 1,
-      canonical: "test1"
+      canonical: "test1",
     };
     const signEvent1 = new MockMessageEvent(signMessage1);
     const msgListener1 = getMessageListener();
@@ -439,7 +448,7 @@ describe("signing-worker", () => {
     const signMessage2 = {
       type: "sign",
       requestId: 2,
-      canonical: "test2"
+      canonical: "test2",
     };
     const signEvent2 = new MockMessageEvent(signMessage2);
     const msgListener2 = getMessageListener();
@@ -453,7 +462,7 @@ describe("signing-worker", () => {
         type: "error",
         requestId: 2,
         reason: "rate-limit-exceeded",
-      })
+      }),
     );
   });
 
@@ -462,7 +471,7 @@ describe("signing-worker", () => {
     const initMessage = {
       type: "init",
       secretBuffer: new ArrayBuffer(32),
-      workerOptions: { maxConcurrentSigning: 1 }
+      workerOptions: { maxConcurrentSigning: 1 },
     };
     const initEvent = new MockMessageEvent(initMessage);
     const msgListener3 = getMessageListener();
@@ -471,13 +480,18 @@ describe("signing-worker", () => {
     }
 
     // Make crypto.sign take a long time to simulate pending operation
-    mockSign.mockImplementation(() => new Promise(resolve => setTimeout(() => resolve(new ArrayBuffer(32)), 100)));
+    mockSign.mockImplementation(
+      () =>
+        new Promise((resolve) =>
+          setTimeout(() => resolve(new ArrayBuffer(32)), 100),
+        ),
+    );
 
     // First request
     const signMessage1 = {
       type: "sign",
       requestId: 1,
-      canonical: "test1"
+      canonical: "test1",
     };
     const signEvent1 = new MockMessageEvent(signMessage1);
     const msgListener4 = getMessageListener();
@@ -489,7 +503,7 @@ describe("signing-worker", () => {
     const signMessage2 = {
       type: "sign",
       requestId: 2,
-      canonical: "test2"
+      canonical: "test2",
     };
     const signEvent2 = new MockMessageEvent(signMessage2);
     const msgListener5 = getMessageListener();
@@ -500,7 +514,7 @@ describe("signing-worker", () => {
     expect(mockPostMessage).toHaveBeenCalledWith({
       type: "error",
       requestId: 2,
-      reason: "worker-overloaded"
+      reason: "worker-overloaded",
     });
   });
 
@@ -509,7 +523,7 @@ describe("signing-worker", () => {
     const initMessage = {
       type: "init",
       secretBuffer: new ArrayBuffer(32),
-      workerOptions: {}
+      workerOptions: {},
     };
     const initEvent = new MockMessageEvent(initMessage);
     const msgListener6 = getMessageListener();
@@ -534,7 +548,7 @@ describe("signing-worker", () => {
     const initMessage = {
       type: "init",
       secretBuffer: new ArrayBuffer(32),
-      workerOptions: {}
+      workerOptions: {},
     };
     const initEvent = new MockMessageEvent(initMessage);
     const msgListener8 = getMessageListener();
@@ -554,7 +568,7 @@ describe("signing-worker", () => {
     const signMessage = {
       type: "sign",
       requestId: 123,
-      canonical: "test"
+      canonical: "test",
     };
     const signEvent = new MockMessageEvent(signMessage);
     const msgListener10 = getMessageListener();
@@ -565,7 +579,7 @@ describe("signing-worker", () => {
     expect(mockPostMessage).toHaveBeenCalledWith({
       type: "error",
       requestId: 123,
-      reason: "worker-shutting-down"
+      reason: "worker-shutting-down",
     });
   });
 
@@ -574,7 +588,7 @@ describe("signing-worker", () => {
     const initMessage = {
       type: "init",
       secretBuffer: new ArrayBuffer(32),
-      workerOptions: {}
+      workerOptions: {},
     };
     const initEvent = new MockMessageEvent(initMessage);
     const msgListener11 = getMessageListener();
@@ -588,7 +602,7 @@ describe("signing-worker", () => {
     const signMessage = {
       type: "sign",
       requestId: 123,
-      canonical: "test"
+      canonical: "test",
     };
     const signEvent = new MockMessageEvent(signMessage);
     const msgListener12 = getMessageListener();
@@ -599,7 +613,7 @@ describe("signing-worker", () => {
     expect(mockPostMessage).toHaveBeenCalledWith({
       type: "error",
       requestId: 123,
-      reason: "sign-failed"
+      reason: "sign-failed",
     });
   });
 
@@ -608,7 +622,7 @@ describe("signing-worker", () => {
     const initMessage = {
       type: "init",
       secretBuffer: new ArrayBuffer(32),
-      options: {}
+      options: {},
     };
     const initEvent = new MockMessageEvent(initMessage);
     const msgListener13 = getMessageListener();
@@ -623,7 +637,7 @@ describe("signing-worker", () => {
     const handshakeMessage = {
       type: "handshake",
       nonce: "test-nonce-123",
-      replyPort: mockReplyPort
+      replyPort: mockReplyPort,
     };
 
     const handshakeEvent = new MockMessageEvent(handshakeMessage);
@@ -636,18 +650,26 @@ describe("signing-worker", () => {
 
     expect(mockReplyPort.postMessage).toHaveBeenCalledWith({
       type: "error",
-      reason: "handshake-failed"
+      reason: "handshake-failed",
     });
   });
 
   it("rejects messages from invalid origins (dropped silently)", async () => {
-    __hoisted.mockIsEventAllowedWithLock.mockReturnValueOnce(false);
-    const event = new MockMessageEvent({ type: "sign", canonical: "test" }, "https://malicious.com");
+    // Use mockReturnValue to avoid ordering flakiness where a previous call
+    // may consume a once-return value in full-suite runs. This keeps the
+    // test deterministic while still validating the rejection behavior.
+    __hoisted.mockIsEventAllowedWithLock.mockReturnValue(false);
+    const event = new MockMessageEvent(
+      { type: "sign", canonical: "test" },
+      "https://malicious.com",
+    );
     const msgListener15 = getMessageListener();
     if (msgListener15) {
       await msgListener15(event.data, { event });
     }
     expect(mockPostMessage).not.toHaveBeenCalled();
+    // Restore default for subsequent tests in this file
+    __hoisted.mockIsEventAllowedWithLock.mockReturnValue(true);
   });
 
   it("rejects unknown message types", async () => {
@@ -660,7 +682,7 @@ describe("signing-worker", () => {
     expect(mockPostMessage).toHaveBeenCalledWith({
       type: "error",
       requestId: undefined,
-      reason: "unknown-message-type"
+      reason: "unknown-message-type",
     });
   });
 
@@ -669,7 +691,7 @@ describe("signing-worker", () => {
     const event = new MockMessageEvent({
       type: "sign",
       requestId: Symbol("invalid"), // This should cause issues
-      canonical: "test"
+      canonical: "test",
     });
     const msgListener17 = getMessageListener();
     if (msgListener17) {
@@ -679,7 +701,7 @@ describe("signing-worker", () => {
     expect(mockPostMessage).toHaveBeenCalledWith({
       type: "error",
       requestId: undefined,
-      reason: "invalid-params"
+      reason: "invalid-params",
     });
   });
 });

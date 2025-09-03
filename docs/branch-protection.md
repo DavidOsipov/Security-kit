@@ -14,6 +14,7 @@ Steps:
 7. Save changes.
 
 Notes:
+
 - Once enabled, any PRs that contain forbidden patterns will fail the status check and cannot be merged until fixed.
 - Make sure the workflow is allowed to run for pull requests from forks if you accept external contributions (see `Workflow permissions` in the repository Settings).
 
@@ -23,14 +24,14 @@ If the guard fails locally or in CI, here are the common causes and fixes:
 
 - Stale git index entry (tracked-but-deleted file):
 
-   Sometimes a file is removed from the working tree but still tracked in Git's index (this can happen when a file was removed locally but the removal wasn't committed). In that case `git ls-files` or `git grep` may still report the path and the guard can raise an error or locate a forbidden pattern in the stale entry.
+  Sometimes a file is removed from the working tree but still tracked in Git's index (this can happen when a file was removed locally but the removal wasn't committed). In that case `git ls-files` or `git grep` may still report the path and the guard can raise an error or locate a forbidden pattern in the stale entry.
 
-   Fix: remove the stale entry from Git's index and commit the change:
+  Fix: remove the stale entry from Git's index and commit the change:
 
-   ```bash
-   git rm --cached src/api-signing.ts
-   git commit -m "Remove stale tracked file entry: src/api-signing.ts"
-   ```
+  ```bash
+  git rm --cached src/api-signing.ts
+  git commit -m "Remove stale tracked file entry: src/api-signing.ts"
+  ```
 
 - Forbidden pattern match: the guard scans for specific source patterns that indicate an embedded blob fallback. If your PR intentionally adds similar code for a dev-only purpose, instead consider putting it behind a clear opt-in and documenting why it's safe. Otherwise remove the pattern and re-run the guard.
 
@@ -47,4 +48,3 @@ npx ts-node-esm ./scripts/ci-guard-no-blob-fallback.ts
 2. If the guard fails because of a stale tracked file, run the `git rm --cached` command shown above and commit the removal.
 
 3. Push and open a PR. The `CI — no blob fallback` check will run automatically.
-

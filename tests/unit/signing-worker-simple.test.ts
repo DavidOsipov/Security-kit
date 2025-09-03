@@ -53,21 +53,22 @@ const __hoisted = vi.hoisted(() => ({
 
 // Mock the postMessage module using vi.mock (with hoisting)
 vi.mock("../../src/postMessage", () => ({
-  createSecurePostMessageListener: __hoisted.mockCreateSecurePostMessageListener.mockImplementation(
-    (options: any) => {
-      // Simulate the actual behavior: set up a message event listener
-      const listener = async (event: MessageEvent) => {
-        await options.onMessage(event.data, {
-          origin: (event as any).origin,
-          source: (event as any).source,
-          ports: (event as any).ports,
-          event,
-        });
-      };
-      __hoisted.registeredListener = listener;
-      return { destroy: vi.fn() };
-    }
-  ),
+  createSecurePostMessageListener:
+    __hoisted.mockCreateSecurePostMessageListener.mockImplementation(
+      (options: any) => {
+        // Simulate the actual behavior: set up a message event listener
+        const listener = async (event: MessageEvent) => {
+          await options.onMessage(event.data, {
+            origin: (event as any).origin,
+            source: (event as any).source,
+            ports: (event as any).ports,
+            event,
+          });
+        };
+        __hoisted.registeredListener = listener;
+        return { destroy: vi.fn() };
+      },
+    ),
   computeInitialAllowedOrigin: vi.fn(() => "https://example.com"),
   isEventAllowedWithLock: vi.fn(() => true),
 }));
@@ -141,7 +142,7 @@ describe("signing-worker", () => {
     const initMessage = {
       type: "init",
       secretBuffer: new ArrayBuffer(32),
-      workerOptions: {}
+      workerOptions: {},
     };
 
     // Create a proper MessageEvent and trigger the listener
@@ -154,7 +155,7 @@ describe("signing-worker", () => {
 
     // Verify the message was processed
     expect(mockPostMessage).toHaveBeenCalledWith({
-      type: "initialized"
+      type: "initialized",
     });
   });
 
@@ -163,14 +164,14 @@ describe("signing-worker", () => {
     const initMessage = {
       type: "init",
       secretBuffer: new ArrayBuffer(32),
-      workerOptions: {}
+      workerOptions: {},
     };
     const initEvent = new MessageEvent("message", {
       data: initMessage,
       origin: "https://example.com",
     });
-  const listener = __hoisted.registeredListener!;
-  await listener(initEvent as any);
+    const listener = __hoisted.registeredListener!;
+    await listener(initEvent as any);
 
     // Clear previous calls
     mockPostMessage.mockClear();
@@ -179,20 +180,20 @@ describe("signing-worker", () => {
     const signMessage = {
       type: "sign",
       requestId: 123,
-      canonical: "test-canonical-string"
+      canonical: "test-canonical-string",
     };
     const signEvent = new MessageEvent("message", {
       data: signMessage,
       origin: "https://example.com",
     });
-  await listener(signEvent as any);
+    await listener(signEvent as any);
 
     // Verify the sign operation was processed
     expect(mockPostMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         type: "signed",
-        requestId: 123
-      })
+        requestId: 123,
+      }),
     );
   });
 
@@ -201,14 +202,14 @@ describe("signing-worker", () => {
     const initMessage = {
       type: "init",
       secretBuffer: new ArrayBuffer(32),
-      workerOptions: {}
+      workerOptions: {},
     };
     const initEvent = new MessageEvent("message", {
       data: initMessage,
       origin: "https://example.com",
     });
-  const listener = __hoisted.registeredListener!;
-  await listener(initEvent as any);
+    const listener = __hoisted.registeredListener!;
+    await listener(initEvent as any);
 
     // Clear previous calls
     mockPostMessage.mockClear();
@@ -218,21 +219,21 @@ describe("signing-worker", () => {
     const handshakeMessage = {
       type: "handshake",
       nonce: "test-nonce-123",
-      replyPort: mockReplyPort
+      replyPort: mockReplyPort,
     };
     const handshakeEvent = new MessageEvent("message", {
       data: handshakeMessage,
       origin: "https://example.com",
       ports: [mockReplyPort as any],
     });
-  await listener(handshakeEvent as any);
+    await listener(handshakeEvent as any);
 
     // Verify handshake was processed
     expect(mockReplyPort.postMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         type: "handshake",
         signature: expect.any(String),
-      })
+      }),
     );
   });
 
@@ -241,14 +242,14 @@ describe("signing-worker", () => {
     const initMessage = {
       type: "init",
       secretBuffer: new ArrayBuffer(32),
-      workerOptions: {}
+      workerOptions: {},
     };
     const initEvent = new MessageEvent("message", {
       data: initMessage,
       origin: "https://example.com",
     });
-  const listener = __hoisted.registeredListener!;
-  await listener(initEvent as any);
+    const listener = __hoisted.registeredListener!;
+    await listener(initEvent as any);
 
     // Clear previous calls
     mockPostMessage.mockClear();
@@ -259,7 +260,7 @@ describe("signing-worker", () => {
       data: destroyMessage,
       origin: "https://example.com",
     });
-  await listener(destroyEvent as any);
+    await listener(destroyEvent as any);
 
     // Verify destroy was processed
     expect(mockPostMessage).toHaveBeenCalledWith({ type: "destroyed" });
@@ -272,8 +273,8 @@ describe("signing-worker", () => {
       data: invalidMessage,
       origin: "https://example.com",
     });
-  const listener = __hoisted.registeredListener!;
-  await listener(event as any);
+    const listener = __hoisted.registeredListener!;
+    await listener(event as any);
 
     expect(mockPostMessage).toHaveBeenCalledWith({
       type: "error",
@@ -288,12 +289,12 @@ describe("signing-worker", () => {
       data: malformedMessage,
       origin: "https://example.com",
     });
-  const listener = __hoisted.registeredListener!;
-  await listener(event as any);
+    const listener = __hoisted.registeredListener!;
+    await listener(event as any);
 
     expect(mockPostMessage).toHaveBeenCalledWith({
       type: "error",
-      reason: "invalid-message-format"
+      reason: "invalid-message-format",
     });
   });
 });

@@ -1,9 +1,9 @@
 // tests/security/token-refill.fake-timers.test.ts
 // RULE-ID: deterministic-async
 
-import { describe, beforeEach, afterEach, test, expect, vi } from 'vitest';
+import { describe, beforeEach, afterEach, test, expect, vi } from "vitest";
 
-describe('token refill math (deterministic fake timers)', () => {
+describe("token refill math (deterministic fake timers)", () => {
   beforeEach(() => {
     vi.useFakeTimers();
   });
@@ -12,8 +12,13 @@ describe('token refill math (deterministic fake timers)', () => {
     vi.useRealTimers();
   });
 
-  test('refills proportionally per second up to burst capacity', async () => {
-    const state = { rateLimitPerMinute: 60, tokens: 0, burst: 10, lastRefillSec: Math.floor(Date.now() / 1000) };
+  test("refills proportionally per second up to burst capacity", async () => {
+    const state = {
+      rateLimitPerMinute: 60,
+      tokens: 0,
+      burst: 10,
+      lastRefillSec: Math.floor(Date.now() / 1000),
+    };
     function refillTokens(nowSec: number) {
       const rateLimitPerMinute = state.rateLimitPerMinute;
       if (rateLimitPerMinute <= 0) return;
@@ -48,8 +53,13 @@ describe('token refill math (deterministic fake timers)', () => {
     expect(state.tokens).toBe(state.burst);
   });
 
-  test('very low rate accumulates slowly and floors correctly', async () => {
-    const state = { rateLimitPerMinute: 1, tokens: 0, burst: 5, lastRefillSec: Math.floor(Date.now() / 1000) };
+  test("very low rate accumulates slowly and floors correctly", async () => {
+    const state = {
+      rateLimitPerMinute: 1,
+      tokens: 0,
+      burst: 5,
+      lastRefillSec: Math.floor(Date.now() / 1000),
+    };
     function refillTokens(nowSec: number) {
       const rateLimitPerMinute = state.rateLimitPerMinute;
       if (rateLimitPerMinute <= 0) return;
@@ -76,14 +86,22 @@ describe('token refill math (deterministic fake timers)', () => {
     expect(state.tokens).toBe(1);
 
     // Note: two 30s steps each floor to 0 due to per-step flooring; document behavior
-    state.tokens = 0; state.lastRefillSec = start;
-    await vi.advanceTimersByTimeAsync(30000); refillTokens(start + 30);
-    await vi.advanceTimersByTimeAsync(30000); refillTokens(start + 60);
+    state.tokens = 0;
+    state.lastRefillSec = start;
+    await vi.advanceTimersByTimeAsync(30000);
+    refillTokens(start + 30);
+    await vi.advanceTimersByTimeAsync(30000);
+    refillTokens(start + 60);
     expect(state.tokens).toBe(0);
   });
 
-  test('large delta is capped (max 3600 seconds) and respects burst', async () => {
-    const state = { rateLimitPerMinute: 120, tokens: 0, burst: 50, lastRefillSec: Math.floor(Date.now() / 1000) };
+  test("large delta is capped (max 3600 seconds) and respects burst", async () => {
+    const state = {
+      rateLimitPerMinute: 120,
+      tokens: 0,
+      burst: 50,
+      lastRefillSec: Math.floor(Date.now() / 1000),
+    };
     function refillTokens(nowSec: number) {
       const rateLimitPerMinute = state.rateLimitPerMinute;
       if (rateLimitPerMinute <= 0) return;
@@ -104,13 +122,18 @@ describe('token refill math (deterministic fake timers)', () => {
     const start = Math.floor(Date.now() / 1000);
     // Simulate a huge jump (e.g., 10 hours) — the implementation caps at 3600s
     await vi.advanceTimersByTimeAsync(10 * 3600 * 1000);
-    refillTokens(start + (10 * 3600));
+    refillTokens(start + 10 * 3600);
     // With 120 tokens/minute => 2 tokens/sec, for capped 3600s => 7200 tokens, but burst=50 caps
     expect(state.tokens).toBe(state.burst);
   });
 
-  test('precision boundary: many small steps do not overshoot due to flooring', async () => {
-    const state = { rateLimitPerMinute: 60, tokens: 0, burst: 5, lastRefillSec: Math.floor(Date.now() / 1000) };
+  test("precision boundary: many small steps do not overshoot due to flooring", async () => {
+    const state = {
+      rateLimitPerMinute: 60,
+      tokens: 0,
+      burst: 5,
+      lastRefillSec: Math.floor(Date.now() / 1000),
+    };
     function refillTokens(nowSec: number) {
       const rateLimitPerMinute = state.rateLimitPerMinute;
       if (rateLimitPerMinute <= 0) return;
@@ -133,7 +156,7 @@ describe('token refill math (deterministic fake timers)', () => {
     for (let i = 1; i <= 10; i++) {
       await vi.advanceTimersByTimeAsync(100); // 100ms slices
       // Use integer seconds for lastRefillSec progression; simulate fractional by batching
-      const nowSec = Math.floor((Date.now()) / 1000);
+      const nowSec = Math.floor(Date.now() / 1000);
       refillTokens(nowSec);
     }
     // Many small steps may floor to 0; assert no overshoot and within [0,1]

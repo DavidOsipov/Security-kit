@@ -35,7 +35,9 @@ afterEach(() => {
 describe("generate-sbom path validation", () => {
   it("rejects paths that escape repository root via ..", () => {
     const outside = path.join(repoRoot, "..", "outside.txt");
-    expect(() => resolveAndValidateUserPath(outside, repoRoot, "test")).toThrow(/outside of repository root|Refusing to operate/);
+    expect(() => resolveAndValidateUserPath(outside, repoRoot, "test")).toThrow(
+      /outside of repository root|Refusing to operate/,
+    );
   });
 
   it("rejects symlink that points outside repo", () => {
@@ -48,7 +50,9 @@ describe("generate-sbom path validation", () => {
     fs.symlinkSync(outsideDir, link, "dir");
 
     const candidate = path.join(link, "secret.txt");
-    expect(() => resolveAndValidateUserPath(candidate, repoRoot, "test")).toThrow(/outside of repository root|Refusing to operate/);
+    expect(() =>
+      resolveAndValidateUserPath(candidate, repoRoot, "test"),
+    ).toThrow(/outside of repository root|Refusing to operate/);
   });
 
   it("allows files inside repo and atomicWriteFileSync writes safely", () => {
@@ -69,6 +73,8 @@ describe("generate-sbom path validation", () => {
 
     const target = path.join(linkRepo, "out.txt");
     // calling atomicWriteFileSync with allowedBase = linkRepo's parent should fail
-    expect(() => atomicWriteFileSync(target, "data", path.join(tmpDir, "doesnotexist"))).toThrow(/outside of repository root|Refusing to write outside/);
+    expect(() =>
+      atomicWriteFileSync(target, "data", path.join(tmpDir, "doesnotexist")),
+    ).toThrow(/outside of repository root|Refusing to write outside/);
   });
 });

@@ -14,7 +14,7 @@ class MockMessageEvent extends Event implements MessageEvent {
   public readonly source: Window | MessagePort | null = null;
 
   constructor(data: any, eventInitDict?: EventInit) {
-    super('message', eventInitDict);
+    super("message", eventInitDict);
     this.data = data;
   }
 
@@ -41,53 +41,80 @@ function setupBasicMocks() {
   capturedMessageListener = undefined;
 
   // Stub global self/postMessage and location
-  vi.stubGlobal('self', {
+  vi.stubGlobal("self", {
     postMessage: mockPostMessage,
     close: vi.fn(),
     addEventListener: vi.fn(),
     removeEventListener: vi.fn(),
   });
 
-  vi.stubGlobal('postMessage', mockPostMessage as any);
+  vi.stubGlobal("postMessage", mockPostMessage as any);
 
-  vi.stubGlobal('location', { origin: 'https://example.com' });
+  vi.stubGlobal("location", { origin: "https://example.com" });
 
   // Mock crypto.subtle with spies
   const mockSign = vi.fn();
   const mockImportKey = vi.fn();
-  vi.stubGlobal('crypto', { ...global.crypto, subtle: { sign: mockSign, importKey: mockImportKey }, getRandomValues: vi.fn() } as any);
+  vi.stubGlobal("crypto", {
+    ...global.crypto,
+    subtle: { sign: mockSign, importKey: mockImportKey },
+    getRandomValues: vi.fn(),
+  } as any);
 
   // Mock postMessage module to capture listener
   vi.mock("../../src/postMessage", () => ({
     createSecurePostMessageListener: vi.fn((options) => {
       const listener = async (event: MessageEvent) => {
-        await options.onMessage(event.data, { origin: event.origin, source: event.source, ports: event.ports, event });
+        await options.onMessage(event.data, {
+          origin: event.origin,
+          source: event.source,
+          ports: event.ports,
+          event,
+        });
       };
       try {
         capturedMessageListener = listener;
       } catch {}
-      try { globalThis.addEventListener("message", listener); } catch {}
-      try { if ((globalThis as any).window && typeof (globalThis as any).window.addEventListener === 'function') (globalThis as any).window.addEventListener("message", listener); } catch {}
+      try {
+        globalThis.addEventListener("message", listener);
+      } catch {}
+      try {
+        if (
+          (globalThis as any).window &&
+          typeof (globalThis as any).window.addEventListener === "function"
+        )
+          (globalThis as any).window.addEventListener("message", listener);
+      } catch {}
       return { destroy: vi.fn() };
     }),
-    computeInitialAllowedOrigin: vi.fn(() => 'https://example.com'),
+    computeInitialAllowedOrigin: vi.fn(() => "https://example.com"),
     isEventAllowedWithLock: vi.fn(() => true),
   }));
 
   // Ensure addEventListener mock captures
   globalThis.addEventListener = vi.fn((type: string, listener: any) => {
-    if (type === 'message') capturedMessageListener = listener;
+    if (type === "message") capturedMessageListener = listener;
     return undefined;
   }) as any;
 
-  try { if ((globalThis as any).window === undefined) (globalThis as any).window = globalThis; (globalThis as any).window.addEventListener = globalThis.addEventListener; } catch {}
+  try {
+    if ((globalThis as any).window === undefined)
+      (globalThis as any).window = globalThis;
+    (globalThis as any).window.addEventListener = globalThis.addEventListener;
+  } catch {}
 
-  return { mockSign: (globalThis as any).crypto.subtle.sign, mockImportKey: (globalThis as any).crypto.subtle.importKey };
+  return {
+    mockSign: (globalThis as any).crypto.subtle.sign,
+    mockImportKey: (globalThis as any).crypto.subtle.importKey,
+  };
 }
 
 async function waitForListener() {
-  for (let i = 0; i < 10; i++) { if (capturedMessageListener) return; await new Promise(r => setTimeout(r, 10)); }
-  throw new Error('listener not captured');
+  for (let i = 0; i < 10; i++) {
+    if (capturedMessageListener) return;
+    await new Promise((r) => setTimeout(r, 10));
+  }
+  throw new Error("listener not captured");
 }
 
 beforeEach(() => {
@@ -99,93 +126,142 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-test('docs-worker: concurrency reservation rejects second request when at limit', async () => {
+test("docs-worker: concurrency reservation rejects second request when at limit", async () => {
   const mocks = setupBasicMocks();
   const { mockSign, mockImportKey } = mocks as any;
   mockImportKey.mockResolvedValue({} as CryptoKey);
   // Make sign slow to force overlap
-  mockSign.mockImplementation(async () => { await new Promise(r => setTimeout(r, 40)); return new ArrayBuffer(0); });
+  mockSign.mockImplementation(async () => {
+    await new Promise((r) => setTimeout(r, 40));
+    return new ArrayBuffer(0);
+  });
 
-  const workerModule = await import('../../src/worker/signing-worker');
+  const workerModule = await import("../../src/worker/signing-worker");
   await waitForListener();
 
   // Initialize with maxConcurrentSigning = 1
-  const initEvent = new MockMessageEvent({ type: 'init', secretBuffer: new ArrayBuffer(32), workerOptions: { maxConcurrentSigning: 1 } });
+  const initEvent = new MockMessageEvent({
+    type: "init",
+    secretBuffer: new ArrayBuffer(32),
+    workerOptions: { maxConcurrentSigning: 1 },
+  });
   if (capturedMessageListener) await capturedMessageListener(initEvent);
 
   mockPostMessage.mockClear();
 
   // Fire first sign but do not await
-  const sign1 = { type: 'sign', requestId: 1, canonical: 'a' };
+  const sign1 = { type: "sign", requestId: 1, canonical: "a" };
   let p1: Promise<void> | undefined;
-  if (capturedMessageListener) p1 = Promise.resolve(capturedMessageListener(new MockMessageEvent(sign1)) as any);
+  if (capturedMessageListener)
+    p1 = Promise.resolve(
+      capturedMessageListener(new MockMessageEvent(sign1)) as any,
+    );
   await Promise.resolve(); // microtask yield
 
   // Send second sign
-  const sign2 = { type: 'sign', requestId: 2, canonical: 'b' };
-  if (capturedMessageListener) await capturedMessageListener(new MockMessageEvent(sign2));
+  const sign2 = { type: "sign", requestId: 2, canonical: "b" };
+  if (capturedMessageListener)
+    await capturedMessageListener(new MockMessageEvent(sign2));
 
   // Wait for first to finish
   if (p1) await p1;
 
   // Expect an overload error for requestId 2
-  expect(mockPostMessage).toHaveBeenCalledWith(expect.objectContaining({ type: 'error', requestId: 2, reason: 'worker-overloaded' }));
+  expect(mockPostMessage).toHaveBeenCalledWith(
+    expect.objectContaining({
+      type: "error",
+      requestId: 2,
+      reason: "worker-overloaded",
+    }),
+  );
 });
 
-test('docs-worker: rate limit blocks second request', async () => {
+test("docs-worker: rate limit blocks second request", async () => {
   const mocks = setupBasicMocks();
   const { mockSign, mockImportKey } = mocks as any;
   mockImportKey.mockResolvedValue({} as CryptoKey);
   // Make sign immediate for this test
   mockSign.mockResolvedValue(new ArrayBuffer(0));
 
-  const workerModule = await import('../../src/worker/signing-worker');
+  const workerModule = await import("../../src/worker/signing-worker");
   await waitForListener();
 
   // Init with rateLimitPerMinute = 1
-  const initEvent = new MockMessageEvent({ type: 'init', secretBuffer: new ArrayBuffer(32), workerOptions: { rateLimitPerMinute: 1 } });
+  const initEvent = new MockMessageEvent({
+    type: "init",
+    secretBuffer: new ArrayBuffer(32),
+    workerOptions: { rateLimitPerMinute: 1 },
+  });
   if (capturedMessageListener) await capturedMessageListener(initEvent);
   mockPostMessage.mockClear();
 
   // First sign
-  const sign1 = { type: 'sign', requestId: 1, canonical: 'x' };
+  const sign1 = { type: "sign", requestId: 1, canonical: "x" };
   let p1: Promise<void> | undefined;
-  if (capturedMessageListener) p1 = Promise.resolve(capturedMessageListener(new MockMessageEvent(sign1)) as any);
+  if (capturedMessageListener)
+    p1 = Promise.resolve(
+      capturedMessageListener(new MockMessageEvent(sign1)) as any,
+    );
   // wait for the first to post
   let sawFirst = false;
-  for (let i = 0; i < 20; i++) { if ((mockPostMessage.mock.calls || []).some(c => c && c[0] && c[0].type === 'signed')) { sawFirst = true; break; } await new Promise(r => setTimeout(r, 5)); }
+  for (let i = 0; i < 20; i++) {
+    if (
+      (mockPostMessage.mock.calls || []).some(
+        (c) => c && c[0] && c[0].type === "signed",
+      )
+    ) {
+      sawFirst = true;
+      break;
+    }
+    await new Promise((r) => setTimeout(r, 5));
+  }
   expect(sawFirst).toBe(true);
   mockPostMessage.mockClear();
 
   // Second sign should be rate-limited
-  const sign2 = { type: 'sign', requestId: 2, canonical: 'y' };
-  if (capturedMessageListener) await capturedMessageListener(new MockMessageEvent(sign2));
+  const sign2 = { type: "sign", requestId: 2, canonical: "y" };
+  if (capturedMessageListener)
+    await capturedMessageListener(new MockMessageEvent(sign2));
 
-  expect(mockPostMessage).toHaveBeenCalledWith(expect.objectContaining({ type: 'error', requestId: 2, reason: 'rate-limit-exceeded' }));
+  expect(mockPostMessage).toHaveBeenCalledWith(
+    expect.objectContaining({
+      type: "error",
+      requestId: 2,
+      reason: "rate-limit-exceeded",
+    }),
+  );
 });
 
-test('docs-worker: adversarial inputs are rejected silently', async () => {
+test("docs-worker: adversarial inputs are rejected silently", async () => {
   const mocks = setupBasicMocks();
   const { mockSign, mockImportKey } = mocks as any;
   mockImportKey.mockResolvedValue({} as CryptoKey);
 
-  const workerModule = await import('../../src/worker/signing-worker');
+  const workerModule = await import("../../src/worker/signing-worker");
   await waitForListener();
 
   // Malformed messages should be ignored (no postMessage calls)
-  const malformedList = [ null, undefined, {}, { type: 'init', secretBuffer: null }, { type: 'sign', requestId: 'one' }, { type: 'handshake', nonce: 123 } ];
+  const malformedList = [
+    null,
+    undefined,
+    {},
+    { type: "init", secretBuffer: null },
+    { type: "sign", requestId: "one" },
+    { type: "handshake", nonce: 123 },
+  ];
   for (const m of malformedList) {
-    if (capturedMessageListener) await capturedMessageListener(new MockMessageEvent(m));
+    if (capturedMessageListener)
+      await capturedMessageListener(new MockMessageEvent(m));
   }
 
   // The worker may either silently ignore malformed messages or respond with
   // generic error objects. Ensure that any responses are safe error messages
   // (no sensitive detail leakage) and have type 'error'.
   const allowedReasons = new Set([
-    'invalid-message-format',
-    'missing-secret',
-    'invalid-params',
-    'invalid-handshake',
+    "invalid-message-format",
+    "missing-secret",
+    "invalid-params",
+    "invalid-handshake",
   ]);
 
   // If there were no calls, that's acceptable. If there were calls, each must
@@ -194,8 +270,8 @@ test('docs-worker: adversarial inputs are rejected silently', async () => {
   for (const c of calls) {
     const msg = c && c[0];
     expect(msg).toBeDefined();
-    expect(msg.type).toBe('error');
-    if (typeof msg.reason === 'string') {
+    expect(msg.type).toBe("error");
+    if (typeof msg.reason === "string") {
       expect(allowedReasons.has(msg.reason)).toBe(true);
     }
   }

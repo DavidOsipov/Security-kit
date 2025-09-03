@@ -18,7 +18,7 @@ export default defineConfig([
       "css-what",
       "lru-cache",
       "isomorphic-dompurify",
-      "dompurify"
+      "dompurify",
     ],
     // Disable code splitting to keep modules intact for tree-shaking
     splitting: false,
@@ -47,7 +47,7 @@ export default defineConfig([
       "css-what",
       "lru-cache",
       "isomorphic-dompurify",
-      "dompurify"
+      "dompurify",
     ],
     outExtension({ format }) {
       if (format === "cjs") return { js: ".cjs" };
@@ -59,8 +59,8 @@ export default defineConfig([
   {
     entry: [
       "server/nonce-store.ts",
-      "server/redis-nonce-store.ts", 
-      "server/verify-api-request-signature.ts"
+      "server/redis-nonce-store.ts",
+      "server/verify-api-request-signature.ts",
     ],
     format: ["esm", "cjs"],
     dts: true,
@@ -75,7 +75,7 @@ export default defineConfig([
       "lru-cache",
       "isomorphic-dompurify",
       "dompurify",
-      "redis"  // Redis is an external dependency for server modules
+      "redis", // Redis is an external dependency for server modules
     ],
     outExtension({ format }) {
       if (format === "cjs") return { js: ".cjs" };

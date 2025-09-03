@@ -1,31 +1,31 @@
 // SPDX-License-Identifier: MIT
-import { describe, it, expect } from 'vitest';
-import { SecureLRUCache } from '../../src/secure-lru-cache';
-import { resolveSecureLRUOptions } from '../../src/config';
+import { describe, it, expect } from "vitest";
+import { SecureLRUCache } from "../../src/secure-lru-cache";
+import { resolveSecureLRUOptions } from "../../src/config";
 
 const BYTES = new Uint8Array(32).fill(1);
 
-describe('Experimental SIEVE profile basic behavior', () => {
-  it('set/get/delete works and eviction occurs at capacity', () => {
-    const opts = resolveSecureLRUOptions('experimental-sieve');
+describe("Experimental SIEVE profile basic behavior", () => {
+  it("set/get/delete works and eviction occurs at capacity", () => {
+    const opts = resolveSecureLRUOptions("experimental-sieve");
     const cache = new SecureLRUCache<string, Uint8Array>({
       maxEntries: 4,
       maxBytes: 64 * 1024,
       ...(opts as any),
     });
-    cache.set('A', BYTES);
-    cache.set('B', BYTES);
-    cache.set('C', BYTES);
-    cache.set('D', BYTES);
+    cache.set("A", BYTES);
+    cache.set("B", BYTES);
+    cache.set("C", BYTES);
+    cache.set("D", BYTES);
     // Reference a couple keys to set second-chance bits
-    expect(cache.get('B')).toBeTruthy();
-    expect(cache.get('D')).toBeTruthy();
+    expect(cache.get("B")).toBeTruthy();
+    expect(cache.get("D")).toBeTruthy();
     // Insert one more to force eviction
-    cache.set('E', BYTES);
+    cache.set("E", BYTES);
     const stats = cache.getStats();
     expect(stats.evictions).toBeGreaterThanOrEqual(1);
     // Deletion should work
-    cache.delete('E');
-    expect(cache.get('E')).toBeUndefined();
+    cache.delete("E");
+    expect(cache.get("E")).toBeUndefined();
   });
 });

@@ -1,5 +1,8 @@
 import { expect, test, afterEach } from "vitest";
-import { __test_toNullProto, __test_resetForUnitTests } from "../../src/postMessage";
+import {
+  __test_toNullProto,
+  __test_resetForUnitTests,
+} from "../../src/postMessage";
 
 (globalThis as any).__SECURITY_KIT_ALLOW_TEST_APIS = true;
 

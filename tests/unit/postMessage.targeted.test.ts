@@ -27,10 +27,14 @@ describe("postMessage targeted hardening tests", () => {
     const o: any = { a: 1 };
     o[s] = { leak: true };
 
-    const ev = new MessageEvent("message", { data: JSON.stringify(o), origin: "http://localhost", source: window });
+    const ev = new MessageEvent("message", {
+      data: JSON.stringify(o),
+      origin: "http://localhost",
+      source: window,
+    });
     window.dispatchEvent(ev);
 
-  await vi.runAllTimersAsync();
+    await vi.runAllTimersAsync();
     expect(onMessage).toHaveBeenCalledTimes(1);
     const arg = onMessage.mock.calls[0][0];
     // symbol-key should not have been preserved (not enumerable string key)
@@ -60,19 +64,32 @@ describe("postMessage targeted hardening tests", () => {
       cur.next = {};
       cur = cur.next;
     }
-    const ev = new MessageEvent("message", { data: JSON.stringify({ deep }), origin: "http://localhost", source: window });
+    const ev = new MessageEvent("message", {
+      data: JSON.stringify({ deep }),
+      origin: "http://localhost",
+      source: window,
+    });
     window.dispatchEvent(ev);
 
-  await vi.runAllTimersAsync();
+    await vi.runAllTimersAsync();
     // should not call onMessage (validation should fail due to depth)
     expect(onMessage).not.toHaveBeenCalled();
 
     // forbidden keys removal test: send payload with __proto__/constructor/prototype
-    const malicious = { a: 1, __proto__: { hacked: true }, constructor: {}, prototype: {} } as any;
-    const ev2 = new MessageEvent("message", { data: JSON.stringify(malicious), origin: "http://localhost", source: window });
+    const malicious = {
+      a: 1,
+      __proto__: { hacked: true },
+      constructor: {},
+      prototype: {},
+    } as any;
+    const ev2 = new MessageEvent("message", {
+      data: JSON.stringify(malicious),
+      origin: "http://localhost",
+      source: window,
+    });
     // using a listener that accepts a simple schema allowing 'a'
     window.dispatchEvent(ev2);
-  await vi.runAllTimersAsync();
+    await vi.runAllTimersAsync();
     // last handled arg should not contain prototype-related keys
     // find the last call
     const last = onMessage.mock.calls[onMessage.mock.calls.length - 1];
@@ -106,8 +123,14 @@ describe("postMessage targeted hardening tests", () => {
     });
 
     const payload = { a: 1 };
-    window.dispatchEvent(new MessageEvent("message", { data: JSON.stringify(payload), origin: "http://localhost", source: window }));
-  await vi.runAllTimersAsync();
+    window.dispatchEvent(
+      new MessageEvent("message", {
+        data: JSON.stringify(payload),
+        origin: "http://localhost",
+        source: window,
+      }),
+    );
+    await vi.runAllTimersAsync();
     expect(onMessage).toHaveBeenCalled();
     const arg = onMessage.mock.calls[0][0];
     // mutation should have been applied
@@ -119,7 +142,9 @@ describe("postMessage targeted hardening tests", () => {
   it("emits fingerprint when crypto available and format looks sane", async () => {
     vi.resetModules();
     const state = await import("../../src/state");
-    const fakeSubtle = { digest: async () => new Uint8Array([1, 2, 3, 4]).buffer };
+    const fakeSubtle = {
+      digest: async () => new Uint8Array([1, 2, 3, 4]).buffer,
+    };
     const fakeCrypto = {
       getRandomValues: (buf: Uint8Array) => {
         for (let i = 0; i < buf.length; i++) buf[i] = i & 0xff;
@@ -127,7 +152,9 @@ describe("postMessage targeted hardening tests", () => {
       },
       subtle: fakeSubtle,
     } as any;
-    vi.spyOn(state, "ensureCrypto").mockImplementation(async () => fakeCrypto as any);
+    vi.spyOn(state, "ensureCrypto").mockImplementation(
+      async () => fakeCrypto as any,
+    );
 
     const utils = await import("../../src/utils");
     const secureDevLogSpy = vi.spyOn(utils, "secureDevLog");
@@ -143,11 +170,19 @@ describe("postMessage targeted hardening tests", () => {
     });
 
     const bad = { x: "no" };
-    window.dispatchEvent(new MessageEvent("message", { data: JSON.stringify(bad), origin: "http://localhost", source: window }));
-  await vi.runAllTimersAsync();
+    window.dispatchEvent(
+      new MessageEvent("message", {
+        data: JSON.stringify(bad),
+        origin: "http://localhost",
+        source: window,
+      }),
+    );
+    await vi.runAllTimersAsync();
 
     const calls = secureDevLogSpy.mock.calls;
-    const diagCall = calls.find((c) => (c as any)[2] === "Message dropped due to failed validation");
+    const diagCall = calls.find(
+      (c) => (c as any)[2] === "Message dropped due to failed validation",
+    );
     expect(diagCall).toBeTruthy();
     const ctx = (diagCall as any)[3];
     expect(typeof ctx.fingerprint).toBe("string");

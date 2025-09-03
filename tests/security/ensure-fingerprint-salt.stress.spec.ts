@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi } from "vitest";
 
 // This stress test spawns many concurrent callers to the internal
 // __test_ensureFingerprintSalt() API. It's intentionally slow at high
@@ -7,26 +7,30 @@ import { describe, it, expect, vi } from 'vitest';
 
 const DEFAULT_CONCURRENCY = 100;
 
-async function loadWithMockedEnsureCrypto(ensureCryptoImpl: () => Promise<any>) {
+async function loadWithMockedEnsureCrypto(
+  ensureCryptoImpl: () => Promise<any>,
+) {
   vi.resetModules();
-  vi.doMock('../../src/state', () => ({
+  vi.doMock("../../src/state", () => ({
     ensureCrypto: ensureCryptoImpl,
     __test_resetCryptoStateForUnitTests: () => {},
     _setCrypto: () => {},
   }));
-  vi.doMock('../../src/environment', () => ({
+  vi.doMock("../../src/environment", () => ({
     environment: { isProduction: false },
     isDevelopment: () => true,
   }));
-  const pm = await import('../../src/postMessage');
+  const pm = await import("../../src/postMessage");
   return pm;
 }
 
-describe('ensureFingerprintSalt stress test (manual)', () => {
-  it('runs high concurrency callers', async () => {
-    const concurrency = Number(process.env.STRESS_CONCURRENCY ?? DEFAULT_CONCURRENCY);
+describe("ensureFingerprintSalt stress test (manual)", () => {
+  it("runs high concurrency callers", async () => {
+    const concurrency = Number(
+      process.env.STRESS_CONCURRENCY ?? DEFAULT_CONCURRENCY,
+    );
     // Ensure we don't accidentally run huge numbers in CI by mistake
-    if (concurrency > 2000) throw new Error('STRESS_CONCURRENCY too large');
+    if (concurrency > 2000) throw new Error("STRESS_CONCURRENCY too large");
 
     let calls = 0;
     // Mock ensureCrypto with a slight delay to better exercise in-flight deduping
@@ -51,7 +55,9 @@ describe('ensureFingerprintSalt stress test (manual)', () => {
     };
 
     const pm = await loadWithMockedEnsureCrypto(mockEnsure);
-    try { pm.__test_resetForUnitTests(); } catch {}
+    try {
+      pm.__test_resetForUnitTests();
+    } catch {}
 
     // Per-caller timing to compute latency distribution
     const start = Date.now();
@@ -80,14 +86,24 @@ describe('ensureFingerprintSalt stress test (manual)', () => {
     const max = sorted[sorted.length - 1] ?? 0;
 
     // Memory telemetry snapshot
-    const mem = typeof process !== 'undefined' && typeof process.memoryUsage === 'function' ? process.memoryUsage() : undefined;
+    const mem =
+      typeof process !== "undefined" &&
+      typeof process.memoryUsage === "function"
+        ? process.memoryUsage()
+        : undefined;
 
     // Telemetry output
     // eslint-disable-next-line no-console
-    console.log(JSON.stringify({
-      stress: { concurrency, calls, durationMs, min, p50, p95, p99, max },
-      mem,
-    }, null, 2));
+    console.log(
+      JSON.stringify(
+        {
+          stress: { concurrency, calls, durationMs, min, p50, p95, p99, max },
+          mem,
+        },
+        null,
+        2,
+      ),
+    );
 
     expect(results.length).toBe(concurrency);
     expect(calls).toBeGreaterThanOrEqual(1);
@@ -104,9 +120,12 @@ describe('ensureFingerprintSalt stress test (manual)', () => {
     // Latency SLO: at least STRESS_LATENCY_PERCENT of callers should finish under threshold
     const thresholdMs = Number(process.env.STRESS_LATENCY_THRESHOLD_MS ?? 200);
     const neededPercent = Number(process.env.STRESS_LATENCY_PERCENT ?? 0.95);
-    const under = sorted.filter((v) => v <= thresholdMs).length / (sorted.length || 1);
+    const under =
+      sorted.filter((v) => v <= thresholdMs).length / (sorted.length || 1);
     // eslint-disable-next-line no-console
-    console.log(`latency: p50=${p50} p95=${p95} p99=${p99} threshold=${thresholdMs} under=${under}`);
+    console.log(
+      `latency: p50=${p50} p95=${p95} p99=${p99} threshold=${thresholdMs} under=${under}`,
+    );
     expect(under).toBeGreaterThanOrEqual(neededPercent);
     // Ensure salt was generated and cached and is the right type
     expect(results.every((r) => r instanceof Uint8Array)).toBe(true);

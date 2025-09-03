@@ -68,24 +68,34 @@ describe("crypto.ts security improvements", () => {
     });
 
     it("rejects invalid alphabet sizes", async () => {
-      await expect(generateSecureStringAsync("", 10)).rejects.toThrow(InvalidParameterError);
-      await expect(generateSecureStringAsync("a".repeat(300), 10)).rejects.toThrow(InvalidParameterError);
+      await expect(generateSecureStringAsync("", 10)).rejects.toThrow(
+        InvalidParameterError,
+      );
+      await expect(
+        generateSecureStringAsync("a".repeat(300), 10),
+      ).rejects.toThrow(InvalidParameterError);
     });
 
     it("rejects duplicate characters in alphabet", async () => {
-      await expect(generateSecureStringAsync("aa", 10)).rejects.toThrow(InvalidParameterError);
+      await expect(generateSecureStringAsync("aa", 10)).rejects.toThrow(
+        InvalidParameterError,
+      );
     });
   });
 
   describe("wipeable bytes", () => {
     it("returns wipeable buffers within documented limits", () => {
-      const bytes = generateSecureIdBytesSync(Math.min(16, MAX_ID_BYTES_LENGTH));
+      const bytes = generateSecureIdBytesSync(
+        Math.min(16, MAX_ID_BYTES_LENGTH),
+      );
       expect(bytes).toBeInstanceOf(Uint8Array);
       expect(bytes.length).toBeLessThanOrEqual(MAX_ID_BYTES_LENGTH);
     });
 
     it("enforces maximum length limits", () => {
-      expect(() => generateSecureIdBytesSync(MAX_ID_BYTES_LENGTH + 1)).toThrow(InvalidParameterError);
+      expect(() => generateSecureIdBytesSync(MAX_ID_BYTES_LENGTH + 1)).toThrow(
+        InvalidParameterError,
+      );
     });
   });
 
@@ -155,7 +165,7 @@ describe("crypto.ts security improvements", () => {
       await generateSRI("test", "sha256");
 
       expect(consoleWarnSpy).toHaveBeenCalledWith(
-        expect.stringContaining("generateSRI received a string input")
+        expect.stringContaining("generateSRI received a string input"),
       );
     });
 
@@ -175,32 +185,56 @@ describe("crypto.ts security improvements", () => {
       await generateSRI(largeInput, "sha256");
 
       expect(consoleWarnSpy).toHaveBeenCalledWith(
-        expect.stringContaining("Wiping a large buffer")
+        expect.stringContaining("Wiping a large buffer"),
       );
     });
   });
 
   describe("input validation and error handling", () => {
     it("rejects invalid byte lengths", () => {
-      expect(() => generateSecureIdBytesSync(-1)).toThrow(InvalidParameterError);
+      expect(() => generateSecureIdBytesSync(-1)).toThrow(
+        InvalidParameterError,
+      );
       expect(() => generateSecureIdBytesSync(0)).toThrow(InvalidParameterError);
-      expect(() => generateSecureIdBytesSync(MAX_ID_BYTES_LENGTH + 1)).toThrow(InvalidParameterError);
-      expect(() => generateSecureIdBytesSync(NaN)).toThrow(InvalidParameterError);
-      expect(() => generateSecureIdBytesSync(Infinity)).toThrow(InvalidParameterError);
+      expect(() => generateSecureIdBytesSync(MAX_ID_BYTES_LENGTH + 1)).toThrow(
+        InvalidParameterError,
+      );
+      expect(() => generateSecureIdBytesSync(NaN)).toThrow(
+        InvalidParameterError,
+      );
+      expect(() => generateSecureIdBytesSync(Infinity)).toThrow(
+        InvalidParameterError,
+      );
     });
 
     it("rejects invalid string generation parameters", async () => {
-      await expect(generateSecureStringAsync("", 10)).rejects.toThrow(InvalidParameterError);
-      await expect(generateSecureStringAsync("a".repeat(300), 10)).rejects.toThrow(InvalidParameterError);
-      await expect(generateSecureStringAsync("abc", -1)).rejects.toThrow(InvalidParameterError);
-      await expect(generateSecureStringAsync("abc", 0)).rejects.toThrow(InvalidParameterError);
-      await expect(generateSecureStringAsync("aa", 10)).rejects.toThrow(InvalidParameterError);
+      await expect(generateSecureStringAsync("", 10)).rejects.toThrow(
+        InvalidParameterError,
+      );
+      await expect(
+        generateSecureStringAsync("a".repeat(300), 10),
+      ).rejects.toThrow(InvalidParameterError);
+      await expect(generateSecureStringAsync("abc", -1)).rejects.toThrow(
+        InvalidParameterError,
+      );
+      await expect(generateSecureStringAsync("abc", 0)).rejects.toThrow(
+        InvalidParameterError,
+      );
+      await expect(generateSecureStringAsync("aa", 10)).rejects.toThrow(
+        InvalidParameterError,
+      );
     });
 
     it("rejects invalid random int ranges", async () => {
-      await expect(getSecureRandomInt(10, 5)).rejects.toThrow(InvalidParameterError);
-      await expect(getSecureRandomInt(NaN, 10)).rejects.toThrow(InvalidParameterError);
-      await expect(getSecureRandomInt(5, NaN)).rejects.toThrow(InvalidParameterError);
+      await expect(getSecureRandomInt(10, 5)).rejects.toThrow(
+        InvalidParameterError,
+      );
+      await expect(getSecureRandomInt(NaN, 10)).rejects.toThrow(
+        InvalidParameterError,
+      );
+      await expect(getSecureRandomInt(5, NaN)).rejects.toThrow(
+        InvalidParameterError,
+      );
     });
   });
 
@@ -209,7 +243,7 @@ describe("crypto.ts security improvements", () => {
       const start = performance.now();
       generateSecureIdBytesSync(128); // Use valid size within limits
       const end = performance.now();
-      
+
       // Should complete within reasonable time (adjust based on environment)
       expect(end - start).toBeLessThan(100); // 100ms should be plenty
     });
@@ -217,7 +251,7 @@ describe("crypto.ts security improvements", () => {
     it("generates different values on subsequent calls", () => {
       const a = generateSecureIdBytesSync(16);
       const b = generateSecureIdBytesSync(16);
-      
+
       // Very unlikely to be identical (probability ~ 2^-128)
       expect(a).not.toEqual(b);
     });

@@ -2,7 +2,10 @@
 // Use this in tests that need deterministic Date.now behavior while allowing real timers
 // and microtasks to run normally (avoids vitest fake-timer interaction with Promise microtasks).
 
-export async function withAdvancedDateNow<T>(timeMs: number, fn: () => Promise<T> | T): Promise<T> {
+export async function withAdvancedDateNow<T>(
+  timeMs: number,
+  fn: () => Promise<T> | T,
+): Promise<T> {
   const origDateNow = Date.now;
   try {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any -- test-only shim

@@ -75,7 +75,7 @@ function writeSummaries(summary, dir = 'benchmarks') {
   // Also write per-profile files for CI scraping convenience
   const per = summary.perProfile || {};
   for (const [profile, data] of Object.entries(per)) {
-    const safe = String(profile).replace(/[^a-z0-9_-]+/gi, '-');
+    const safe = String(profile).replace(/[^\w-]+/g, '-');
     const fn = path.join(dir, `summary-${safe}-${ts}.json`);
     fs.writeFileSync(fn, JSON.stringify(data, null, 2), 'utf8');
   }

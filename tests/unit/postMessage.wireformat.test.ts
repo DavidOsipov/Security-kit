@@ -6,10 +6,17 @@ describe("postMessage wireFormat behavior", () => {
     const postMessage = await import("../../src/postMessage");
 
     // send path should accept object and serialize; but parseMessageEventData rejects non-string
-    const ev = new MessageEvent("message", { data: 42, origin: "http://localhost", source: window as any });
+    const ev = new MessageEvent("message", {
+      data: 42,
+      origin: "http://localhost",
+      source: window as any,
+    });
     const state = await import("../../src/state");
     // Mock ensureCrypto for listener creation in dev
-    vi.spyOn(state, "ensureCrypto").mockImplementation(async () => ({ getRandomValues: (b: Uint8Array) => b, subtle: undefined } as any));
+    vi.spyOn(state, "ensureCrypto").mockImplementation(
+      async () =>
+        ({ getRandomValues: (b: Uint8Array) => b, subtle: undefined }) as any,
+    );
 
     const onMessage = vi.fn();
     const listener = postMessage.createSecurePostMessageListener({

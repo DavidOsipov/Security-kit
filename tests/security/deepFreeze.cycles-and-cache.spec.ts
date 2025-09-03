@@ -1,11 +1,16 @@
 import { expect, test, vi, afterEach } from "vitest";
-import { __test_deepFreeze, __test_resetForUnitTests } from "../../src/postMessage";
+import {
+  __test_deepFreeze,
+  __test_resetForUnitTests,
+} from "../../src/postMessage";
 
 (globalThis as any).__SECURITY_KIT_ALLOW_TEST_APIS = true;
 
 afterEach(() => {
   vi.restoreAllMocks();
-  try { __test_resetForUnitTests(); } catch {}
+  try {
+    __test_resetForUnitTests();
+  } catch {}
 });
 
 test("deepFreeze handles cycles without throwing and returns same reference", () => {
@@ -23,7 +28,9 @@ test("deepFreeze cache avoids re-freezing identical objects", () => {
   const obj = { a: { b: 2 } };
   const first = __test_deepFreeze(obj);
   // mutate via non-frozen path before second freeze attempt
-  try { (obj as any).newProp = 1; } catch {}
+  try {
+    (obj as any).newProp = 1;
+  } catch {}
   const second = __test_deepFreeze(obj);
   expect(first).toBe(second);
 });

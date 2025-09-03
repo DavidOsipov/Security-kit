@@ -8,9 +8,12 @@ import {
 } from "../../src/crypto";
 import * as stateModule from "../../src/state";
 import { setCrypto } from "../../src/config";
-import { InvalidParameterError, CryptoUnavailableError } from "../../src/errors";
+import {
+  InvalidParameterError,
+  CryptoUnavailableError,
+} from "../../src/errors";
 
-const { __test_resetCryptoStateForUnitTests } = (stateModule as any);
+const { __test_resetCryptoStateForUnitTests } = stateModule as any;
 
 describe("deep crypto behaviors", () => {
   beforeEach(() => {
@@ -26,7 +29,7 @@ describe("deep crypto behaviors", () => {
         return arr;
       },
     };
-  setCrypto(fakeCrypto as any);
+    setCrypto(fakeCrypto as any);
     const u = await generateSecureUUID();
     expect(typeof u).toBe("string");
     expect(u.split("-").length).toBe(5);
@@ -44,7 +47,7 @@ describe("deep crypto behaviors", () => {
       },
       getRandomValues: () => {},
     };
-  setCrypto(fakeCrypto as any);
+    setCrypto(fakeCrypto as any);
     const buf = new Uint8Array([1, 2, 3]).buffer;
     const sri = await generateSRI(buf, "sha384");
     expect(sri.startsWith("sha384-")).toBe(true);
@@ -59,29 +62,36 @@ describe("deep crypto behaviors", () => {
       },
       getRandomValues: () => {},
     };
-  setCrypto(fakeCrypto as any);
-  await expect(createOneTimeCryptoKey({ lengthBits: 128, usages: ["encrypt"] })).resolves.toBeDefined();
-  await expect(createOneTimeCryptoKey({ lengthBits: 512 as any })).rejects.toBeInstanceOf(InvalidParameterError);
+    setCrypto(fakeCrypto as any);
+    await expect(
+      createOneTimeCryptoKey({ lengthBits: 128, usages: ["encrypt"] }),
+    ).resolves.toBeDefined();
+    await expect(
+      createOneTimeCryptoKey({ lengthBits: 512 as any }),
+    ).rejects.toBeInstanceOf(InvalidParameterError);
   });
 
   it("getSecureRandomAsync aborts when signal aborted", async () => {
     const ac = new AbortController();
     ac.abort();
     // Abort implementations may use different error messages; assert by pattern
-  await expect(getSecureRandomAsync({ signal: ac.signal })).rejects.toThrow(/Abort|aborted|Operation aborted/);
+    await expect(getSecureRandomAsync({ signal: ac.signal })).rejects.toThrow(
+      /Abort|aborted|Operation aborted/,
+    );
   });
 
   it("generateSecureStringAsync respects abort during generation", async () => {
     const fakeCrypto: any = {
       getRandomValues(arr: Uint8Array) {
-        for (let i = 0; i < arr.length; i++) arr[i] = Math.floor(Math.random() * 256);
+        for (let i = 0; i < arr.length; i++)
+          arr[i] = Math.floor(Math.random() * 256);
         return arr;
       },
     };
-  setCrypto(fakeCrypto as any);
+    setCrypto(fakeCrypto as any);
     const ac = new AbortController();
     const p = generateSecureStringAsync("abcdef", 32, { signal: ac.signal });
     ac.abort();
-  await expect(p).rejects.toThrow(/Abort|aborted|Operation aborted/);
+    await expect(p).rejects.toThrow(/Abort|aborted|Operation aborted/);
   });
 });

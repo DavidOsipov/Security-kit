@@ -5,20 +5,20 @@
 // are found. This is intended as a simple, opt-in CI guard — projects can replace
 // it with a stricter eslint rule if desired.
 
-import fs from 'fs';
-import path from 'path';
-import { fileURLToPath } from 'url';
+import fs from "fs";
+import path from "path";
+import { fileURLToPath } from "url";
 
 const MIN_BYTES = 32;
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const repoRoot = path.resolve(__dirname, '..');
+const repoRoot = path.resolve(__dirname, "..");
 
 function isLikelySecretLiteral(s: string): boolean {
   return /^[A-Za-z0-9_-]{8,64}$/.test(s);
 }
 
 function bytesLengthOfString(s: string): number {
-  return Buffer.from(s, 'utf8').length;
+  return Buffer.from(s, "utf8").length;
 }
 
 function walk(dir: string, cb: (file: string) => void) {
@@ -26,7 +26,8 @@ function walk(dir: string, cb: (file: string) => void) {
     const full = path.join(dir, name);
     const stat = fs.statSync(full);
     if (stat.isDirectory()) {
-      if (name === 'node_modules' || name === '.git' || name === 'dist') continue;
+      if (name === "node_modules" || name === ".git" || name === "dist")
+        continue;
       walk(full, cb);
     } else if (stat.isFile()) {
       cb(full);
@@ -36,8 +37,8 @@ function walk(dir: string, cb: (file: string) => void) {
 
 const matches: Array<{ file: string; literal: string; bytes: number }> = [];
 walk(repoRoot, (file) => {
-  if (!file.endsWith('.ts') && !file.endsWith('.md')) return;
-  const data = fs.readFileSync(file, 'utf8');
+  if (!file.endsWith(".ts") && !file.endsWith(".md")) return;
+  const data = fs.readFileSync(file, "utf8");
   const re = /(['\"])([A-Za-z0-9_-]{8,64})\1/g;
   let m: RegExpExecArray | null;
   while ((m = re.exec(data)) !== null) {
@@ -52,11 +53,11 @@ walk(repoRoot, (file) => {
 });
 
 if (matches.length === 0) {
-  console.log('No short secret literals detected.');
+  console.log("No short secret literals detected.");
   process.exit(0);
 }
 
-console.error('Detected short secret literals (< 32 bytes):');
+console.error("Detected short secret literals (< 32 bytes):");
 for (const m of matches) {
   console.error(`  ${m.file}: "${m.literal}" (${m.bytes} bytes)`);
 }

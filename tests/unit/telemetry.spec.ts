@@ -15,7 +15,11 @@ describe("telemetry registration", () => {
 
   it("registers, emits, and unregisters telemetry hooks (basic)", () => {
     const calls: Array<any> = [];
-    const hook = (name: string, value?: number, tags?: Record<string, string>) => {
+    const hook = (
+      name: string,
+      value?: number,
+      tags?: Record<string, string>,
+    ) => {
       calls.push({ name, value, tags });
     };
 
@@ -70,34 +74,42 @@ describe("telemetry registration", () => {
       const { secureCompare } = await import("../../src/utils");
       expect(secureCompare(long, long)).toBe(true);
       // Wait for microtask to complete
-      await new Promise(resolve => setTimeout(resolve, 0));
+      await new Promise((resolve) => setTimeout(resolve, 0));
       expect(throwingHook).toHaveBeenCalled();
     } finally {
       unregister();
     }
   });
 
-
-  it('safeEmitMetric passes sanitized tags to hooks', async () => {
+  it("safeEmitMetric passes sanitized tags to hooks", async () => {
     const received: Array<any> = [];
-    const hook = (name: string, value?: number, tags?: Record<string, string>) => {
+    const hook = (
+      name: string,
+      value?: number,
+      tags?: Record<string, string>,
+    ) => {
       received.push({ name, value, tags });
     };
     const unregister = registerTelemetry(hook as any);
     try {
-// Trigger emission via secureCompare path as in previous test
-  const { secureCompare } = await import('../../src/utils');
-      const long = 'x'.repeat(4096 - 63);
+      // Trigger emission via secureCompare path as in previous test
+      const { secureCompare } = await import("../../src/utils");
+      const long = "x".repeat(4096 - 63);
       expect(secureCompare(long, long)).toBe(true);
       // Wait for microtask
-      await new Promise(resolve => setTimeout(resolve, 0));
+      await new Promise((resolve) => setTimeout(resolve, 0));
       // Expect at least one telemetry call recorded
       expect(received.length).toBeGreaterThan(0);
       for (const call of received) {
         if (call.tags) {
           // No unexpected keys
           for (const k of Object.keys(call.tags)) {
-            expect(['reason','strict','requireCrypto','subtlePresent']).toContain(k);
+            expect([
+              "reason",
+              "strict",
+              "requireCrypto",
+              "subtlePresent",
+            ]).toContain(k);
           }
         }
       }
@@ -120,7 +132,7 @@ describe("telemetry registration", () => {
       // Should not be called synchronously
       expect(called).toBe(false);
       // Wait for microtask
-      await new Promise(resolve => setTimeout(resolve, 0));
+      await new Promise((resolve) => setTimeout(resolve, 0));
       expect(hook).toHaveBeenCalled();
     } finally {
       unregister();

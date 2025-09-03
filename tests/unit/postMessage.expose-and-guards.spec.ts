@@ -1,31 +1,44 @@
-import { test, expect } from 'vitest';
-import ts from 'typescript';
-import vm from 'node:vm';
-import path from 'path';
-import { readFileSync } from 'fs';
-import { createRequire } from 'module';
+import { test, expect } from "vitest";
+import ts from "typescript";
+import vm from "node:vm";
+import path from "path";
+import { readFileSync } from "fs";
+import { createRequire } from "module";
 
 // Shared helper: create a require() that transpiles local .ts imports on the fly
 // and reuses a shared cache to avoid infinite recursion when modules import each other.
-function createTranspilingRequire(parentDir: string, sharedCache?: Map<string, any>) {
+function createTranspilingRequire(
+  parentDir: string,
+  sharedCache?: Map<string, any>,
+) {
   const nodeRequire = createRequire(parentDir + path.sep);
   const cache = sharedCache ?? new Map<string, any>();
 
   function transpileFile(tsPath: string) {
-    const code = readFileSync(tsPath, 'utf8');
+    const code = readFileSync(tsPath, "utf8");
     const withMacroInner = `const __TEST__ = true;\n` + code;
     const out = ts.transpileModule(withMacroInner, {
-      compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020, esModuleInterop: true },
+      compilerOptions: {
+        module: ts.ModuleKind.CommonJS,
+        target: ts.ScriptTarget.ES2020,
+        esModuleInterop: true,
+      },
       fileName: path.basename(tsPath),
     });
-    if (!out.outputText) throw new Error('Transpile failed for ' + tsPath + '\n' + JSON.stringify(out.diagnostics || []));
+    if (!out.outputText)
+      throw new Error(
+        "Transpile failed for " +
+          tsPath +
+          "\n" +
+          JSON.stringify(out.diagnostics || []),
+      );
     return out.outputText;
   }
 
   function req(spec: string) {
-    if (!spec.startsWith('.')) return nodeRequire(spec);
+    if (!spec.startsWith(".")) return nodeRequire(spec);
     let resolvedTs = path.resolve(parentDir, spec);
-    if (!path.extname(resolvedTs)) resolvedTs += '.ts';
+    if (!path.extname(resolvedTs)) resolvedTs += ".ts";
     const normalized = resolvedTs;
     if (cache.has(normalized)) return cache.get(normalized).exports;
     const modLocal: any = { exports: {} };
@@ -36,15 +49,32 @@ function createTranspilingRequire(parentDir: string, sharedCache?: Map<string, a
     const ctx: any = { console, __SECURITY_KIT_ALLOW_TEST_APIS: true };
     const host = globalThis as any;
     for (const key of [
-      'ArrayBuffer','Uint8Array','Int8Array','Uint16Array','Int16Array','Uint32Array','Int32Array',
-      'Float32Array','Float64Array','DataView','SharedArrayBuffer','TextEncoder','TextDecoder',
+      "ArrayBuffer",
+      "Uint8Array",
+      "Int8Array",
+      "Uint16Array",
+      "Int16Array",
+      "Uint32Array",
+      "Int32Array",
+      "Float32Array",
+      "Float64Array",
+      "DataView",
+      "SharedArrayBuffer",
+      "TextEncoder",
+      "TextDecoder",
     ]) {
-      if (typeof host[key] !== 'undefined') ctx[key] = host[key];
+      if (typeof host[key] !== "undefined") ctx[key] = host[key];
     }
     // Use the same cache for nested requires to avoid recursion and repeated evals
     ctx.require = createTranspilingRequire(path.dirname(resolvedTs), cache);
     const fnLocal = scriptLocal.runInNewContext(ctx);
-    const result = fnLocal(modLocal.exports, ctx.require, modLocal, resolvedTs, path.dirname(resolvedTs));
+    const result = fnLocal(
+      modLocal.exports,
+      ctx.require,
+      modLocal,
+      resolvedTs,
+      path.dirname(resolvedTs),
+    );
     modLocal.exports = result || modLocal.exports;
     return modLocal.exports;
   }
@@ -52,14 +82,18 @@ function createTranspilingRequire(parentDir: string, sharedCache?: Map<string, a
   return req;
 }
 
-test('module evaluated with __TEST__ but no require should not expose __test_internals', () => {
-  const srcPath = path.resolve(__dirname, '../../src/postMessage.ts');
-  const src = readFileSync(srcPath, 'utf8');
+test("module evaluated with __TEST__ but no require should not expose __test_internals", () => {
+  const srcPath = path.resolve(__dirname, "../../src/postMessage.ts");
+  const src = readFileSync(srcPath, "utf8");
   // Don't set __TEST__ = true so that __test_internals will be undefined
   const withMacro = src;
   const transpiled = ts.transpileModule(withMacro, {
-    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020, esModuleInterop: true },
-    fileName: 'postMessage.test.ts',
+    compilerOptions: {
+      module: ts.ModuleKind.CommonJS,
+      target: ts.ScriptTarget.ES2020,
+      esModuleInterop: true,
+    },
+    fileName: "postMessage.test.ts",
   }).outputText;
 
   const wrapper = `(function(exports, require, module, __filename, __dirname) { ${transpiled} \n return module.exports; })`;
@@ -73,37 +107,57 @@ test('module evaluated with __TEST__ but no require should not expose __test_int
   function makeStubRequire(parentDir: string) {
     const nodeReq = createRequire(parentDir + path.sep);
     return function req(spec: string) {
-      if (!spec.startsWith('.')) return nodeReq(spec);
+      if (!spec.startsWith(".")) return nodeReq(spec);
       // Map common local imports to tiny stubs sufficient for module init.
-      const base = spec.replace(/^\.\//, '').replace(/\.ts$/, '');
-      if (spec.endsWith('/environment') || spec === './environment') {
-        return { environment: { isProduction: false, setExplicitEnv: (_: any) => {}, clearCache: () => {} } };
+      const base = spec.replace(/^\.\//, "").replace(/\.ts$/, "");
+      if (spec.endsWith("/environment") || spec === "./environment") {
+        return {
+          environment: {
+            isProduction: false,
+            setExplicitEnv: (_: any) => {},
+            clearCache: () => {},
+          },
+        };
       }
-      if (spec.endsWith('/errors') || spec === './errors') {
+      if (spec.endsWith("/errors") || spec === "./errors") {
         class E extends Error {}
         return {
           InvalidParameterError: class InvalidParameterError extends E {},
           InvalidConfigurationError: class InvalidConfigurationError extends E {},
           CryptoUnavailableError: class CryptoUnavailableError extends E {},
           TransferableNotAllowedError: class TransferableNotAllowedError extends E {},
-          sanitizeErrorForLogs: (e: unknown) => ({ message: String((e as Error)?.message ?? e) }),
+          sanitizeErrorForLogs: (e: unknown) => ({
+            message: String((e as Error)?.message ?? e),
+          }),
         };
       }
-      if (spec.endsWith('/state') || spec === './state') {
+      if (spec.endsWith("/state") || spec === "./state") {
         return {
-          ensureCrypto: async () => ({ getRandomValues: (u: Uint8Array) => { for (let i=0;i<u.length;i++) u[i]=i; }, subtle: { digest: async () => new ArrayBuffer(32) } }),
+          ensureCrypto: async () => ({
+            getRandomValues: (u: Uint8Array) => {
+              for (let i = 0; i < u.length; i++) u[i] = i;
+            },
+            subtle: { digest: async () => new ArrayBuffer(32) },
+          }),
         };
       }
-      if (spec.endsWith('/utils') || spec === './utils') {
-        return { secureDevLog: () => {}, _arrayBufferToBase64: (_: ArrayBuffer) => 'AAA' };
+      if (spec.endsWith("/utils") || spec === "./utils") {
+        return {
+          secureDevLog: () => {},
+          _arrayBufferToBase64: (_: ArrayBuffer) => "AAA",
+        };
       }
-      if (spec.endsWith('/encoding') || spec === './encoding') {
-        return { SHARED_ENCODER: { encode: (s: string) => new TextEncoder().encode(s) } };
+      if (spec.endsWith("/encoding") || spec === "./encoding") {
+        return {
+          SHARED_ENCODER: {
+            encode: (s: string) => new TextEncoder().encode(s),
+          },
+        };
       }
-      if (spec.endsWith('/constants') || spec === './constants') {
+      if (spec.endsWith("/constants") || spec === "./constants") {
         return { isForbiddenKey: (_: string) => false };
       }
-      if (spec.endsWith('/url') || spec === './url') {
+      if (spec.endsWith("/url") || spec === "./url") {
         return { normalizeOrigin: (s: string) => s };
       }
       // Fallback: attempt to let Node resolve (may fail for .ts modules)
@@ -119,8 +173,11 @@ test('module evaluated with __TEST__ but no require should not expose __test_int
   const context: any = vm.createContext({ console });
   // Mock require to throw for development-guards to ensure __test_internals is undefined
   context.require = (spec: string) => {
-    if (spec === './development-guards' || spec.endsWith('/development-guards')) {
-      throw new Error('require not available for development-guards');
+    if (
+      spec === "./development-guards" ||
+      spec.endsWith("/development-guards")
+    ) {
+      throw new Error("require not available for development-guards");
     }
     // For other imports, use the stub require
     return requireFor(spec);
@@ -129,54 +186,75 @@ test('module evaluated with __TEST__ but no require should not expose __test_int
   // on realm checks when loaded inside the VM.
   const host = globalThis as any;
   for (const key of [
-    'ArrayBuffer',
-    'Uint8Array',
-    'Int8Array',
-    'Uint16Array',
-    'Int16Array',
-    'Uint32Array',
-    'Int32Array',
-    'Float32Array',
-    'Float64Array',
-    'DataView',
-    'SharedArrayBuffer',
-    'TextEncoder',
-    'TextDecoder',
+    "ArrayBuffer",
+    "Uint8Array",
+    "Int8Array",
+    "Uint16Array",
+    "Int16Array",
+    "Uint32Array",
+    "Int32Array",
+    "Float32Array",
+    "Float64Array",
+    "DataView",
+    "SharedArrayBuffer",
+    "TextEncoder",
+    "TextDecoder",
   ]) {
-    if (typeof host[key] !== 'undefined') context[key] = host[key];
+    if (typeof host[key] !== "undefined") context[key] = host[key];
   }
   const fn = script.runInNewContext(context);
-  const exported = fn(mod.exports, requireFor, mod, srcPath, path.dirname(srcPath));
+  const exported = fn(
+    mod.exports,
+    requireFor,
+    mod,
+    srcPath,
+    path.dirname(srcPath),
+  );
 
   // The factory should not expose internals when require is not available.
   expect(exported.__test_internals).toBeUndefined();
 });
 
-test('runtime test API guard throws in production unless explicitly allowed', () => {
-  const srcPath = path.resolve(__dirname, '../../src/postMessage.ts');
+test("runtime test API guard throws in production unless explicitly allowed", () => {
+  const srcPath = path.resolve(__dirname, "../../src/postMessage.ts");
   // Import the runtime-guarded helpers directly from the source so we exercise
   // the inline _assertTestApiAllowedInline check.
   // Build a VM execution of the module with a mocked './environment' import
   // and no global __SECURITY_KIT_ALLOW_TEST_APIS so the runtime guard will
   // enforce production restrictions.
-  const withMacro2 = readFileSync(srcPath, 'utf8');
+  const withMacro2 = readFileSync(srcPath, "utf8");
   const transpiled = ts.transpileModule(withMacro2, {
-    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020, esModuleInterop: true },
-    fileName: 'postMessage.vm.ts',
+    compilerOptions: {
+      module: ts.ModuleKind.CommonJS,
+      target: ts.ScriptTarget.ES2020,
+      esModuleInterop: true,
+    },
+    fileName: "postMessage.vm.ts",
   }).outputText;
 
   const wrapper2 = `(function(exports, require, module, __filename, __dirname) { ${transpiled} \n return module.exports; })`;
-  const script2 = new vm.Script(wrapper2, { filename: srcPath + '.vm' });
+  const script2 = new vm.Script(wrapper2, { filename: srcPath + ".vm" });
 
   const mod2: any = { exports: {} };
   const context2: any = { console };
   // Expose typed-array builtins in VM
   const host2 = globalThis as any;
   for (const key of [
-    'ArrayBuffer', 'Uint8Array', 'Int8Array', 'Uint16Array', 'Int16Array', 'Uint32Array', 'Int32Array',
-    'Float32Array', 'Float64Array', 'DataView', 'SharedArrayBuffer', 'TextEncoder', 'TextDecoder',
+    "ArrayBuffer",
+    "Uint8Array",
+    "Int8Array",
+    "Uint16Array",
+    "Int16Array",
+    "Uint32Array",
+    "Int32Array",
+    "Float32Array",
+    "Float64Array",
+    "DataView",
+    "SharedArrayBuffer",
+    "TextEncoder",
+    "TextDecoder",
   ]) {
-    if (typeof host2[key] !== 'undefined') context2[key] = host2[key];
+    if (typeof host2[key] !== "undefined") context2[key] = host2[key];
   }
   // Provide an initial process.env without SECURITY_KIT_ALLOW_TEST_APIS
   context2.process = { env: {} };
@@ -184,37 +262,52 @@ test('runtime test API guard throws in production unless explicitly allowed', ()
   // Create a require shim that mocks './environment' import to be production
   const nodeReq = createRequire(path.dirname(srcPath) + path.sep);
   function requireShim(spec: string) {
-    if (spec === './environment' || spec.endsWith('/environment')) {
-      return { environment: { isProduction: true, setExplicitEnv: (_: any) => {}, clearCache: () => {} } };
+    if (spec === "./environment" || spec.endsWith("/environment")) {
+      return {
+        environment: {
+          isProduction: true,
+          setExplicitEnv: (_: any) => {},
+          clearCache: () => {},
+        },
+      };
     }
-    if (spec === './errors' || spec.endsWith('/errors')) {
+    if (spec === "./errors" || spec.endsWith("/errors")) {
       class E extends Error {}
       return {
         InvalidParameterError: class InvalidParameterError extends E {},
         InvalidConfigurationError: class InvalidConfigurationError extends E {},
         CryptoUnavailableError: class CryptoUnavailableError extends E {},
         TransferableNotAllowedError: class TransferableNotAllowedError extends E {},
-        sanitizeErrorForLogs: (e: unknown) => ({ message: String((e as Error)?.message ?? e) }),
+        sanitizeErrorForLogs: (e: unknown) => ({
+          message: String((e as Error)?.message ?? e),
+        }),
       };
     }
-    if (spec === './utils' || spec.endsWith('/utils')) {
+    if (spec === "./utils" || spec.endsWith("/utils")) {
       return { secureDevLog: () => {} };
     }
-    if (spec === './encoding' || spec.endsWith('/encoding')) {
-      return { SHARED_ENCODER: { encode: (s: string) => new TextEncoder().encode(s) } };
+    if (spec === "./encoding" || spec.endsWith("/encoding")) {
+      return {
+        SHARED_ENCODER: { encode: (s: string) => new TextEncoder().encode(s) },
+      };
     }
-    if (spec === './encoding-utils' || spec.endsWith('/encoding-utils')) {
-      return { arrayBufferToBase64: (_: ArrayBuffer) => 'AAA' };
+    if (spec === "./encoding-utils" || spec.endsWith("/encoding-utils")) {
+      return { arrayBufferToBase64: (_: ArrayBuffer) => "AAA" };
     }
-    if (spec === './constants' || spec.endsWith('/constants')) {
+    if (spec === "./constants" || spec.endsWith("/constants")) {
       return { isForbiddenKey: (_: string) => false };
     }
-    if (spec === './url' || spec.endsWith('/url')) {
+    if (spec === "./url" || spec.endsWith("/url")) {
       return { normalizeOrigin: (s: string) => s };
     }
-    if (spec === './state' || spec.endsWith('/state')) {
+    if (spec === "./state" || spec.endsWith("/state")) {
       return {
-        ensureCrypto: async () => ({ getRandomValues: (u: Uint8Array) => { for (let i=0;i<u.length;i++) u[i]=i; }, subtle: { digest: async () => new ArrayBuffer(32) } }),
+        ensureCrypto: async () => ({
+          getRandomValues: (u: Uint8Array) => {
+            for (let i = 0; i < u.length; i++) u[i] = i;
+          },
+          subtle: { digest: async () => new ArrayBuffer(32) },
+        }),
       };
     }
     // Default to Node resolution for other modules
@@ -222,12 +315,18 @@ test('runtime test API guard throws in production unless explicitly allowed', ()
   }
 
   const fn2 = script2.runInNewContext(context2);
-  const exported2 = fn2(mod2.exports, requireShim, mod2, srcPath, path.dirname(srcPath));
+  const exported2 = fn2(
+    mod2.exports,
+    requireShim,
+    mod2,
+    srcPath,
+    path.dirname(srcPath),
+  );
 
   // Calling the test API without any allow flags should throw
   expect(() => exported2.__test_getSaltFailureTimestamp()).toThrow();
 
   // Now set the VM process env flag and it should no longer throw
-  context2.process.env['SECURITY_KIT_ALLOW_TEST_APIS'] = 'true';
+  context2.process.env["SECURITY_KIT_ALLOW_TEST_APIS"] = "true";
   expect(() => exported2.__test_getSaltFailureTimestamp()).not.toThrow();
 });

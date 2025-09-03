@@ -244,7 +244,7 @@ async function convert() {
     const out = [];
     for (let i = 0; i < inLines.length; i++) {
       const line = inLines[i];
-      const sigMatch = line.match(/^\-\s*([\w$<>\[\]]+)\s*\(([^)]*)\)\s*:\s*(.*)$/);
+      const sigMatch = line.match(/^-\s*([\w$<>[\]]+)\s*\(([^)]*)\)\s*:\s*(.*)$/);
       if (sigMatch) {
         const name = sigMatch[1];
         const args = sigMatch[2] || '';
@@ -255,7 +255,7 @@ async function convert() {
         for (const marker of markers) {
           const idx = rest.indexOf(marker);
           if (idx !== -1) {
-            desc = rest.slice(idx).replace(/^\s*#####?\s*/i, '');
+            desc = rest.slice(idx).replace(/^\s*#####?\s*/, '');
             rest = rest.slice(0, idx).trim();
             break;
           }
@@ -285,10 +285,10 @@ async function convert() {
   }
 
   // Ensure declaration blocks that look like "Name { ... }" are converted to "interface Name { ... }"
-  final = final.replace(/```ts\n\s*([\w]+)\s*\{([\s\S]*?)\}\s*```/g, (m, name, body) => {
+  final = final.replace(/```ts\n\s*(\w+)\s*\{([\s\S]*?)\}\s*```/g, (m, name, body) => {
     // split the inline body into comma-separated fields and produce one-per-line
     const fields = (body || '').replace(/\s+/g, ' ').trim();
-    const parts = fields.split(/;|,|\n/).map(s => s.trim()).filter(Boolean);
+    const parts = fields.split(/[;,\n]/).map(s => s.trim()).filter(Boolean);
     const lines = parts.map(p => '  ' + p.replace(/\s+/g, ' '));
     const decl = `interface ${name} {\n${lines.join('\n')}\n}`;
     return '```ts\n' + decl + '\n```';
@@ -307,7 +307,7 @@ async function convert() {
     const lines = block.split(/\n/).map(l => l.trim()).filter(Boolean);
     const bullets = lines.map(l => {
       // if pattern 'name: description' convert to '- name — description'
-      const p = l.match(/^([A-Za-z0-9_\-]+)[:\s]+(.+)$/);
+      const p = l.match(/^([\w\-]+)[:\s]+(.+)$/);
       if (p) return `- ${p[1]} — ${p[2].trim()}`;
       return `- ${l}`;
     });

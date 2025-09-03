@@ -1,5 +1,5 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import loadPostMessageInternals from '../helpers/vmPostMessageHelper';
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import loadPostMessageInternals from "../helpers/vmPostMessageHelper";
 
 /**
  * Cross-realm tests for postMessage functionality.
@@ -9,7 +9,7 @@ import loadPostMessageInternals from '../helpers/vmPostMessageHelper';
  * realm boundaries, particularly for instanceof checks and prototype chains.
  */
 
-describe('postMessage cross-realm security', () => {
+describe("postMessage cross-realm security", () => {
   beforeEach(() => {
     vi.resetModules();
   });
@@ -21,14 +21,14 @@ describe('postMessage cross-realm security', () => {
     vi.restoreAllMocks();
   });
 
-  it('safeCtorName correctly identifies cross-realm objects', async () => {
+  it("safeCtorName correctly identifies cross-realm objects", async () => {
     const pm = loadPostMessageInternals();
-  // Diagnostic: expose exported keys and last-run metadata to help debug VM shape
-  // (temporary during debugging)
-  // eslint-disable-next-line no-console
-  console.log('VM exported keys:', (pm as any).__vm_export_keys);
-  // eslint-disable-next-line no-console
-  console.log('VM last return meta:', (pm as any).__vm_last_return_meta);
+    // Diagnostic: expose exported keys and last-run metadata to help debug VM shape
+    // (temporary during debugging)
+    // eslint-disable-next-line no-console
+    console.log("VM exported keys:", (pm as any).__vm_export_keys);
+    // eslint-disable-next-line no-console
+    console.log("VM last return meta:", (pm as any).__vm_last_return_meta);
 
     // Create a MessagePort-like object in the VM realm and run detection inside VM
     const ctorName = pm.__runInVmJson(`
@@ -39,10 +39,10 @@ describe('postMessage cross-realm security', () => {
       if (typeof m.safeCtorName === 'function') return m.safeCtorName(p);
       try { return Object.getPrototypeOf(p).constructor.name; } catch { return undefined; }
     `);
-    expect(ctorName).toBe('MessagePort');
+    expect(ctorName).toBe("MessagePort");
   }, 30_000);
 
-  it('validateTransferables rejects cross-realm MessagePort-like objects', async () => {
+  it("validateTransferables rejects cross-realm MessagePort-like objects", async () => {
     const pm = loadPostMessageInternals();
 
     // Create a VM-realm object with MessagePort constructor name and ask VM to
@@ -56,7 +56,7 @@ describe('postMessage cross-realm security', () => {
     expect(rejected).toBe(true);
   }, 30_000);
 
-  it('toNullProto works correctly with cross-realm objects', async () => {
+  it("toNullProto works correctly with cross-realm objects", async () => {
     const pm = loadPostMessageInternals();
 
     // Create an object in VM realm with prototype pollution and run toNullProto
@@ -77,14 +77,17 @@ describe('postMessage cross-realm security', () => {
     // Reconstruct null-proto object on the host from the VM marker
     let hostSanitized: any = sanitized;
     if (sanitized && (sanitized as any).__isNullProto) {
-      hostSanitized = Object.assign(Object.create(null), (sanitized as any).data);
+      hostSanitized = Object.assign(
+        Object.create(null),
+        (sanitized as any).data,
+      );
     }
     expect(Object.getPrototypeOf(hostSanitized)).toBeNull();
-    expect(hostSanitized.safe).toBe('data');
+    expect(hostSanitized.safe).toBe("data");
     expect(hostSanitized.polluted).toBeUndefined();
   }, 30_000);
 
-  it('cross-realm ArrayBuffer.isView compatibility', async () => {
+  it("cross-realm ArrayBuffer.isView compatibility", async () => {
     const pm = loadPostMessageInternals();
 
     // Create a Uint8Array in VM realm and ask VM to confirm it's an ArrayBuffer view
@@ -97,7 +100,7 @@ describe('postMessage cross-realm security', () => {
     expect(arrInfo.first).toBe(1);
   }, 30_000);
 
-  it('structured clone works with cross-realm typed arrays', async () => {
+  it("structured clone works with cross-realm typed arrays", async () => {
     const pm = loadPostMessageInternals();
 
     // Create typed array in VM and test structured serialization

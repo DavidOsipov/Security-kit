@@ -1,23 +1,23 @@
-import { beforeEach, afterEach, expect, test, vi } from 'vitest';
+import { beforeEach, afterEach, expect, test, vi } from "vitest";
 
 // Enable test APIs at runtime and reset modules
 beforeEach(async () => {
   vi.resetModules();
   (globalThis as any).__SECURITY_KIT_ALLOW_TEST_APIS = true;
-  const postMessage = await import('../../src/postMessage');
+  const postMessage = await import("../../src/postMessage");
   postMessage.__test_resetForUnitTests();
 });
 
 afterEach(async () => {
   delete (globalThis as any).__SECURITY_KIT_ALLOW_TEST_APIS;
-  const postMessage = await import('../../src/postMessage');
+  const postMessage = await import("../../src/postMessage");
   postMessage.__test_resetForUnitTests();
   vi.restoreAllMocks();
 });
 
-test('ensureFingerprintSalt succeeds when crypto available (subtle path mocked)', async () => {
+test("ensureFingerprintSalt succeeds when crypto available (subtle path mocked)", async () => {
   // Spy on state.ensureCrypto to provide a fake crypto with getRandomValues
-  const state = await import('../../src/state');
+  const state = await import("../../src/state");
   const fakeCrypto = {
     getRandomValues(buf: Uint8Array) {
       for (let i = 0; i < buf.length; i++) buf[i] = i & 0xff;
@@ -31,9 +31,9 @@ test('ensureFingerprintSalt succeeds when crypto available (subtle path mocked)'
     },
   } as unknown as Crypto;
 
-  const spy = vi.spyOn(state, 'ensureCrypto').mockResolvedValue(fakeCrypto);
+  const spy = vi.spyOn(state, "ensureCrypto").mockResolvedValue(fakeCrypto);
 
-  const postMessage = await import('../../src/postMessage');
+  const postMessage = await import("../../src/postMessage");
   const salt = await postMessage.__test_ensureFingerprintSalt();
   expect(salt).toBeInstanceOf(Uint8Array);
   expect(salt.length).toBeGreaterThan(0);
@@ -45,23 +45,24 @@ test('ensureFingerprintSalt succeeds when crypto available (subtle path mocked)'
   spy.mockRestore();
 });
 
-test('ensureFingerprintSalt honors cooldown (throws when timestamp recent)', async () => {
+test("ensureFingerprintSalt honors cooldown (throws when timestamp recent)", async () => {
   // Set a recent failure timestamp to trigger cooldown
   const now = Date.now();
-  const postMessage = await import('../../src/postMessage');
+  const postMessage = await import("../../src/postMessage");
   (postMessage as any).__test_setSaltFailureTimestamp(now);
   try {
     await (postMessage as any).__test_ensureFingerprintSalt();
-    throw new Error('Expected ensureFingerprintSalt to throw due to cooldown');
+    throw new Error("Expected ensureFingerprintSalt to throw due to cooldown");
   } catch (err: any) {
     expect(err).toBeDefined();
   }
 });
 
-test('getPayloadFingerprint uses subtle.digest when available', async () => {
-  const state = await import('../../src/state');
+test("getPayloadFingerprint uses subtle.digest when available", async () => {
+  const state = await import("../../src/state");
   // Provide fake crypto where subtle.digest returns predictable bytes
-  const fakeDigest = new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]).buffer;
+  const fakeDigest = new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12])
+    .buffer;
   const fakeCrypto = {
     getRandomValues(buf: Uint8Array) {
       for (let i = 0; i < buf.length; i++) buf[i] = (i + 1) & 0xff;
@@ -73,21 +74,22 @@ test('getPayloadFingerprint uses subtle.digest when available', async () => {
       },
     },
   } as unknown as Crypto;
-  const spy = vi.spyOn(state, 'ensureCrypto').mockResolvedValue(fakeCrypto);
+  const spy = vi.spyOn(state, "ensureCrypto").mockResolvedValue(fakeCrypto);
 
-  const postMessage = await import('../../src/postMessage');
+  const postMessage = await import("../../src/postMessage");
   const fp = await (postMessage as any).__test_getPayloadFingerprint({ a: 1 });
-  expect(typeof fp).toBe('string');
+  expect(typeof fp).toBe("string");
   // Since base64 slice(0,12) may be used, ensure it's not the error token
-  expect(fp).not.toBe('FINGERPRINT_ERR');
+  expect(fp).not.toBe("FINGERPRINT_ERR");
 
   spy.mockRestore();
 });
 
-test('scheduleDiagnosticForFailedValidation logs fingerprint when enabled', async () => {
-  const state = await import('../../src/state');
+test("scheduleDiagnosticForFailedValidation logs fingerprint when enabled", async () => {
+  const state = await import("../../src/state");
   // Provide fake crypto that supports subtle.digest
-  const fakeDigest = new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]).buffer;
+  const fakeDigest = new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12])
+    .buffer;
   const fakeCrypto = {
     getRandomValues(buf: Uint8Array) {
       for (let i = 0; i < buf.length; i++) buf[i] = (i + 2) & 0xff;
@@ -99,24 +101,24 @@ test('scheduleDiagnosticForFailedValidation logs fingerprint when enabled', asyn
       },
     },
   } as unknown as Crypto;
-  vi.spyOn(state, 'ensureCrypto').mockResolvedValue(fakeCrypto);
+  vi.spyOn(state, "ensureCrypto").mockResolvedValue(fakeCrypto);
 
   // Create a listener with enableDiagnostics true and a schema validator
   // Use a spy for the consumer so we can assert messages are not delivered when validation fails
   const onMessageSpy = vi.fn();
-  const postMessage = await import('../../src/postMessage');
+  const postMessage = await import("../../src/postMessage");
   const listener = (postMessage as any).createSecurePostMessageListener(
     {
-      allowedOrigins: ['http://localhost'],
+      allowedOrigins: ["http://localhost"],
       onMessage: onMessageSpy,
-      validate: { a: 'number' },
+      validate: { a: "number" },
       enableDiagnostics: true,
     },
     undefined as any,
   );
 
   // Craft a JSON string that will fail validation (a is wrong type)
-  const eventData = JSON.stringify({ a: 'not-a-number' });
+  const eventData = JSON.stringify({ a: "not-a-number" });
 
   // Post the message to the current window/origin to trigger the listener
   window.postMessage(eventData, window.location.origin);
@@ -136,26 +138,24 @@ test('scheduleDiagnosticForFailedValidation logs fingerprint when enabled', asyn
   listener.destroy();
 });
 
-test('parseMessageEventData structured rejects disallowed transferables', async () => {
+test("parseMessageEventData structured rejects disallowed transferables", async () => {
   // Create a listener configured for structured wireFormat
   const onMessage = vi.fn();
-  const postMessage = await import('../../src/postMessage');
-  const listener = (postMessage as any).createSecurePostMessageListener(
-    {
-      allowedOrigins: ['http://localhost'],
-      onMessage,
-      validate: () => true,
-      wireFormat: 'structured',
-      allowTransferables: false,
-    },
-  );
+  const postMessage = await import("../../src/postMessage");
+  const listener = (postMessage as any).createSecurePostMessageListener({
+    allowedOrigins: ["http://localhost"],
+    onMessage,
+    validate: () => true,
+    wireFormat: "structured",
+    allowTransferables: false,
+  });
 
   // Craft a fake MessagePort-like object whose ctor name is MessagePort
   function MessagePort() {}
   const fakePort = Object.create(MessagePort.prototype);
 
   const eventLike = {
-    origin: 'http://localhost',
+    origin: "http://localhost",
     data: { port: fakePort },
     source: null,
   } as unknown as MessageEvent;
@@ -179,4 +179,3 @@ test('parseMessageEventData structured rejects disallowed transferables', async 
   expect(onMessage).not.toHaveBeenCalled();
   listener.destroy();
 });
-

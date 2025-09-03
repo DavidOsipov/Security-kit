@@ -218,10 +218,12 @@ describe("Security Testing Suite (unit)", () => {
       expect(() =>
         safeAddEventListener(button, "click", () => {}),
       ).not.toThrow();
-      expect(() => safeAddEventListener(button, "onload", () => {})).toThrow(/not allowed/);
-      expect(() =>
-        safeAddEventListener(button, "click", "no" as any),
-      ).toThrow(/Handler must be a function/);
+      expect(() => safeAddEventListener(button, "onload", () => {})).toThrow(
+        /not allowed/,
+      );
+      expect(() => safeAddEventListener(button, "click", "no" as any)).toThrow(
+        /Handler must be a function/,
+      );
     });
   });
 

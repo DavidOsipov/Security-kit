@@ -117,9 +117,9 @@ function canonicalizeObject(
 
   // Conservative probe for proxies: include alphabetic keys 'a'..'z' and 'A'..'Z'
   const alpha = "abcdefghijklmnopqrstuvwxyz";
-  for (let i = 0; i < alpha.length; i++) {
-    keySet.add(alpha.charAt(i));
-    keySet.add(alpha.charAt(i).toUpperCase());
+  for (let index = 0; index < alpha.length; index++) {
+    keySet.add(alpha.charAt(index));
+    keySet.add(alpha.charAt(index).toUpperCase());
   }
 
   const keys = Array.from(keySet).sort((a, b) => a.localeCompare(b));
@@ -150,7 +150,12 @@ function canonicalizeObject(
       continue;
     }
 
-    if (raw === undefined || typeof raw === "function" || typeof raw === "symbol") continue;
+    if (
+      raw === undefined ||
+      typeof raw === "function" ||
+      typeof raw === "symbol"
+    )
+      continue;
 
     let canon: unknown;
     if (raw !== null && typeof raw === "object") {
@@ -227,8 +232,13 @@ export function toCanonicalValue(value: unknown): unknown {
   try {
     if (value && typeof value === "object") {
       if (typeof ArrayBuffer !== "undefined") {
-        // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- optional chaining for cross-realm safety
-        if ((ArrayBuffer as unknown as { isView?: (x: unknown) => boolean }).isView?.(value)) {
+        if (
+          (
+            ArrayBuffer as unknown as {
+              readonly isView?: (x: unknown) => boolean;
+            }
+          ).isView?.(value)
+        ) {
           return {};
         }
         if (value instanceof ArrayBuffer) return {};
@@ -250,41 +260,43 @@ export function safeStableStringify(value: unknown): string {
 
   type Pos = "top" | "array" | "objectProp";
 
-  const stringify = (val: unknown, pos: Pos): string => {
-    if (val === null) return "null";
-    const t = typeof val;
-    if (t === "string") return JSON.stringify(val);
-    if (t === "number") return Object.is(val, -0) ? "-0" : JSON.stringify(val);
-    if (t === "boolean") return val ? "true" : "false";
+  const stringify = (value_: unknown, pos: Pos): string => {
+    if (value_ === null) return "null";
+    const t = typeof value_;
+    if (t === "string") return JSON.stringify(value_);
+    if (t === "number")
+      return Object.is(value_, -0) ? "-0" : JSON.stringify(value_);
+    if (t === "boolean") return value_ ? "true" : "false";
     if (t === "bigint") {
       throw new InvalidParameterError(
         "BigInt values are not supported in payload/context.body.",
       );
     }
-    if (val === undefined) return "null";
+    if (value_ === undefined) return "null";
 
-    if (Array.isArray(val)) {
-      const arr = val as unknown[];
-      const items = (pos === "objectProp"
-        ? arr.filter((e) => e !== null && e !== undefined)
-        : arr
+    if (Array.isArray(value_)) {
+      const array = value_ as readonly unknown[];
+      const items = (
+        pos === "objectProp"
+          ? array.filter((e) => e !== null && e !== undefined)
+          : array
       ).map((e) => stringify(e, "array"));
       return `[${items.join(",")}]`;
     }
 
-    if (val && typeof val === "object") {
-      const obj = val as Record<string, unknown>;
-      const keys = Object.keys(obj).sort((a, b) => a.localeCompare(b));
-      const parts: string[] = [];
+    if (value_ && typeof value_ === "object") {
+      const object = value_ as Record<string, unknown>;
+      const keys = Object.keys(object).sort((a, b) => a.localeCompare(b));
+      const parts: readonly string[] = [];
       for (const k of keys) {
-        const v = obj[k];
+        const v = object[k];
         if (v === undefined) continue; // drop undefined properties
         parts.push(`${JSON.stringify(k)}:${stringify(v, "objectProp")}`);
       }
       return `{${parts.join(",")}}`;
     }
 
-    return JSON.stringify(val);
+    return JSON.stringify(value_);
   };
 
   return stringify(canonical, "top");

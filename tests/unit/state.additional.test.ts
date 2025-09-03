@@ -26,7 +26,8 @@ beforeEach(() => {
 
 afterEach(() => {
   // Restore original global crypto if present and try to reset module state
-  if (origGlobalCrypto !== undefined) (globalThis as any).crypto = origGlobalCrypto;
+  if (origGlobalCrypto !== undefined)
+    (globalThis as any).crypto = origGlobalCrypto;
   try {
     if (typeof state.__test_resetCryptoStateForUnitTests === "function") {
       state.__test_resetCryptoStateForUnitTests();
@@ -93,8 +94,8 @@ describe("state module - crypto lifecycle", () => {
 
   it("ensureCrypto propagates configuration errors cleanly", async () => {
     // Mock Node crypto import to fail so ensureCrypto rejects when no global crypto
-    vi.doMock('node:crypto', () => {
-      throw new Error('Module not found');
+    vi.doMock("node:crypto", () => {
+      throw new Error("Module not found");
     });
 
     // Simulate invalid usage: configure with a value that will be rejected

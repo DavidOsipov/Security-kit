@@ -10,7 +10,10 @@ import {
   getCryptoState,
 } from "../../src/state";
 
-import { CryptoUnavailableError, InvalidConfigurationError } from "../../src/errors";
+import {
+  CryptoUnavailableError,
+  InvalidConfigurationError,
+} from "../../src/errors";
 
 // Minimal fake crypto implementation
 function makeFakeCrypto(): Crypto {
@@ -44,7 +47,10 @@ describe("state.ts - crypto lifecycle and test helpers", () => {
     try {
       // try to restore global crypto if tests changed it
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      if ((globalThis as any).crypto && (globalThis as any).__test_replaced_crypto) {
+      if (
+        (globalThis as any).crypto &&
+        (globalThis as any).__test_replaced_crypto
+      ) {
         (globalThis as any).crypto = (globalThis as any).__test_replaced_crypto;
         delete (globalThis as any).__test_replaced_crypto;
       }

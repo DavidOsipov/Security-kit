@@ -11,7 +11,9 @@ import { InvalidParameterError } from "../../src/errors";
 
 describe("url module", () => {
   it("createSecureURL builds URL and encodes params", () => {
-    const res = createSecureURL("https://example.com", ["api", "v1"], { q: "a b" });
+    const res = createSecureURL("https://example.com", ["api", "v1"], {
+      q: "a b",
+    });
     expect(res.startsWith("https://example.com/")).toBe(true);
     expect(res.includes("q=a%20b") || res.includes("q=a+b")).toBe(true);
   });
@@ -25,7 +27,11 @@ describe("url module", () => {
 
   it("updateURLParams can remove undefined and set values", () => {
     const base = "https://example.com/?a=1&b=2";
-    const updated = updateURLParams(base, { a: undefined, b: "x", c: "z" }, { removeUndefined: true, onUnsafeKey: "throw" });
+    const updated = updateURLParams(
+      base,
+      { a: undefined, b: "x", c: "z" },
+      { removeUndefined: true, onUnsafeKey: "throw" },
+    );
     expect(updated.includes("a=")).toBe(false);
     expect(updated.includes("b=x")).toBe(true);
     expect(updated.includes("c=z")).toBe(true);

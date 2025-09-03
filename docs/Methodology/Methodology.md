@@ -14,9 +14,9 @@ This methodology is built on three core principles.
 
 Before a single line of code was written, a comprehensive set of "constitutions" was created, drawing from expert literature on JavaScript security, performance, and testing. These documents are included in the package and serve as the **single source of truth and the primary architectural blueprint**.
 
-*   **The Security Constitution:** Defines the non-negotiable security rules, from cryptographic integrity to DOM interaction safety.
-*   **The Testing & QA Constitution:** Mandates a verifiable testing strategy, including adversarial and mutation testing.
-*   **The JS Performance Constitution:** Enforces performance budgets and best practices.
+- **The Security Constitution:** Defines the non-negotiable security rules, from cryptographic integrity to DOM interaction safety.
+- **The Testing & QA Constitution:** Mandates a verifiable testing strategy, including adversarial and mutation testing.
+- **The JS Performance Constitution:** Enforces performance budgets and best practices.
 
 The AI's primary directive was to generate code that strictly adheres to these human-authored rules. The code serves the constitution, not the other way around.
 
@@ -34,9 +34,9 @@ This process creates an automated, adversarial review cycle where AI models are 
 
 AI was the tool, but human judgment was the final arbiter at every stage.
 
-*   **Architectural Control:** The constitutions, core architecture, and final design decisions were 100% human-led.
-*   **Iterative Refinement:** The entire library underwent **over 50 major iterations** of refinement. Each change proposed by the AI orchestrator was critically assessed, tested, and approved by a human before being implemented.
-*   **Final Verification:** The final codebase is subject to a comprehensive suite of tests—unit, integration, and security-specific—written to prove compliance with the constitutions.
+- **Architectural Control:** The constitutions, core architecture, and final design decisions were 100% human-led.
+- **Iterative Refinement:** The entire library underwent **over 50 major iterations** of refinement. Each change proposed by the AI orchestrator was critically assessed, tested, and approved by a human before being implemented.
+- **Final Verification:** The final codebase is subject to a comprehensive suite of tests—unit, integration, and security-specific—written to prove compliance with the constitutions.
 
 ---
 
@@ -44,8 +44,8 @@ AI was the tool, but human judgment was the final arbiter at every stage.
 
 I believe this transparent, constitution-driven, and AI-assisted process represents a new standard for developing high-quality software. It is designed to be **more rigorous** than a single developer working alone by:
 
-*   **Enforcing a Security-First Mindset:** The constitutions ensure that best practices are the default, not an afterthought.
-*   **Leveraging Scale:** Using multiple AIs for review allows me to check the code against a vast body of knowledge for potential vulnerabilities.
-*   **Maintaining Expert Control:** Human oversight ensures that the final product is logical, secure, and aligned with the project's core philosophy.
+- **Enforcing a Security-First Mindset:** The constitutions ensure that best practices are the default, not an afterthought.
+- **Leveraging Scale:** Using multiple AIs for review allows me to check the code against a vast body of knowledge for potential vulnerabilities.
+- **Maintaining Expert Control:** Human oversight ensures that the final product is logical, secure, and aligned with the project's core philosophy.
 
 This library is a testament to using AI as a powerful tool to augment, not replace, human expertise. We invite you to review the code, the constitutions, and the methodology, and I welcome contributions that help me uphold these high standards.

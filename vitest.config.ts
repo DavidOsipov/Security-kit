@@ -29,7 +29,7 @@ export default defineConfig({
         ".vscode/**",
         ".github/**",
         ".sonarlint/**",
-        ".mcp/**"
+        ".mcp/**",
       ],
       include: ["src/**", "server/**", "tools/**", "scritps/**"],
       all: true,
@@ -38,10 +38,10 @@ export default defineConfig({
           branches: 80,
           functions: 80,
           lines: 80,
-          statements: 80
-        }
-      }
-    }
+          statements: 80,
+        },
+      },
+    },
   },
   define: {
     __TEST__: false,

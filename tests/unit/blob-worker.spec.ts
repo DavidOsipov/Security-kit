@@ -1,7 +1,7 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { SecureApiSigner } from '../../src/secure-api-signer';
-import { VerifiedByteCache } from '../../src/secure-lru-cache';
-import { SecurityKitError } from '../../src/errors';
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { SecureApiSigner } from "../../src/secure-api-signer";
+import { VerifiedByteCache } from "../../src/secure-lru-cache";
+import { SecurityKitError } from "../../src/errors";
 
 // Mocks for global objects we need: Blob, URL.createObjectURL, URL.revokeObjectURL, Worker
 
@@ -22,19 +22,23 @@ class FakeWorker {
   postMessage(msg: any) {
     // For handshake: when 'init' with secretBuffer sent, reply with initialized
     const transfer = arguments[1] as any[] | undefined;
-    if (msg && msg.type === 'init') {
+    if (msg && msg.type === "init") {
       setTimeout(() => {
-        const event = { data: { type: 'initialized' } };
-        (this.handlers['message'] || []).forEach((h) => h(event));
+        const event = { data: { type: "initialized" } };
+        (this.handlers["message"] || []).forEach((h) => h(event));
       }, 10);
       return;
     }
-    if (msg && msg.type === 'handshake') {
+    if (msg && msg.type === "handshake") {
       // If a MessagePort was transferred, post the handshake response on that port
-      if (transfer && transfer.length > 0 && typeof transfer[0]?.postMessage === 'function') {
+      if (
+        transfer &&
+        transfer.length > 0 &&
+        typeof transfer[0]?.postMessage === "function"
+      ) {
         setTimeout(() => {
           try {
-            transfer[0].postMessage({ type: 'handshake', signature: 'AAA' });
+            transfer[0].postMessage({ type: "handshake", signature: "AAA" });
           } catch {
             // ignore
           }
@@ -44,8 +48,8 @@ class FakeWorker {
 
       // Otherwise, fall back to emitting a message event on the worker
       setTimeout(() => {
-        const event = { data: { type: 'handshake', signature: 'AAA' } };
-        (this.handlers['message'] || []).forEach((h) => h(event));
+        const event = { data: { type: "handshake", signature: "AAA" } };
+        (this.handlers["message"] || []).forEach((h) => h(event));
       }, 10);
     }
   }
@@ -68,7 +72,9 @@ beforeEach(() => {
   (globalThis as any).Blob = function (arr: any, opts: any) {
     return { arr, opts };
   };
-  (URL as any).createObjectURL = vi.fn((blob: any) => `blob://fake-${Math.random()}`);
+  (URL as any).createObjectURL = vi.fn(
+    (blob: any) => `blob://fake-${Math.random()}`,
+  );
   (URL as any).revokeObjectURL = vi.fn(() => {});
   (globalThis as any).Worker = vi.fn(function (script: string, opts: any) {
     return new FakeWorker(script);
@@ -87,105 +93,107 @@ afterEach(() => {
 async function makeSigner(init: any) {
   const defaultInit = {
     secret: new Uint8Array(32),
-    workerUrl: new URL('http://example.com/worker.js'),
-    integrity: 'compute',
-    allowCrossOriginWorkerOrigins: ['http://example.com'],
+    workerUrl: new URL("http://example.com/worker.js"),
+    integrity: "compute",
+    allowCrossOriginWorkerOrigins: ["http://example.com"],
   };
   return await SecureApiSigner.create({ ...defaultInit, ...init });
 }
 
-describe('Blob worker and policy gating', () => {
-  it('caches verified bytes and creates blob worker when allowed', async () => {
+describe("Blob worker and policy gating", () => {
+  it("caches verified bytes and creates blob worker when allowed", async () => {
     // Simulate fetch to return a small script
     globalThis.fetch = vi.fn(async () => {
       return {
         ok: true,
         redirected: false,
-        url: 'http://example.com/worker.js',
-        arrayBuffer: async () => new Uint8Array([1,2,3]).buffer,
+        url: "http://example.com/worker.js",
+        arrayBuffer: async () => new Uint8Array([1, 2, 3]).buffer,
       } as any;
     });
 
     // Ensure runtime policy allows blob workers
-    const { setRuntimePolicy } = await import('../../src/config');
+    const { setRuntimePolicy } = await import("../../src/config");
     setRuntimePolicy({ allowBlobWorkers: true });
 
     const signer = await makeSigner({});
-    expect(VerifiedByteCache.get('http://example.com/worker.js')).toBeDefined();
+    expect(VerifiedByteCache.get("http://example.com/worker.js")).toBeDefined();
     await signer.destroy();
   });
 
-  it('throws E_SIGNATURE_MISMATCH when expected hash mismatches', async () => {
+  it("throws E_SIGNATURE_MISMATCH when expected hash mismatches", async () => {
     globalThis.fetch = vi.fn(async () => {
       return {
         ok: true,
         redirected: false,
-        url: 'http://example.com/worker.js',
-        arrayBuffer: async () => new Uint8Array([1,2,3]).buffer,
+        url: "http://example.com/worker.js",
+        arrayBuffer: async () => new Uint8Array([1, 2, 3]).buffer,
       } as any;
     });
-    const { setRuntimePolicy } = await import('../../src/config');
+    const { setRuntimePolicy } = await import("../../src/config");
     setRuntimePolicy({ allowBlobWorkers: true });
 
     await expect(
-      makeSigner({ expectedWorkerScriptHash: 'AAAAAAAAAAAAAAAAAAAA' }),
+      makeSigner({ expectedWorkerScriptHash: "AAAAAAAAAAAAAAAAAAAA" }),
     ).rejects.toThrow(SecurityKitError);
   });
 
-  it('refuses compute in production by default', async () => {
-  // Simulate production environment (use public API)
-  const env = await import('../../src/environment');
-  env.environment.setExplicitEnv('production');
+  it("refuses compute in production by default", async () => {
+    // Simulate production environment (use public API)
+    const env = await import("../../src/environment");
+    env.environment.setExplicitEnv("production");
 
     globalThis.fetch = vi.fn(async () => {
       return {
         ok: true,
         redirected: false,
-        url: 'http://example.com/worker.js',
-        arrayBuffer: async () => new Uint8Array([1,2,3]).buffer,
+        url: "http://example.com/worker.js",
+        arrayBuffer: async () => new Uint8Array([1, 2, 3]).buffer,
       } as any;
     });
 
     await expect(makeSigner({})).rejects.toThrow(SecurityKitError);
 
-  // restore
-  env.environment.setExplicitEnv('development');
+    // restore
+    env.environment.setExplicitEnv("development");
   });
 
-  it('throws E_CSP_BLOCKED if Blob worker creation fails', async () => {
+  it("throws E_CSP_BLOCKED if Blob worker creation fails", async () => {
     globalThis.fetch = vi.fn(async () => {
       return {
         ok: true,
         redirected: false,
-        url: 'http://example.com/worker.js',
-        arrayBuffer: async () => new Uint8Array([1,2,3]).buffer,
+        url: "http://example.com/worker.js",
+        arrayBuffer: async () => new Uint8Array([1, 2, 3]).buffer,
       } as any;
     });
-    const { setRuntimePolicy } = await import('../../src/config');
+    const { setRuntimePolicy } = await import("../../src/config");
     setRuntimePolicy({ allowBlobWorkers: true });
 
     // Make URL.createObjectURL throw
-    (URL as any).createObjectURL = () => { throw new Error('CSP'); };
+    (URL as any).createObjectURL = () => {
+      throw new Error("CSP");
+    };
 
     await expect(makeSigner({})).rejects.toThrow(SecurityKitError);
   });
 
-  it('enforces canonical size limit', async () => {
+  it("enforces canonical size limit", async () => {
     // Create a signer with a small worker script
     globalThis.fetch = vi.fn(async () => {
       return {
         ok: true,
         redirected: false,
-        url: 'http://example.com/worker.js',
-        arrayBuffer: async () => new Uint8Array([1,2,3]).buffer,
+        url: "http://example.com/worker.js",
+        arrayBuffer: async () => new Uint8Array([1, 2, 3]).buffer,
       } as any;
     });
-    const { setRuntimePolicy } = await import('../../src/config');
+    const { setRuntimePolicy } = await import("../../src/config");
     setRuntimePolicy({ allowBlobWorkers: true });
 
     const signer = await makeSigner({});
     // Attempt to sign a huge payload
-    const huge = 'A'.repeat(3_000_000);
+    const huge = "A".repeat(3_000_000);
     await expect(signer.sign({ data: huge })).rejects.toThrow(SecurityKitError);
     await signer.destroy();
   });

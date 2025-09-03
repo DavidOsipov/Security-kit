@@ -12,7 +12,7 @@ class MockMessageEvent extends Event implements MessageEvent {
   public readonly source: Window | MessagePort | null = null;
 
   constructor(data: any, eventInitDict?: EventInit) {
-    super('message', eventInitDict);
+    super("message", eventInitDict);
     // Keep the structure intact for structured clone simulation
     this.data = data;
   }
@@ -25,7 +25,7 @@ class MockMessageEvent extends Event implements MessageEvent {
     origin?: string,
     lastEventId?: string,
     source?: MessageEventSource | null,
-    ports?: MessagePort[]
+    ports?: MessagePort[],
   ): void {
     // Mock implementation - not used in tests
   }
@@ -58,7 +58,7 @@ const mockImportKey = vi.fn();
 let capturedMessageListener: ((event: MessageEvent) => void) | undefined;
 
 // Mock the global environment
-vi.stubGlobal('self', {
+vi.stubGlobal("self", {
   postMessage: mockPostMessage,
   close: mockClose,
   addEventListener: mockAddEventListener,
@@ -66,13 +66,13 @@ vi.stubGlobal('self', {
 });
 
 // Mock the global postMessage function (available in Web Worker context)
-vi.stubGlobal('postMessage', mockPostMessage);
+vi.stubGlobal("postMessage", mockPostMessage);
 
-vi.stubGlobal('location', {
+vi.stubGlobal("location", {
   origin: "https://example.com",
 });
 
-vi.stubGlobal('crypto', {
+vi.stubGlobal("crypto", {
   ...global.crypto,
   subtle: {
     sign: mockSign,
@@ -84,15 +84,16 @@ vi.stubGlobal('crypto', {
 // Mock addEventListener to capture the listener BEFORE importing the worker
 const originalAddEventListener = globalThis.addEventListener;
 globalThis.addEventListener = vi.fn((type: string, listener: any) => {
-  if (type === 'message') {
+  if (type === "message") {
     capturedMessageListener = listener;
   }
   // Don't call original in test environment
-    return undefined;
+  return undefined;
 });
 // Ensure `window` alias is present and its addEventListener points to the mock
 try {
-  if (typeof (globalThis as any).window === 'undefined') (globalThis as any).window = globalThis;
+  if (typeof (globalThis as any).window === "undefined")
+    (globalThis as any).window = globalThis;
   (globalThis as any).window.addEventListener = globalThis.addEventListener;
 } catch {}
 
@@ -119,7 +120,10 @@ vi.mock("../../src/postMessage", () => ({
       globalThis.addEventListener("message", listener);
     } catch {}
     try {
-      if ((globalThis as any).window && typeof (globalThis as any).window.addEventListener === 'function') {
+      if (
+        (globalThis as any).window &&
+        typeof (globalThis as any).window.addEventListener === "function"
+      ) {
         (globalThis as any).window.addEventListener("message", listener);
       }
     } catch {}
@@ -138,10 +142,10 @@ function setupWorkerMocks() {
   try {
     vi.resetModules();
   } catch {}
-  
+
   // Reset captured listener
   capturedMessageListener = undefined;
-  
+
   const mockPostMessage = vi.fn();
   const mockClose = vi.fn();
   const mockAddEventListener = vi.fn();
@@ -149,20 +153,20 @@ function setupWorkerMocks() {
   const mockSign = vi.fn();
   const mockImportKey = vi.fn();
 
-  vi.stubGlobal('self', {
+  vi.stubGlobal("self", {
     postMessage: mockPostMessage,
     close: mockClose,
     addEventListener: mockAddEventListener,
     removeEventListener: mockRemoveEventListener,
   });
 
-  vi.stubGlobal('postMessage', mockPostMessage);
+  vi.stubGlobal("postMessage", mockPostMessage);
 
-  vi.stubGlobal('location', {
+  vi.stubGlobal("location", {
     origin: "https://example.com",
   });
 
-  vi.stubGlobal('crypto', {
+  vi.stubGlobal("crypto", {
     ...global.crypto,
     subtle: {
       sign: mockSign,
@@ -173,17 +177,20 @@ function setupWorkerMocks() {
 
   // Re-setup the global addEventListener mock to capture the listener
   // This preserves the listener capture functionality while setting up other mocks
-  globalThis.addEventListener = vi.fn((type: string, listener: any, options?: any) => {
-    if (type === 'message') {
-      capturedMessageListener = listener;
-    }
-    // Don't call original in test environment
-    return undefined;
-  });
+  globalThis.addEventListener = vi.fn(
+    (type: string, listener: any, options?: any) => {
+      if (type === "message") {
+        capturedMessageListener = listener;
+      }
+      // Don't call original in test environment
+      return undefined;
+    },
+  );
 
   // Ensure `window` alias is present and its addEventListener points to the mock
   try {
-    if (typeof (globalThis as any).window === 'undefined') (globalThis as any).window = globalThis;
+    if (typeof (globalThis as any).window === "undefined")
+      (globalThis as any).window = globalThis;
     (globalThis as any).window.addEventListener = globalThis.addEventListener;
   } catch {}
 
@@ -198,7 +205,10 @@ function setupWorkerMocks() {
 }
 
 // Helper function to send messages to the worker
-async function sendMessageToWorker(message: any, eventOptions?: Partial<MessageEvent>) {
+async function sendMessageToWorker(
+  message: any,
+  eventOptions?: Partial<MessageEvent>,
+) {
   if (!capturedMessageListener) {
     throw new Error("Worker message listener not captured");
   }
@@ -214,7 +224,7 @@ async function waitForListener(): Promise<void> {
     if (capturedMessageListener) {
       return;
     }
-    await new Promise(resolve => setTimeout(resolve, 10));
+    await new Promise((resolve) => setTimeout(resolve, 10));
   }
   throw new Error("Listener was not captured within timeout");
 }
@@ -291,9 +301,7 @@ test("signing-worker: applyConcurrencyConfig sets max concurrent signing", async
   expect(typeof workerModule.__test_validateHandshakeNonce).toBe("function");
 });
 
-
 // RULE-ID: validation-functions
-
 
 test("signing-worker: validateSignParameters rejects oversized canonical", async () => {
   const workerModule = await import("../../src/worker/signing-worker");
@@ -460,19 +468,22 @@ test("signing-worker: main event listener processes messages correctly", async (
   // Check if we got initialized or already-initialized
   const calls = mockPostMessage.mock.calls;
   expect(calls.length).toBeGreaterThan(0);
-  
+
   const lastCall = calls[calls.length - 1][0];
-  expect(typeof lastCall).toBe('object');
+  expect(typeof lastCall).toBe("object");
   expect(lastCall.type).toBeDefined();
-  
+
   // If it was initialized, we should see "initialized"
   // If it was already initialized, we should see "already-initialized"
-  if (lastCall.type === 'initialized') {
+  if (lastCall.type === "initialized") {
     expect(lastCall).toEqual({ type: "initialized" });
-  } else if (lastCall.type === 'error' && lastCall.reason === 'already-initialized') {
+  } else if (
+    lastCall.type === "error" &&
+    lastCall.reason === "already-initialized"
+  ) {
     expect(lastCall).toEqual({
       type: "error",
-      reason: "already-initialized"
+      reason: "already-initialized",
     });
   } else {
     throw new Error(`Unexpected response: ${JSON.stringify(lastCall)}`);
@@ -489,7 +500,7 @@ test("signing-worker: main event listener processes messages correctly", async (
   expect(mockPostMessage).toHaveBeenCalledWith({
     type: "error",
     requestId: undefined,
-    reason: "unknown-message-type"
+    reason: "unknown-message-type",
   });
 });
 
@@ -516,14 +527,14 @@ test("signing-worker: main event listener handles exceptions gracefully", async 
   const malformedEvent = new MockMessageEvent(malformedMessage);
 
   await capturedMessageListener(malformedEvent);
-  
+
   // Check that some error response was sent
   expect(mockPostMessage).toHaveBeenCalled();
   const calls = mockPostMessage.mock.calls;
   expect(calls.length).toBeGreaterThan(0);
-  
+
   const lastCall = calls[calls.length - 1][0];
-  expect(typeof lastCall).toBe('object');
+  expect(typeof lastCall).toBe("object");
   expect(lastCall.type).toBeDefined();
 });
 
@@ -562,7 +573,7 @@ test("signing-worker: validates message origins", async () => {
   if (calls.length > 0) {
     const lastCall = calls[calls.length - 1][0];
     // If we get any response, it should be an error (not a successful sign response)
-    expect(lastCall.type).toBe('error');
+    expect(lastCall.type).toBe("error");
   }
   // If no calls, that's also acceptable (silently ignored)
 });
@@ -588,18 +599,18 @@ test("signing-worker: can setup worker environment mocks", async () => {
   const mockImportKey = vi.fn();
 
   // Setup mocks
-  vi.stubGlobal('self', {
+  vi.stubGlobal("self", {
     postMessage: mockPostMessage,
     close: mockClose,
     addEventListener: vi.fn(),
     removeEventListener: vi.fn(),
   });
 
-  vi.stubGlobal('location', {
+  vi.stubGlobal("location", {
     origin: "https://example.com",
   });
 
-  vi.stubGlobal('crypto', {
+  vi.stubGlobal("crypto", {
     ...global.crypto,
     subtle: {
       sign: mockSign,
@@ -627,18 +638,18 @@ test("signing-worker: worker initializes with mocked environment", async () => {
   const mockImportKey = vi.fn();
 
   // Setup mocks
-  vi.stubGlobal('self', {
+  vi.stubGlobal("self", {
     postMessage: mockPostMessage,
     close: mockClose,
     addEventListener: vi.fn(),
     removeEventListener: vi.fn(),
   });
 
-  vi.stubGlobal('location', {
+  vi.stubGlobal("location", {
     origin: "https://example.com",
   });
 
-  vi.stubGlobal('crypto', {
+  vi.stubGlobal("crypto", {
     ...global.crypto,
     subtle: {
       sign: mockSign,
@@ -665,23 +676,23 @@ test("signing-worker: rejects malformed message types", async () => {
   const mockImportKey = vi.fn();
 
   // Mock global environment properly
-  vi.stubGlobal('self', {
+  vi.stubGlobal("self", {
     postMessage: mockPostMessage,
     close: mockClose,
     addEventListener: vi.fn(),
     removeEventListener: vi.fn(),
   });
 
-  vi.stubGlobal('crypto', {
+  vi.stubGlobal("crypto", {
     ...global.crypto,
     subtle: { sign: mockSign, importKey: mockImportKey },
   });
 
   // Mock global addEventListener to capture the listener
-  
+
   const originalAddEventListener = globalThis.addEventListener;
   globalThis.addEventListener = vi.fn((type: string, listener: any) => {
-    if (type === 'message') {
+    if (type === "message") {
       capturedMessageListener = listener;
     }
     // Don't call original in test environment
@@ -739,23 +750,23 @@ test("signing-worker: rejects oversized payloads", async () => {
   const mockSign = vi.fn();
   const mockImportKey = vi.fn();
 
-  vi.stubGlobal('self', {
+  vi.stubGlobal("self", {
     postMessage: mockPostMessage,
     close: mockClose,
     addEventListener: vi.fn(),
     removeEventListener: vi.fn(),
   });
 
-  vi.stubGlobal('crypto', {
+  vi.stubGlobal("crypto", {
     ...global.crypto,
     subtle: { sign: mockSign, importKey: mockImportKey },
   });
 
   // Mock global addEventListener to capture the listener
-  
+
   const originalAddEventListener = globalThis.addEventListener;
   globalThis.addEventListener = vi.fn((type: string, listener: any) => {
-    if (type === 'message') {
+    if (type === "message") {
       capturedMessageListener = listener;
     }
     // Don't call original in test environment
@@ -805,23 +816,23 @@ test("signing-worker: prevents type confusion attacks", async () => {
   const mockSign = vi.fn();
   const mockImportKey = vi.fn();
 
-  vi.stubGlobal('self', {
+  vi.stubGlobal("self", {
     postMessage: mockPostMessage,
     close: mockClose,
     addEventListener: vi.fn(),
     removeEventListener: vi.fn(),
   });
 
-  vi.stubGlobal('crypto', {
+  vi.stubGlobal("crypto", {
     ...global.crypto,
     subtle: { sign: mockSign, importKey: mockImportKey },
   });
 
   // Mock global addEventListener to capture the listener
-  
+
   const originalAddEventListener = globalThis.addEventListener;
   globalThis.addEventListener = vi.fn((type: string, listener: any) => {
-    if (type === 'message') {
+    if (type === "message") {
       capturedMessageListener = listener;
     }
     // Don't call original in test environment
@@ -864,23 +875,23 @@ test("signing-worker: handles circular references safely", async () => {
   const mockSign = vi.fn();
   const mockImportKey = vi.fn();
 
-  vi.stubGlobal('self', {
+  vi.stubGlobal("self", {
     postMessage: mockPostMessage,
     close: mockClose,
     addEventListener: vi.fn(),
     removeEventListener: vi.fn(),
   });
 
-  vi.stubGlobal('crypto', {
+  vi.stubGlobal("crypto", {
     ...global.crypto,
     subtle: { sign: mockSign, importKey: mockImportKey },
   });
 
   // Mock global addEventListener to capture the listener
-  
+
   const originalAddEventListener = globalThis.addEventListener;
   globalThis.addEventListener = vi.fn((type: string, listener: any) => {
-    if (type === 'message') {
+    if (type === "message") {
       capturedMessageListener = listener;
     }
     // Don't call original in test environment
@@ -915,23 +926,23 @@ test("signing-worker: validates input encoding and characters", async () => {
   const mockSign = vi.fn();
   const mockImportKey = vi.fn();
 
-  vi.stubGlobal('self', {
+  vi.stubGlobal("self", {
     postMessage: mockPostMessage,
     close: mockClose,
     addEventListener: vi.fn(),
     removeEventListener: vi.fn(),
   });
 
-  vi.stubGlobal('crypto', {
+  vi.stubGlobal("crypto", {
     ...global.crypto,
     subtle: { sign: mockSign, importKey: mockImportKey },
   });
 
   // Mock global addEventListener to capture the listener
-  
+
   const originalAddEventListener = globalThis.addEventListener;
   globalThis.addEventListener = vi.fn((type: string, listener: any) => {
-    if (type === 'message') {
+    if (type === "message") {
       capturedMessageListener = listener;
     }
     // Don't call original in test environment
@@ -1002,7 +1013,7 @@ test("signing-worker: handles init message with valid secret buffer", async () =
     initMessage.secretBuffer,
     { name: "HMAC", hash: { name: "SHA-256" } },
     false,
-    ["sign"]
+    ["sign"],
   );
   expect(mockPostMessage).toHaveBeenCalledWith({ type: "initialized" });
 
@@ -1036,7 +1047,7 @@ test("signing-worker: rejects init message without secret buffer", async () => {
 
   expect(mockPostMessage).toHaveBeenCalledWith({
     type: "error",
-    reason: "missing-secret"
+    reason: "missing-secret",
   });
 });
 
@@ -1082,7 +1093,7 @@ test("signing-worker: rejects duplicate init messages", async () => {
 
   expect(mockPostMessage).toHaveBeenCalledWith({
     type: "error",
-    reason: "already-initialized"
+    reason: "already-initialized",
   });
 });
 
@@ -1118,7 +1129,7 @@ test("signing-worker: handles valid handshake message", async () => {
     let initialized = false;
     for (let i = 0; i < 20; i++) {
       initialized = (mockPostMessage.mock.calls || []).some(
-        (c) => c && c[0] && c[0].type === "initialized"
+        (c) => c && c[0] && c[0].type === "initialized",
       );
       if (initialized) break;
       await new Promise((r) => setTimeout(r, 5));
@@ -1147,12 +1158,12 @@ test("signing-worker: handles valid handshake message", async () => {
 
   expect(mockSign).toHaveBeenCalled();
   const call = mockReplyPort.postMessage.mock.calls[0][0];
-  expect(typeof call).toBe('object');
+  expect(typeof call).toBe("object");
   expect(call).toEqual(
     expect.objectContaining({
       type: "handshake",
-      signature: expect.any(String)
-    })
+      signature: expect.any(String),
+    }),
   );
 });
 
@@ -1199,7 +1210,7 @@ test("signing-worker: rejects handshake without reply port", async () => {
 
   expect(mockPostMessage).toHaveBeenCalledWith({
     type: "error",
-    reason: "invalid-handshake"
+    reason: "invalid-handshake",
   });
 });
 
@@ -1248,7 +1259,7 @@ test("signing-worker: rejects handshake with invalid nonce format", async () => 
 
   expect(mockReplyPort.postMessage).toHaveBeenCalledWith({
     type: "error",
-    reason: "nonce-format-invalid"
+    reason: "nonce-format-invalid",
   });
 });
 
@@ -1297,13 +1308,13 @@ test("signing-worker: handles valid sign message", async () => {
 
   expect(mockSign).toHaveBeenCalled();
   const signCall = mockPostMessage.mock.calls[0][0];
-  expect(typeof signCall).toBe('object');
+  expect(typeof signCall).toBe("object");
   expect(signCall).toEqual(
     expect.objectContaining({
       type: "signed",
       requestId: 123,
-      signature: expect.any(String)
-    })
+      signature: expect.any(String),
+    }),
   );
 });
 
@@ -1351,7 +1362,7 @@ test("signing-worker: rejects sign message with invalid parameters", async () =>
   expect(mockPostMessage).toHaveBeenCalledWith({
     type: "error",
     requestId: undefined,
-    reason: "invalid-params"
+    reason: "invalid-params",
   });
 });
 
@@ -1408,7 +1419,9 @@ test("signing-worker: enforces rate limiting", async () => {
   for (let i = 0; i < 20; i++) {
     const calls = mockPostMessage.mock.calls || [];
     if (
-      calls.some((c) => c && c[0] && c[0].type === "signed" && c[0].requestId === 1)
+      calls.some(
+        (c) => c && c[0] && c[0].type === "signed" && c[0].requestId === 1,
+      )
     ) {
       sawFirst = true;
       break;
@@ -1438,7 +1451,7 @@ test("signing-worker: enforces rate limiting", async () => {
   expect(mockPostMessage).toHaveBeenCalledWith({
     type: "error",
     requestId: 2,
-    reason: "rate-limit-exceeded"
+    reason: "rate-limit-exceeded",
   });
 });
 
@@ -1515,7 +1528,7 @@ test("signing-worker: enforces concurrency limits", async () => {
   expect(mockPostMessage).toHaveBeenCalledWith({
     type: "error",
     requestId: 2,
-    reason: "worker-overloaded"
+    reason: "worker-overloaded",
   });
 });
 
@@ -1618,7 +1631,7 @@ test("signing-worker: rejects sign requests during shutdown", async () => {
   expect(mockPostMessage).toHaveBeenCalledWith({
     type: "error",
     requestId: 123,
-    reason: "worker-shutting-down"
+    reason: "worker-shutting-down",
   });
 });
 
@@ -1670,7 +1683,7 @@ test("signing-worker: handles crypto operation failures gracefully", async () =>
   expect(mockPostMessage).toHaveBeenCalledWith({
     type: "error",
     requestId: 123,
-    reason: "sign-failed"
+    reason: "sign-failed",
   });
 });
 
@@ -1723,7 +1736,7 @@ test("signing-worker: handles handshake crypto failures gracefully", async () =>
 
   expect(mockReplyPort.postMessage).toHaveBeenCalledWith({
     type: "error",
-    reason: "handshake-failed"
+    reason: "handshake-failed",
   });
 });
 
@@ -1734,22 +1747,21 @@ test("signing-worker: rejects messages from invalid origins", async () => {
   const mockSign = vi.fn();
   const mockImportKey = vi.fn().mockResolvedValue({} as CryptoKey);
 
-  vi.stubGlobal('self', {
+  vi.stubGlobal("self", {
     postMessage: mockPostMessage,
     close: mockClose,
     addEventListener: vi.fn(),
     removeEventListener: vi.fn(),
   });
 
-  vi.stubGlobal('crypto', {
+  vi.stubGlobal("crypto", {
     ...global.crypto,
     subtle: { sign: mockSign, importKey: mockImportKey },
   });
 
-  
   const originalAddEventListener = globalThis.addEventListener;
   globalThis.addEventListener = vi.fn((type: string, listener: any) => {
-    if (type === 'message') {
+    if (type === "message") {
       capturedMessageListener = listener;
     }
     // Don't call original in test environment
@@ -1837,7 +1849,7 @@ test("signing-worker: rejects unknown message types", async () => {
   expect(mockPostMessage).toHaveBeenCalledWith({
     type: "error",
     requestId: undefined,
-    reason: "unknown-message-type"
+    reason: "unknown-message-type",
   });
 });
 
@@ -1876,7 +1888,7 @@ test("signing-worker: handles unhandled exceptions gracefully", async () => {
   expect(mockPostMessage).toHaveBeenCalledWith({
     type: "error",
     requestId: undefined,
-    reason: "worker-exception"
+    reason: "worker-exception",
   });
 });
 
@@ -1901,18 +1913,18 @@ test("signing-worker: can setup worker environment mocks", async () => {
   const mockImportKey = vi.fn();
 
   // Setup mocks
-  vi.stubGlobal('self', {
+  vi.stubGlobal("self", {
     postMessage: mockPostMessage,
     close: mockClose,
     addEventListener: vi.fn(),
     removeEventListener: vi.fn(),
   });
 
-  vi.stubGlobal('location', {
+  vi.stubGlobal("location", {
     origin: "https://example.com",
   });
 
-  vi.stubGlobal('crypto', {
+  vi.stubGlobal("crypto", {
     ...global.crypto,
     subtle: {
       sign: mockSign,
@@ -1940,18 +1952,18 @@ test("signing-worker: worker initializes with mocked environment", async () => {
   const mockImportKey = vi.fn();
 
   // Setup mocks
-  vi.stubGlobal('self', {
+  vi.stubGlobal("self", {
     postMessage: mockPostMessage,
     close: mockClose,
     addEventListener: vi.fn(),
     removeEventListener: vi.fn(),
   });
 
-  vi.stubGlobal('location', {
+  vi.stubGlobal("location", {
     origin: "https://example.com",
   });
 
-  vi.stubGlobal('crypto', {
+  vi.stubGlobal("crypto", {
     ...global.crypto,
     subtle: {
       sign: mockSign,
@@ -1978,23 +1990,23 @@ test("signing-worker: rejects malformed message types", async () => {
   const mockImportKey = vi.fn();
 
   // Mock global environment properly
-  vi.stubGlobal('self', {
+  vi.stubGlobal("self", {
     postMessage: mockPostMessage,
     close: mockClose,
     addEventListener: vi.fn(),
     removeEventListener: vi.fn(),
   });
 
-  vi.stubGlobal('crypto', {
+  vi.stubGlobal("crypto", {
     ...global.crypto,
     subtle: { sign: mockSign, importKey: mockImportKey },
   });
 
   // Mock global addEventListener to capture the listener
-  
+
   const originalAddEventListener = globalThis.addEventListener;
   globalThis.addEventListener = vi.fn((type: string, listener: any) => {
-    if (type === 'message') {
+    if (type === "message") {
       capturedMessageListener = listener;
     }
     // Don't call original in test environment
@@ -2052,23 +2064,23 @@ test("signing-worker: rejects oversized payloads", async () => {
   const mockSign = vi.fn();
   const mockImportKey = vi.fn();
 
-  vi.stubGlobal('self', {
+  vi.stubGlobal("self", {
     postMessage: mockPostMessage,
     close: mockClose,
     addEventListener: vi.fn(),
     removeEventListener: vi.fn(),
   });
 
-  vi.stubGlobal('crypto', {
+  vi.stubGlobal("crypto", {
     ...global.crypto,
     subtle: { sign: mockSign, importKey: mockImportKey },
   });
 
   // Mock global addEventListener to capture the listener
-  
+
   const originalAddEventListener = globalThis.addEventListener;
   globalThis.addEventListener = vi.fn((type: string, listener: any) => {
-    if (type === 'message') {
+    if (type === "message") {
       capturedMessageListener = listener;
     }
     // Don't call original in test environment
@@ -2118,23 +2130,23 @@ test("signing-worker: prevents type confusion attacks", async () => {
   const mockSign = vi.fn();
   const mockImportKey = vi.fn();
 
-  vi.stubGlobal('self', {
+  vi.stubGlobal("self", {
     postMessage: mockPostMessage,
     close: mockClose,
     addEventListener: vi.fn(),
     removeEventListener: vi.fn(),
   });
 
-  vi.stubGlobal('crypto', {
+  vi.stubGlobal("crypto", {
     ...global.crypto,
     subtle: { sign: mockSign, importKey: mockImportKey },
   });
 
   // Mock global addEventListener to capture the listener
-  
+
   const originalAddEventListener = globalThis.addEventListener;
   globalThis.addEventListener = vi.fn((type: string, listener: any) => {
-    if (type === 'message') {
+    if (type === "message") {
       capturedMessageListener = listener;
     }
     // Don't call original in test environment
@@ -2177,23 +2189,23 @@ test("signing-worker: handles circular references safely", async () => {
   const mockSign = vi.fn();
   const mockImportKey = vi.fn();
 
-  vi.stubGlobal('self', {
+  vi.stubGlobal("self", {
     postMessage: mockPostMessage,
     close: mockClose,
     addEventListener: vi.fn(),
     removeEventListener: vi.fn(),
   });
 
-  vi.stubGlobal('crypto', {
+  vi.stubGlobal("crypto", {
     ...global.crypto,
     subtle: { sign: mockSign, importKey: mockImportKey },
   });
 
   // Mock global addEventListener to capture the listener
-  
+
   const originalAddEventListener = globalThis.addEventListener;
   globalThis.addEventListener = vi.fn((type: string, listener: any) => {
-    if (type === 'message') {
+    if (type === "message") {
       capturedMessageListener = listener;
     }
     // Don't call original in test environment
@@ -2228,23 +2240,23 @@ test("signing-worker: validates input encoding and characters", async () => {
   const mockSign = vi.fn();
   const mockImportKey = vi.fn();
 
-  vi.stubGlobal('self', {
+  vi.stubGlobal("self", {
     postMessage: mockPostMessage,
     close: mockClose,
     addEventListener: vi.fn(),
     removeEventListener: vi.fn(),
   });
 
-  vi.stubGlobal('crypto', {
+  vi.stubGlobal("crypto", {
     ...global.crypto,
     subtle: { sign: mockSign, importKey: mockImportKey },
   });
 
   // Mock global addEventListener to capture the listener
-  
+
   const originalAddEventListener = globalThis.addEventListener;
   globalThis.addEventListener = vi.fn((type: string, listener: any) => {
-    if (type === 'message') {
+    if (type === "message") {
       capturedMessageListener = listener;
     }
     // Don't call original in test environment

@@ -101,7 +101,7 @@ describe("protocol", () => {
       expect(errorReasons).toHaveLength(16);
 
       // Test that each reason can be used in an ErrorResponse
-      errorReasons.forEach(reason => {
+      errorReasons.forEach((reason) => {
         const errorResponse: ErrorResponse = {
           type: "error",
           reason,

@@ -6,7 +6,10 @@ import {
   SANITIZER_ESLINT_RECOMMENDATIONS,
   type SanitizerPolicies,
 } from "../../src/sanitizer.js";
-import { InvalidParameterError, InvalidConfigurationError } from "../../src/errors.js";
+import {
+  InvalidParameterError,
+  InvalidConfigurationError,
+} from "../../src/errors.js";
 
 // Mock DOMPurify
 const mockDOMPurify = {
@@ -114,9 +117,15 @@ describe("sanitizer", () => {
       });
 
       it("throws InvalidParameterError for invalid DOMPurify instance", () => {
-        expect(() => new Sanitizer(null as any, policies)).toThrow(InvalidParameterError);
-        expect(() => new Sanitizer({} as any, policies)).toThrow(InvalidParameterError);
-        expect(() => new Sanitizer({ sanitize: "not-a-function" } as any, policies)).toThrow(InvalidParameterError);
+        expect(() => new Sanitizer(null as any, policies)).toThrow(
+          InvalidParameterError,
+        );
+        expect(() => new Sanitizer({} as any, policies)).toThrow(
+          InvalidParameterError,
+        );
+        expect(
+          () => new Sanitizer({ sanitize: "not-a-function" } as any, policies),
+        ).toThrow(InvalidParameterError);
       });
 
       it("accepts empty policies object", () => {
@@ -152,13 +161,17 @@ describe("sanitizer", () => {
       });
 
       it("throws InvalidConfigurationError for unknown policy", () => {
-        expect(() => sanitizer.createPolicy("unknown")).toThrow(InvalidConfigurationError);
+        expect(() => sanitizer.createPolicy("unknown")).toThrow(
+          InvalidConfigurationError,
+        );
       });
 
       it("throws InvalidConfigurationError when Trusted Types unavailable", () => {
         delete (global.window as any).trustedTypes;
 
-        expect(() => sanitizer.createPolicy("strict")).toThrow(InvalidConfigurationError);
+        expect(() => sanitizer.createPolicy("strict")).toThrow(
+          InvalidConfigurationError,
+        );
       });
 
       it("calls DOMPurify.sanitize with correct config", () => {
@@ -177,7 +190,7 @@ describe("sanitizer", () => {
           {
             ...STRICT_HTML_POLICY_CONFIG,
             RETURN_TRUSTED_TYPE: true,
-          }
+          },
         );
       });
 
@@ -214,20 +227,25 @@ describe("sanitizer", () => {
       });
 
       it("sanitizes HTML with correct config", () => {
-        const result = sanitizer.sanitizeForNonTTBrowsers("<script>evil</script><p>good</p>", "strict");
+        const result = sanitizer.sanitizeForNonTTBrowsers(
+          "<script>evil</script><p>good</p>",
+          "strict",
+        );
 
         expect(mockDOMPurify.sanitize).toHaveBeenCalledWith(
           "<script>evil</script><p>good</p>",
           {
             ...STRICT_HTML_POLICY_CONFIG,
             RETURN_TRUSTED_TYPE: false,
-          }
+          },
         );
         expect(result).toBe("<p>sanitized</p>");
       });
 
       it("throws InvalidConfigurationError for unknown policy", () => {
-        expect(() => sanitizer.sanitizeForNonTTBrowsers("html", "unknown")).toThrow(InvalidConfigurationError);
+        expect(() =>
+          sanitizer.sanitizeForNonTTBrowsers("html", "unknown"),
+        ).toThrow(InvalidConfigurationError);
       });
     });
 
@@ -265,7 +283,9 @@ describe("sanitizer", () => {
       });
 
       it("throws InvalidConfigurationError for unknown policy", () => {
-        expect(() => sanitizer.createPolicyIfAvailable("unknown")).toThrow(InvalidConfigurationError);
+        expect(() => sanitizer.createPolicyIfAvailable("unknown")).toThrow(
+          InvalidConfigurationError,
+        );
       });
 
       it("returns undefined when policy creation fails", () => {
@@ -284,7 +304,10 @@ describe("sanitizer", () => {
       });
 
       it("returns sanitized string", () => {
-        const result = sanitizer.getSanitizedString("<script>evil</script><p>good</p>", "strict");
+        const result = sanitizer.getSanitizedString(
+          "<script>evil</script><p>good</p>",
+          "strict",
+        );
 
         expect(result).toBe("<p>sanitized</p>");
         expect(mockDOMPurify.sanitize).toHaveBeenCalledWith(
@@ -292,12 +315,14 @@ describe("sanitizer", () => {
           {
             ...STRICT_HTML_POLICY_CONFIG,
             RETURN_TRUSTED_TYPE: false,
-          }
+          },
         );
       });
 
       it("throws InvalidConfigurationError for unknown policy", () => {
-        expect(() => sanitizer.getSanitizedString("html", "unknown")).toThrow(InvalidConfigurationError);
+        expect(() => sanitizer.getSanitizedString("html", "unknown")).toThrow(
+          InvalidConfigurationError,
+        );
       });
     });
   });
@@ -309,8 +334,12 @@ describe("sanitizer", () => {
 
       mockDOMPurify.sanitize.mockReturnValue("<p>safe content</p>");
 
-      const maliciousHtml = '<script>alert("xss")</script><img src=x onerror=alert(1)><p>safe</p>';
-      const result = sanitizer.sanitizeForNonTTBrowsers(maliciousHtml, "strict");
+      const maliciousHtml =
+        '<script>alert("xss")</script><img src=x onerror=alert(1)><p>safe</p>';
+      const result = sanitizer.sanitizeForNonTTBrowsers(
+        maliciousHtml,
+        "strict",
+      );
 
       expect(mockDOMPurify.sanitize).toHaveBeenCalledWith(maliciousHtml, {
         ...STRICT_HTML_POLICY_CONFIG,
@@ -323,9 +352,12 @@ describe("sanitizer", () => {
       const policies = { svg: HARDENED_SVG_POLICY_CONFIG };
       const sanitizer = new Sanitizer(mockDOMPurify, policies);
 
-      mockDOMPurify.sanitize.mockReturnValue('<svg><circle cx="50" cy="50" r="40"/></svg>' as any);
+      mockDOMPurify.sanitize.mockReturnValue(
+        '<svg><circle cx="50" cy="50" r="40"/></svg>' as any,
+      );
 
-      const svgContent = '<svg><script>alert(1)</script><circle cx="50" cy="50" r="40"/></svg>';
+      const svgContent =
+        '<svg><script>alert(1)</script><circle cx="50" cy="50" r="40"/></svg>';
       const result = sanitizer.sanitizeForNonTTBrowsers(svgContent, "svg");
 
       expect(mockDOMPurify.sanitize).toHaveBeenCalledWith(svgContent, {

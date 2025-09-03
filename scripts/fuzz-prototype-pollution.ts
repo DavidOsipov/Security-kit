@@ -4,7 +4,8 @@
 // with plain `node` after `npm run build`. Otherwise fall back to importing source
 // TS files (useful when running via ts-node).
 import helpers from "./fuzz-helpers";
-const { safeUrlForImport, safeImport, randomString, makeHostilePayload } = helpers as any;
+const { safeUrlForImport, safeImport, randomString, makeHostilePayload } =
+  helpers as any;
 let Sanitizer: any;
 let STRICT_HTML_POLICY_CONFIG: any;
 let postMessageMod: any;
@@ -17,30 +18,51 @@ export async function resolveImports() {
     const distUrl = new URL("../dist/index.mjs", import.meta.url).href;
     const d = await safeImport(distUrl);
     Sanitizer = d.Sanitizer ?? d.default?.Sanitizer;
-    STRICT_HTML_POLICY_CONFIG = d.STRICT_HTML_POLICY_CONFIG ?? d.default?.STRICT_HTML_POLICY_CONFIG;
+    STRICT_HTML_POLICY_CONFIG =
+      d.STRICT_HTML_POLICY_CONFIG ?? d.default?.STRICT_HTML_POLICY_CONFIG;
     try {
-      const pmUrl = new URL("../dist/scripts/fuzz-prototype-pollution.mjs", import.meta.url).href.replace("fuzz-prototype-pollution.mjs", "src/postMessage.mjs");
+      const pmUrl = new URL(
+        "../dist/scripts/fuzz-prototype-pollution.mjs",
+        import.meta.url,
+      ).href.replace("fuzz-prototype-pollution.mjs", "src/postMessage.mjs");
       postMessageMod = await safeImport(pmUrl);
     } catch (e) {
-      console.warn("fallback to postMessage from dist bundle failed:", e && (e as Error).message);
+      console.warn(
+        "fallback to postMessage from dist bundle failed:",
+        e && (e as Error).message,
+      );
       postMessageMod = d.postMessage ?? d.default?.postMessage ?? {};
     }
     return;
   } catch (e) {
     // Dist bundle import failed — log and fall back to source imports below
-    console.warn("fallback to dist bundle import failed:", e && (e as Error).message);
+    console.warn(
+      "fallback to dist bundle import failed:",
+      e && (e as Error).message,
+    );
   }
 
   // Fallback to source TypeScript imports (this works when running via ts-node).
   try {
-    const s = await safeImport(new URL("../src/sanitizer", import.meta.url).href);
-    const p = await safeImport(new URL("../src/postMessage", import.meta.url).href);
+    const s = await safeImport(
+      new URL("../src/sanitizer", import.meta.url).href,
+    );
+    const p = await safeImport(
+      new URL("../src/postMessage", import.meta.url).href,
+    );
     Sanitizer = s.Sanitizer;
     STRICT_HTML_POLICY_CONFIG = s.STRICT_HTML_POLICY_CONFIG;
     postMessageMod = p;
   } catch (err) {
-    console.warn("Could not import source modules for fuzz harness:", (err as Error).message);
-    Sanitizer = (globalThis as any).Sanitizer || function () { return null; };
+    console.warn(
+      "Could not import source modules for fuzz harness:",
+      (err as Error).message,
+    );
+    Sanitizer =
+      (globalThis as any).Sanitizer ||
+      function () {
+        return null;
+      };
     STRICT_HTML_POLICY_CONFIG = {};
     postMessageMod = {};
   }
@@ -60,13 +82,19 @@ export async function main() {
       try {
         sanitizer.getSanitizedString(JSON.stringify(p), "strict");
       } catch (err) {
-        console.warn("sanitizer threw during fuzz iteration:", (err as Error).message);
+        console.warn(
+          "sanitizer threw during fuzz iteration:",
+          (err as Error).message,
+        );
       }
       // run through postMessage validator
       try {
         postMessageMod._validatePayload?.(p, (d: any) => true as any);
       } catch (err) {
-        console.warn("postMessage validator threw during fuzz iteration:", (err as Error).message);
+        console.warn(
+          "postMessage validator threw during fuzz iteration:",
+          (err as Error).message,
+        );
       }
     } catch (e) {
       console.error("Unexpected crash", e);
@@ -77,7 +105,9 @@ export async function main() {
       process.exit(2);
     }
   }
-  console.log("Fuzz finished: no prototype pollution detected in 100 iterations");
+  console.log(
+    "Fuzz finished: no prototype pollution detected in 100 iterations",
+  );
 }
 
 // Only run the script when executed directly and when explicitly enabled
@@ -91,6 +121,8 @@ if (typeof require !== "undefined" && require.main === module) {
       });
   } else {
     // Not enabled; avoid accidental long-running fuzz execution when imported
-    console.info("fuzz-prototype-pollution: not running fuzz loop (RUN_FUZZ_SCRIPT not set)");
+    console.info(
+      "fuzz-prototype-pollution: not running fuzz loop (RUN_FUZZ_SCRIPT not set)",
+    );
   }
 }

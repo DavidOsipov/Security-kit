@@ -16,7 +16,7 @@ This directory contains the SecureLRUCache performance tests and a short summary
 - New code preset: `low-latency` in `src/config.ts` that enforces microtask wipe scheduling with higher auto thresholds and canonical SIEVE recency.
 - Perf tests now set these env defaults if unset:
   - WIPE_SCHED=microtask, WIPE_AUTO_THRESH=512, WIPE_TIMEOUT_MS=0
-  This avoids scheduler drift between local/CI.
+    This avoids scheduler drift between local/CI.
 
 ## How to reproduce the sweep locally
 

@@ -5,7 +5,10 @@ function makeFakeCrypto(opts?: { withRandomUUID?: boolean; subtle?: any }) {
     getRandomValues(buf: Uint8Array | Uint32Array | BigUint64Array) {
       // deterministic but varied bytes
       for (let i = 0; i < (buf as any).length; i++) {
-        if (typeof BigUint64Array !== "undefined" && buf instanceof BigUint64Array) {
+        if (
+          typeof BigUint64Array !== "undefined" &&
+          buf instanceof BigUint64Array
+        ) {
           // BigUint64Array expects BigInt values
           (buf as BigUint64Array)[i] = BigInt((i * 13) & 0xff);
         } else {
@@ -15,7 +18,8 @@ function makeFakeCrypto(opts?: { withRandomUUID?: boolean; subtle?: any }) {
       return buf;
     },
   };
-  if (opts && opts.withRandomUUID) fake.randomUUID = () => "11111111-2222-3333-4444-555555555555";
+  if (opts && opts.withRandomUUID)
+    fake.randomUUID = () => "11111111-2222-3333-4444-555555555555";
   if (opts && opts.subtle !== undefined) fake.subtle = opts.subtle;
   return fake as Crypto;
 }
@@ -27,12 +31,14 @@ describe("crypto - targeted branches", () => {
   beforeEach(async () => {
     vi.resetModules();
     state = await import("../../src/state");
-    if ((state as any).__test_resetCryptoStateForUnitTests) (state as any).__test_resetCryptoStateForUnitTests();
+    if ((state as any).__test_resetCryptoStateForUnitTests)
+      (state as any).__test_resetCryptoStateForUnitTests();
     cryptoModule = undefined;
   });
 
   afterEach(async () => {
-    if (state && (state as any).__test_resetCryptoStateForUnitTests) (state as any).__test_resetCryptoStateForUnitTests();
+    if (state && (state as any).__test_resetCryptoStateForUnitTests)
+      (state as any).__test_resetCryptoStateForUnitTests();
   });
 
   it("generateSecureUUID uses crypto.randomUUID when present", async () => {
@@ -46,7 +52,13 @@ describe("crypto - targeted branches", () => {
   it("createOneTimeCryptoKey falls back to importKey when subtle.generateKey missing", async () => {
     // subtle without generateKey should exercise importKey path
     const subtleMock = {
-      importKey: async (_format: any, _data: ArrayBuffer, _alg: any, _ext: boolean, _usages: any) => {
+      importKey: async (
+        _format: any,
+        _data: ArrayBuffer,
+        _alg: any,
+        _ext: boolean,
+        _usages: any,
+      ) => {
         return { kty: "sym" } as unknown as CryptoKey;
       },
     };
@@ -86,10 +98,15 @@ describe("crypto - targeted branches", () => {
     (state as any)._setCrypto(fake);
     cryptoModule = await import("../../src/crypto");
     const { InvalidParameterError } = await import("../../src/errors");
-    await expect(cryptoModule.generateSRI(null as any)).rejects.toThrow(InvalidParameterError);
+    await expect(cryptoModule.generateSRI(null as any)).rejects.toThrow(
+      InvalidParameterError,
+    );
     const s256 = await cryptoModule.generateSRI("ok", "sha256");
     expect(s256.startsWith("sha256-")).toBe(true);
-    const s512 = await cryptoModule.generateSRI(new Uint8Array([1, 2, 3]).buffer, "sha512");
+    const s512 = await cryptoModule.generateSRI(
+      new Uint8Array([1, 2, 3]).buffer,
+      "sha512",
+    );
     expect(s512.startsWith("sha512-")).toBe(true);
   });
 

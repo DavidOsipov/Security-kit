@@ -596,6 +596,19 @@ export const __test_validateHandshakeNonce:
     return isTestEnvironment || isGlobalTestFlag
       ? (nonce: string): boolean => {
           try {
+            // Emit a loud warning when invoked outside strict test mode to ensure visibility
+            const inStrictTest =
+              typeof process !== "undefined" &&
+              process?.env?.["NODE_ENV"] === "test";
+            if (!inStrictTest) {
+              try {
+                console.warn(
+                  "SECURITY WARNING: A test-only API (__test_validateHandshakeNonce) was called in a non-test environment.",
+                );
+              } catch {
+                /* best-effort logging only */
+              }
+            }
             _assertTestApiAllowedInlineWorker();
             const cfg = getHandshakeConfig();
             if (typeof nonce !== "string") return false;

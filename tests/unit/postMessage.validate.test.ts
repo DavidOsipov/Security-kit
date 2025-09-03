@@ -15,11 +15,17 @@ describe("_validatePayload (schema)", () => {
   it("validates simple schema and rejects forbidden keys", async () => {
     const postMessage = await import("../../src/postMessage");
     const schema = { id: "string" as const, n: "number" as const };
-    expect(postMessage._validatePayload({ id: "x", n: 1 }, schema).valid).toBe(true);
+    expect(postMessage._validatePayload({ id: "x", n: 1 }, schema).valid).toBe(
+      true,
+    );
     expect(postMessage._validatePayload({ id: "x" }, schema).valid).toBe(false);
-    expect(postMessage._validatePayload({ id: "x", n: "no" }, schema).valid).toBe(false);
+    expect(
+      postMessage._validatePayload({ id: "x", n: "no" }, schema).valid,
+    ).toBe(false);
     // forbidden key test
-    expect(postMessage._validatePayload({ __proto__: {} }, schema).valid).toBe(false);
+    expect(postMessage._validatePayload({ __proto__: {} }, schema).valid).toBe(
+      false,
+    );
   });
 
   it("allows function validators and surfaces thrown errors", async () => {
@@ -50,7 +56,13 @@ describe("_validatePayloadWithExtras", () => {
   it("rejects unexpected extra props when not allowed", async () => {
     const postMessage = await import("../../src/postMessage");
     const schema = { a: "number" as const };
-    expect(postMessage._validatePayloadWithExtras({ a: 1, b: 2 }, schema, false).valid).toBe(false);
-    expect(postMessage._validatePayloadWithExtras({ a: 1, b: 2 }, schema, true).valid).toBe(true);
+    expect(
+      postMessage._validatePayloadWithExtras({ a: 1, b: 2 }, schema, false)
+        .valid,
+    ).toBe(false);
+    expect(
+      postMessage._validatePayloadWithExtras({ a: 1, b: 2 }, schema, true)
+        .valid,
+    ).toBe(true);
   });
 });

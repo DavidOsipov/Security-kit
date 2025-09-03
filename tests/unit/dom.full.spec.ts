@@ -52,7 +52,7 @@ describe("dom.ts comprehensive coverage", () => {
   });
 
   it("redactAttributesSafely handles quoted and unquoted attributes", () => {
-    const quoted = "div[class=\"user\"]";
+    const quoted = 'div[class="user"]';
     expect(redactAttributesSafely(quoted)).toContain("=<redacted>]");
 
     const unquoted = "a[href=http://example.com]";
@@ -100,7 +100,9 @@ describe("dom.ts comprehensive coverage", () => {
       const mod: any = await import("../../src/dom");
       // fake node:crypto module
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (mod.__test_sha256Hex as any).__test_importOverride = async (spec: string) => {
+      (mod.__test_sha256Hex as any).__test_importOverride = async (
+        spec: string,
+      ) => {
         if (spec === "node:crypto") {
           return {
             createHash: () => ({ update: () => ({ digest: () => "aabb" }) }),
@@ -112,21 +114,33 @@ describe("dom.ts comprehensive coverage", () => {
       // ensure native WebCrypto (if present) does not override our importer
       try {
         // stub global crypto.subtle.digest to throw so the importer path is used
-        vi.stubGlobal("crypto", { subtle: { digest: () => { throw new Error('no'); } } });
+        vi.stubGlobal("crypto", {
+          subtle: {
+            digest: () => {
+              throw new Error("no");
+            },
+          },
+        });
       } catch {
         /* ignore */
       }
       try {
-        await expect(mod.__test_sha256Hex("x" as unknown as string)).resolves.toBe("aabb");
+        await expect(
+          mod.__test_sha256Hex("x" as unknown as string),
+        ).resolves.toBe("aabb");
       } finally {
-        try { delete (mod.__test_sha256Hex as any).__test_importOverride; } catch {}
+        try {
+          delete (mod.__test_sha256Hex as any).__test_importOverride;
+        } catch {}
       }
     });
 
     it("uses fast-sha256 object API when available", async () => {
       const mod: any = await import("../../src/dom");
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (mod.__test_sha256Hex as any).__test_importOverride = async (spec: string) => {
+      (mod.__test_sha256Hex as any).__test_importOverride = async (
+        spec: string,
+      ) => {
         if (spec === "fast-sha256") {
           return { hashHex: (s: string) => "ff11" };
         }
@@ -135,21 +149,27 @@ describe("dom.ts comprehensive coverage", () => {
       try {
         await expect(mod.__test_sha256Hex("x")).resolves.toBe("ff11");
       } finally {
-        try { delete (mod.__test_sha256Hex as any).__test_importOverride; } catch {}
+        try {
+          delete (mod.__test_sha256Hex as any).__test_importOverride;
+        } catch {}
       }
     });
 
     it("uses fast-sha256 function export when module is a function", async () => {
       const mod: any = await import("../../src/dom");
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (mod.__test_sha256Hex as any).__test_importOverride = async (spec: string) => {
+      (mod.__test_sha256Hex as any).__test_importOverride = async (
+        spec: string,
+      ) => {
         if (spec === "fast-sha256") return (s: string) => "f-func";
         return Promise.reject(new Error("not found"));
       };
       try {
         await expect(mod.__test_sha256Hex("x")).resolves.toBe("f-func");
       } finally {
-        try { delete (mod.__test_sha256Hex as any).__test_importOverride; } catch {}
+        try {
+          delete (mod.__test_sha256Hex as any).__test_importOverride;
+        } catch {}
       }
     });
 
@@ -157,54 +177,74 @@ describe("dom.ts comprehensive coverage", () => {
       // async
       const mod: any = await import("../../src/dom");
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (mod.__test_sha256Hex as any).__test_importOverride = async (spec: string) => {
-        if (spec === "hash-wasm") return { sha256: async (s: string) => "hh-async" };
+      (mod.__test_sha256Hex as any).__test_importOverride = async (
+        spec: string,
+      ) => {
+        if (spec === "hash-wasm")
+          return { sha256: async (s: string) => "hh-async" };
         return Promise.reject(new Error("not found"));
       };
       try {
         await expect(mod.__test_sha256Hex("x")).resolves.toBe("hh-async");
       } finally {
-        try { delete (mod.__test_sha256Hex as any).__test_importOverride; } catch {}
+        try {
+          delete (mod.__test_sha256Hex as any).__test_importOverride;
+        } catch {}
       }
 
       // sync
       const mod2: any = await import("../../src/dom");
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (mod2.__test_sha256Hex as any).__test_importOverride = async (spec: string) => {
+      (mod2.__test_sha256Hex as any).__test_importOverride = async (
+        spec: string,
+      ) => {
         if (spec === "hash-wasm") return { sha256: (s: string) => "hh-sync" };
         return Promise.reject(new Error("not found"));
       };
       try {
         await expect(mod2.__test_sha256Hex("x")).resolves.toBe("hh-sync");
       } finally {
-        try { delete (mod2.__test_sha256Hex as any).__test_importOverride; } catch {}
+        try {
+          delete (mod2.__test_sha256Hex as any).__test_importOverride;
+        } catch {}
       }
     });
 
     it("throws when no strategies available", async () => {
       const mod: any = await import("../../src/dom");
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (mod.__test_sha256Hex as any).__test_importOverride = async () => Promise.reject(new Error("nope"));
+      (mod.__test_sha256Hex as any).__test_importOverride = async () =>
+        Promise.reject(new Error("nope"));
       try {
-        await expect(mod.__test_sha256Hex("x")).rejects.toThrow("No crypto available");
+        await expect(mod.__test_sha256Hex("x")).rejects.toThrow(
+          "No crypto available",
+        );
       } finally {
-        try { delete (mod.__test_sha256Hex as any).__test_importOverride; } catch {}
+        try {
+          delete (mod.__test_sha256Hex as any).__test_importOverride;
+        } catch {}
       }
     });
   });
 
   describe("DOMValidator behaviors and edge cases", () => {
     it("constructor throws on invalid allowed vs forbidden overlap", () => {
-      expect(() => new DOMValidator({
-        allowedRootSelectors: new Set(["body"]),
-        forbiddenRoots: new Set(["body"]),
-      } as any)).toThrow();
+      expect(
+        () =>
+          new DOMValidator({
+            allowedRootSelectors: new Set(["body"]),
+            forbiddenRoots: new Set(["body"]),
+          } as any),
+      ).toThrow();
     });
 
     it("invalidateCache emits cache_refresh when auditHook provided", async () => {
       const calls: any[] = [];
       const hook = vi.fn(async (e: any) => calls.push(e));
-      const v = createDefaultDOMValidator({ auditHook: hook, emitSelectorHash: false } as any);
+      const v = createDefaultDOMValidator({
+        auditHook: hook,
+        emitSelectorHash: false,
+      } as any);
       v.invalidateCache();
       // wait a tick for async fire-and-forget to run
       vi.useFakeTimers();
@@ -220,7 +260,9 @@ describe("dom.ts comprehensive coverage", () => {
     it("validateSelectorSyntax accepts simple selectors and rejects expensive ones", () => {
       const v = createDefaultDOMValidator();
       expect(v.validateSelectorSyntax("#x")).toBe("#x");
-      expect(() => v.validateSelectorSyntax(123 as unknown as string)).toThrow();
+      expect(() =>
+        v.validateSelectorSyntax(123 as unknown as string),
+      ).toThrow();
       expect(() => v.validateSelectorSyntax("")).toThrow();
       expect(() => v.validateSelectorSyntax("a:has(b)")).toThrow();
     });
@@ -257,9 +299,13 @@ describe("dom.ts comprehensive coverage", () => {
       const v = createDefaultDOMValidator({ failFast: true } as any);
       // stub DocumentFragment.prototype.querySelector to throw for this selector
       const orig = DocumentFragment.prototype.querySelector;
-      DocumentFragment.prototype.querySelector = function () { throw new Error('bad'); } as any;
+      DocumentFragment.prototype.querySelector = function () {
+        throw new Error("bad");
+      } as any;
       try {
-        expect(() => v.queryAllSafely("bad(selector)" as unknown as string)).toThrow();
+        expect(() =>
+          v.queryAllSafely("bad(selector)" as unknown as string),
+        ).toThrow();
       } finally {
         DocumentFragment.prototype.querySelector = orig;
       }
@@ -267,24 +313,36 @@ describe("dom.ts comprehensive coverage", () => {
 
     it("attempts to upgrade internal cache to LRU when available", async () => {
       // ensure global markers absent
-      try { delete (globalThis as any).__LRU_UPGRADED; } catch {}
-      try { delete (globalThis as any).__LRU_IMPORTED; } catch {}
+      try {
+        delete (globalThis as any).__LRU_UPGRADED;
+      } catch {}
+      try {
+        delete (globalThis as any).__LRU_IMPORTED;
+      } catch {}
       // create a validator without cacheFactory so upgrade can be triggered
       // Provide a deterministic importer override so the class attempts to
       // construct an LRU shim synchronously from our test.
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (DOMValidator as any).__test_importOverride = async (spec: string) => {
         if (spec === "lru-cache") {
-          try { (globalThis as any).__LRU_IMPORTED = true; } catch {}
+          try {
+            (globalThis as any).__LRU_IMPORTED = true;
+          } catch {}
           return {
             default: class LRUShim {
               _map: Map<any, any>;
               constructor(opts: any) {
-                try { (globalThis as any).__LRU_UPGRADED = true; } catch {}
+                try {
+                  (globalThis as any).__LRU_UPGRADED = true;
+                } catch {}
                 this._map = new Map();
               }
-              get(k: any) { return this._map.get(k); }
-              set(k: any, v: any) { this._map.set(k, v); }
+              get(k: any) {
+                return this._map.get(k);
+              }
+              set(k: any, v: any) {
+                this._map.set(k, v);
+              }
             },
           };
         }
@@ -296,7 +354,9 @@ describe("dom.ts comprehensive coverage", () => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       await (v as any).__test_tryUpgradeCache();
       // cleanup importer override
-      try { delete (DOMValidator as any).__test_importOverride; } catch {}
+      try {
+        delete (DOMValidator as any).__test_importOverride;
+      } catch {}
       // our shim marks a global flag when module imported or constructed
       const imported = Boolean((globalThis as any).__LRU_IMPORTED);
       const upgraded = Boolean((globalThis as any).__LRU_UPGRADED);
@@ -307,7 +367,7 @@ describe("dom.ts comprehensive coverage", () => {
       const calls: any[] = [];
       const hook = vi.fn(async (e: any) => calls.push(e));
 
-  const v = createDefaultDOMValidator({ auditHook: hook } as any);
+      const v = createDefaultDOMValidator({ auditHook: hook } as any);
       // call the test wrapper that directly invokes the private background parse
       // this avoids timing uncertainty and runs the optional import synchronously from the test's perspective
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -316,10 +376,13 @@ describe("dom.ts comprehensive coverage", () => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (DOMValidator as any).__test_importOverride = async (spec: string) => {
         if (spec === "css-what") {
-          try { (globalThis as any).__CSS_WHAT_IMPORTED = true; } catch {}
+          try {
+            (globalThis as any).__CSS_WHAT_IMPORTED = true;
+          } catch {}
           return {
             parse: (s: string) => {
-              if (String(s).includes("__throw__")) throw new Error("parse-fail");
+              if (String(s).includes("__throw__"))
+                throw new Error("parse-fail");
               return [[{ type: "tag", name: String(s) }]];
             },
           };
@@ -329,16 +392,20 @@ describe("dom.ts comprehensive coverage", () => {
 
       (v as any).__test_backgroundCssWhatParse('div[foo="__throw__"]');
       // cleanup importer override
-      try { delete (DOMValidator as any).__test_importOverride; } catch {}
-  // wait a short moment for fire-and-forget audit emission
-  vi.useFakeTimers();
-  try {
-    await vi.runAllTimersAsync();
-  } finally {
-    vi.useRealTimers();
-  }
+      try {
+        delete (DOMValidator as any).__test_importOverride;
+      } catch {}
+      // wait a short moment for fire-and-forget audit emission
+      vi.useFakeTimers();
+      try {
+        await vi.runAllTimersAsync();
+      } finally {
+        vi.useRealTimers();
+      }
       // should have emitted a validation_failure audit event due to parse failure
-      expect(calls.some((c) => c && c.kind === "validation_failure")).toBe(true);
+      expect(calls.some((c) => c && c.kind === "validation_failure")).toBe(
+        true,
+      );
     });
 
     it("emitValidationFailureEvent handles sha256/hash failures gracefully", async () => {
@@ -347,20 +414,24 @@ describe("dom.ts comprehensive coverage", () => {
 
       // Force sha256 to fail by making importer reject
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (__test_sha256Hex as any).__test_importOverride = async () => Promise.reject(new Error("no-crypto"));
+      (__test_sha256Hex as any).__test_importOverride = async () =>
+        Promise.reject(new Error("no-crypto"));
 
-      const v = createDefaultDOMValidator({ auditHook: hook, emitSelectorHash: true } as any);
+      const v = createDefaultDOMValidator({
+        auditHook: hook,
+        emitSelectorHash: true,
+      } as any);
 
       // Trigger a selector validation failure that will call #emitValidationFailureEvent
       expect(() => v.validateSelectorSyntax("a:has(b)")).toThrow();
 
-  // wait a short while for async follow-up to run
-  vi.useFakeTimers();
-  try {
-    await vi.runAllTimersAsync();
-  } finally {
-    vi.useRealTimers();
-  }
+      // wait a short while for async follow-up to run
+      vi.useFakeTimers();
+      try {
+        await vi.runAllTimersAsync();
+      } finally {
+        vi.useRealTimers();
+      }
 
       // base event should have been emitted; follow-up hash event may have failed and been handled
       expect(calls.length).toBeGreaterThanOrEqual(1);
@@ -376,7 +447,10 @@ describe("dom.ts comprehensive coverage", () => {
         await vi.runAllTimersAsync(); // Use fake timers instead of real setTimeout
       };
 
-      const v = createDefaultDOMValidator({ auditHook: hook, auditHookTimeoutMs: 1 } as any);
+      const v = createDefaultDOMValidator({
+        auditHook: hook,
+        auditHookTimeoutMs: 1,
+      } as any);
       // invalidateCache triggers a cache_refresh audit event which will race with timeout
       v.invalidateCache();
       // use fake timers and advance so the timeout path runs deterministically
@@ -398,19 +472,24 @@ describe("dom.ts comprehensive coverage", () => {
 
       // make sha256 succeed via importer override
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (__test_sha256Hex as any).__test_importOverride = async () => ({ sha256: (s: string) => "hash-ok" });
+      (__test_sha256Hex as any).__test_importOverride = async () => ({
+        sha256: (s: string) => "hash-ok",
+      });
 
-      const v = createDefaultDOMValidator({ auditHook: hook, emitSelectorHash: true } as any);
+      const v = createDefaultDOMValidator({
+        auditHook: hook,
+        emitSelectorHash: true,
+      } as any);
 
       expect(() => v.validateSelectorSyntax("a:has(b)")).toThrow();
 
-  // wait for async follow-up
-  vi.useFakeTimers();
-  try {
-    await vi.runAllTimersAsync();
-  } finally {
-    vi.useRealTimers();
-  }
+      // wait for async follow-up
+      vi.useFakeTimers();
+      try {
+        await vi.runAllTimersAsync();
+      } finally {
+        vi.useRealTimers();
+      }
 
       // Should have at least two calls: base validation_failure and follow-up validation_failure_hash
       const kinds = calls.map((c) => c.kind).sort();
@@ -424,7 +503,9 @@ describe("dom.ts comprehensive coverage", () => {
 
     it("auditHook throwing errors are caught and do not bubble", async () => {
       // hook that throws immediately
-      const hook = vi.fn(() => { throw new Error('boom'); });
+      const hook = vi.fn(() => {
+        throw new Error("boom");
+      });
       const v = createDefaultDOMValidator({ auditHook: hook } as any);
       // invalidateCache should call hook but not throw
       v.invalidateCache();

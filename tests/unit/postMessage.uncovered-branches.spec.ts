@@ -18,7 +18,10 @@ describe("postMessage uncovered branches", () => {
         throw new Error("Test validator error");
       };
 
-      const result = postMessage._validatePayloadWithExtras({}, throwingValidator);
+      const result = postMessage._validatePayloadWithExtras(
+        {},
+        throwingValidator,
+      );
       expect(result).toEqual({
         valid: false,
         reason: "Validator function threw: Test validator error",
@@ -31,7 +34,10 @@ describe("postMessage uncovered branches", () => {
         throw "string error";
       };
 
-      const result = postMessage._validatePayloadWithExtras({}, throwingValidator);
+      const result = postMessage._validatePayloadWithExtras(
+        {},
+        throwingValidator,
+      );
       expect(result).toEqual({
         valid: false,
         reason: "Validator function threw: ",
@@ -44,7 +50,10 @@ describe("postMessage uncovered branches", () => {
         throw null;
       };
 
-      const result = postMessage._validatePayloadWithExtras({}, throwingValidator);
+      const result = postMessage._validatePayloadWithExtras(
+        {},
+        throwingValidator,
+      );
       expect(result).toEqual({
         valid: false,
         reason: "Validator function threw: ",
@@ -65,7 +74,10 @@ describe("postMessage uncovered branches", () => {
       const postMessage = await import("../../src/postMessage");
       const truthyValidator = () => true;
 
-      const result = postMessage._validatePayloadWithExtras({}, truthyValidator);
+      const result = postMessage._validatePayloadWithExtras(
+        {},
+        truthyValidator,
+      );
       expect(result).toEqual({
         valid: true,
       });
@@ -107,7 +119,8 @@ describe("postMessage uncovered branches", () => {
 
   describe("runtime test API guard function", () => {
     const originalProcess = globalThis.process;
-    const originalGlobalAllow = (globalThis as any).__SECURITY_KIT_ALLOW_TEST_APIS;
+    const originalGlobalAllow = (globalThis as any)
+      .__SECURITY_KIT_ALLOW_TEST_APIS;
 
     beforeEach(() => {
       globalThis.process = { env: {} } as any;
@@ -139,7 +152,9 @@ describe("postMessage uncovered branches", () => {
 
     beforeEach(() => {
       // Set up test environment
-      globalThis.process = { env: { SECURITY_KIT_ALLOW_TEST_APIS: "true" } } as any;
+      globalThis.process = {
+        env: { SECURITY_KIT_ALLOW_TEST_APIS: "true" },
+      } as any;
     });
 
     afterEach(() => {
@@ -187,7 +202,9 @@ describe("postMessage uncovered branches", () => {
 
     test("__test_setSaltFailureTimestamp calls guard and sets value", async () => {
       const postMessage = await import("../../src/postMessage");
-      expect(() => postMessage.__test_setSaltFailureTimestamp(12345)).not.toThrow();
+      expect(() =>
+        postMessage.__test_setSaltFailureTimestamp(12345),
+      ).not.toThrow();
       expect(postMessage.__test_getSaltFailureTimestamp()).toBe(12345);
 
       // Reset

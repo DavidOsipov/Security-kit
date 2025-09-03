@@ -4,24 +4,24 @@
  * server/verify-api-request-signature.ts
  *
  * Server-side verification for signatures produced by SecureApiSigner.
- * 
+ *
  * SECURITY CONSTITUTION COMPLIANCE:
  * - Implements positive validation (allowlist) for all inputs per Part II-B rules
  * - Uses timing-safe comparison to prevent timing attacks
  * - Requires explicit nonce store implementation to prevent replay attacks
  * - Validates message structure to prevent HTTP smuggling
  * - Enforces data minimization principles
- * 
- * IMPORTANT: The server MUST provide a nonceStore implementing INonceStore 
+ *
+ * IMPORTANT: The server MUST provide a nonceStore implementing INonceStore
  * for replay protection. The example InMemoryNonceStore is NOT for production.
  */
 
-import { 
-  InvalidParameterError, 
-  TimestampError, 
+import {
+  InvalidParameterError,
+  TimestampError,
   ReplayAttackError,
   SignatureVerificationError,
-  InvalidConfigurationError
+  InvalidConfigurationError,
 } from "../src/errors.js";
 import { SHARED_ENCODER } from "../src/encoding.js";
 import { safeStableStringify } from "../src/canonical.js";
@@ -45,11 +45,10 @@ export type VerifyExtendedInput = {
 // Configuration constants
 const DEFAULT_SKEW_MS = 120_000; // 2 minutes — conservative default
 const NONCE_TTL_MS = 300_000; // 5 minutes — shorter replay window by default
-const DEFAULT_RESERVATION_TTL_MS = 10_000; // 10s provisional reservation to mitigate nonce-store DoS
 
 // Precompiled regex patterns for performance
 const METHOD_RE = /^[A-Z]+$/;
-const KID_RE = /^[a-zA-Z0-9._-]+$/;
+const KID_RE = /^[\w.-]+$/;
 
 // Security limits
 const MAX_SIGNATURE_LENGTH = 512;
@@ -66,10 +65,10 @@ const MAX_SECRET_BYTES = 4096;
 export interface INonceStore {
   /**
    * Check if a nonce has been used before.
-   * 
+   *
    * WARNING: This method alone is NOT safe for distributed systems due to race conditions.
    * Use in combination with store() OR implement atomic storeIfNotExists().
-   * 
+   *
    * @param kid - Key identifier for namespacing
    * @param nonce - The nonce value to check
    * @returns Promise resolving to true if nonce exists (already used)
@@ -78,10 +77,10 @@ export interface INonceStore {
 
   /**
    * Store a nonce with expiration.
-   * 
+   *
    * WARNING: If used after has(), creates a race condition window in distributed systems.
    * For production, implement atomic storeIfNotExists() instead.
-   * 
+   *
    * @param kid - Key identifier for namespacing
    * @param nonce - The nonce value to store
    * @param ttlMs - Time-to-live in milliseconds
@@ -91,15 +90,19 @@ export interface INonceStore {
   /**
    * Atomically store nonce if it does not exist (e.g., Redis SET NX PX).
    * Returns true if stored (reserved), false if the nonce already exists.
-   * 
+   *
    * PRODUCTION RECOMMENDATION: Implement this method for replay-safe verification.
-   * 
+   *
    * @param kid - Key identifier for namespacing
    * @param nonce - The nonce value to store
    * @param ttlMs - Time-to-live in milliseconds
    * @returns Promise resolving to true if nonce was stored, false if already exists
    */
-  storeIfNotExists?(kid: string, nonce: string, ttlMs: number): Promise<boolean>;
+  storeIfNotExists?(
+    kid: string,
+    nonce: string,
+    ttlMs: number,
+  ): Promise<boolean>;
 
   /**
    * Optional: reserve a nonce with a short TTL to mitigate DoS from bogus signatures.
@@ -112,7 +115,7 @@ export interface INonceStore {
   finalize?(kid: string, nonce: string, ttlMs: number): Promise<void>;
   /**
    * Optional: delete a reserved nonce (for cleanup on failed verifications).
-   * 
+   *
    * @param kid - Key identifier for namespacing
    * @param nonce - The nonce value to delete
    */
@@ -127,14 +130,15 @@ export interface INonceStore {
 
 /**
  * Example (NOT FOR PRODUCTION) in-memory nonce store.
- * 
+ *
  * ⚠️ PRODUCTION WARNING: This implementation is NOT suitable for production:
  * - Not distributed: works only with single server instance
  * - Not persistent: lost on restart
  * - Not atomic: race conditions possible with high concurrency
- * 
+ *
  * For production, use Redis, DynamoDB, or another distributed store.
  */
+/* eslint-disable functional/immutable-data -- Justification: In-memory store intentionally mutates a private Map to track nonces and expirations. This non-production helper encapsulates Map#set/delete as part of its contract. */
 export class InMemoryNonceStore implements INonceStore {
   #map = new Map<string, number>(); // key = `${kid}:${nonce}`, value = expiry unix ms
 
@@ -150,18 +154,22 @@ export class InMemoryNonceStore implements INonceStore {
 
   async store(kid: string, nonce: string, ttlMs: number): Promise<void> {
     this.#validateStoreParams(kid, nonce);
-    if (typeof ttlMs !== 'number' || ttlMs < 1 || ttlMs > 86400000) {
-      throw new InvalidParameterError('ttlMs must be between 1 and 86400000');
+    if (typeof ttlMs !== "number" || ttlMs < 1 || ttlMs > 86400000) {
+      throw new InvalidParameterError("ttlMs must be between 1 and 86400000");
     }
     const key = `${kid}:${nonce}`;
     const exp = Date.now() + Math.max(0, Math.floor(ttlMs));
     this.#map.set(key, exp);
   }
 
-  async storeIfNotExists(kid: string, nonce: string, ttlMs: number): Promise<boolean> {
+  async storeIfNotExists(
+    kid: string,
+    nonce: string,
+    ttlMs: number,
+  ): Promise<boolean> {
     this.#validateStoreParams(kid, nonce);
-    if (typeof ttlMs !== 'number' || ttlMs < 1 || ttlMs > 86400000) {
-      throw new InvalidParameterError('ttlMs must be between 1 and 86400000');
+    if (typeof ttlMs !== "number" || ttlMs < 1 || ttlMs > 86400000) {
+      throw new InvalidParameterError("ttlMs must be between 1 and 86400000");
     }
     const key = `${kid}:${nonce}`;
     const now = Date.now();
@@ -186,34 +194,48 @@ export class InMemoryNonceStore implements INonceStore {
   }
 
   #validateStoreParams(kid: string, nonce: string): void {
-    if (typeof kid !== 'string' || kid.length === 0 || kid.length > 128) {
-      throw new InvalidParameterError('kid must be a non-empty string');
+    if (typeof kid !== "string" || kid.length === 0 || kid.length > 128) {
+      throw new InvalidParameterError("kid must be a non-empty string");
     }
-    if (typeof nonce !== 'string' || nonce.length === 0) {
-      throw new InvalidParameterError('nonce must be a non-empty string');
+    if (typeof nonce !== "string" || nonce.length === 0) {
+      throw new InvalidParameterError("nonce must be a non-empty string");
     }
 
     const cfg = getHandshakeConfig();
-    const maxLen = typeof cfg.handshakeMaxNonceLength === 'number' ? cfg.handshakeMaxNonceLength : 256;
-    const allowedFormats = Array.isArray(cfg.allowedNonceFormats) && cfg.allowedNonceFormats.length > 0
-      ? cfg.allowedNonceFormats
-      : ["base64", "base64url"];
+    const maxLen =
+      typeof cfg.handshakeMaxNonceLength === "number"
+        ? cfg.handshakeMaxNonceLength
+        : 256;
+    const allowedFormats =
+      Array.isArray(cfg.allowedNonceFormats) &&
+      cfg.allowedNonceFormats.length > 0
+        ? cfg.allowedNonceFormats
+        : ["base64", "base64url"];
 
     if (nonce.length > maxLen) {
-      throw new InvalidParameterError('nonce must be a non-empty string');
+      throw new InvalidParameterError("nonce must be a non-empty string");
     }
 
     const allowed = (() => {
-      if ((allowedFormats.includes('base64') || allowedFormats.includes('base64url')) && isLikelyBase64(nonce)) return true;
-      if (allowedFormats.includes('hex') && /^[0-9a-fA-F]+$/.test(nonce)) return true;
+      if (
+        (allowedFormats.includes("base64") ||
+          allowedFormats.includes("base64url")) &&
+        isLikelyBase64(nonce)
+      )
+        return true;
+      if (allowedFormats.includes("hex") && /^[0-9a-f]+$/i.test(nonce))
+        return true;
       return false;
     })();
 
     if (!allowed) {
-      throw new InvalidParameterError('nonce must be in an allowed encoded format');
+      throw new InvalidParameterError(
+        "nonce must be in an allowed encoded format",
+      );
     }
   }
 }
+/* eslint-enable functional/immutable-data */
 
 // Input validation with positive validation (allowlist approach)
 function validateVerifyInput(input: VerifyExtendedInput): void {
@@ -239,7 +261,9 @@ function validateVerifyInput(input: VerifyExtendedInput): void {
       throw new InvalidParameterError("Invalid secret array length");
     }
   } else {
-    throw new InvalidParameterError("Secret must be string, ArrayBuffer, or Uint8Array");
+    throw new InvalidParameterError(
+      "Secret must be string, ArrayBuffer, or Uint8Array",
+    );
   }
 
   // Nonce validation (config-driven): consult centralized handshake policy
@@ -248,18 +272,29 @@ function validateVerifyInput(input: VerifyExtendedInput): void {
   }
   try {
     const cfg = getHandshakeConfig();
-    const maxLen = typeof cfg.handshakeMaxNonceLength === 'number' ? cfg.handshakeMaxNonceLength : 256;
-    const allowedFormats = Array.isArray(cfg.allowedNonceFormats) && cfg.allowedNonceFormats.length > 0
-      ? cfg.allowedNonceFormats
-      : ["base64", "base64url"];
+    const maxLen =
+      typeof cfg.handshakeMaxNonceLength === "number"
+        ? cfg.handshakeMaxNonceLength
+        : 256;
+    const allowedFormats =
+      Array.isArray(cfg.allowedNonceFormats) &&
+      cfg.allowedNonceFormats.length > 0
+        ? cfg.allowedNonceFormats
+        : ["base64", "base64url"];
 
     if (input.nonce.length > maxLen) {
       throw new InvalidParameterError("nonce too long");
     }
 
     const isAllowed = (() => {
-      if ((allowedFormats.includes('base64') || allowedFormats.includes('base64url')) && isLikelyBase64(input.nonce)) return true;
-      if (allowedFormats.includes('hex') && /^[0-9a-fA-F]+$/.test(input.nonce)) return true;
+      if (
+        (allowedFormats.includes("base64") ||
+          allowedFormats.includes("base64url")) &&
+        isLikelyBase64(input.nonce)
+      )
+        return true;
+      if (allowedFormats.includes("hex") && /^[0-9a-f]+$/i.test(input.nonce))
+        return true;
       return false;
     })();
 
@@ -268,7 +303,7 @@ function validateVerifyInput(input: VerifyExtendedInput): void {
     }
   } catch (err) {
     if (err instanceof InvalidParameterError) throw err;
-    throw new InvalidParameterError('Invalid nonce');
+    throw new InvalidParameterError("Invalid nonce");
   }
 
   // Timestamp validation
@@ -281,38 +316,48 @@ function validateVerifyInput(input: VerifyExtendedInput): void {
 
   // Payload size limits (prevent DoS with huge payloads)
   try {
-    if (typeof input.payload === 'string') {
+    if (typeof input.payload === "string") {
       const max = 10 * 1024 * 1024; // 10 MB
       if (input.payload.length > max) {
-        throw new InvalidParameterError('payload too large');
+        throw new InvalidParameterError("payload too large");
       }
     } else if (input.payload !== undefined && input.payload !== null) {
       const s = safeStableStringify(input.payload);
       const max = 10 * 1024 * 1024; // 10 MB
       if (s.length > max) {
-        throw new InvalidParameterError('payload too large');
+        throw new InvalidParameterError("payload too large");
       }
     }
   } catch (err) {
     // Re-throw validation errors
     if (err instanceof InvalidParameterError) throw err;
-    throw new InvalidParameterError('Invalid payload');
+    throw new InvalidParameterError("Invalid payload");
   }
 
   // Signature validation (accept base64 or base64url)
-  if (typeof input.signatureBase64 !== "string" || input.signatureBase64.length === 0) {
-    throw new InvalidParameterError("signatureBase64 must be a non-empty string");
+  if (
+    typeof input.signatureBase64 !== "string" ||
+    input.signatureBase64.length === 0
+  ) {
+    throw new InvalidParameterError(
+      "signatureBase64 must be a non-empty string",
+    );
   }
   if (input.signatureBase64.length > MAX_SIGNATURE_LENGTH) {
     throw new InvalidParameterError("Signature too long");
   }
   if (!isLikelyBase64(input.signatureBase64)) {
-    throw new InvalidParameterError("signatureBase64 must be base64 or base64url");
+    throw new InvalidParameterError(
+      "signatureBase64 must be base64 or base64url",
+    );
   }
 
   // Optional fields validation (allowlist approach)
   if (input.method !== undefined) {
-    if (typeof input.method !== "string" || input.method.length > MAX_METHOD_LENGTH) {
+    if (
+      typeof input.method !== "string" ||
+      input.method.length > MAX_METHOD_LENGTH
+    ) {
       throw new InvalidParameterError("Invalid method");
     }
     if (!METHOD_RE.test(input.method.toUpperCase())) {
@@ -328,7 +373,9 @@ function validateVerifyInput(input: VerifyExtendedInput): void {
       throw new InvalidParameterError("path must start with '/'");
     }
     if (input.path.includes("..") || input.path.includes("//")) {
-      throw new InvalidParameterError("path traversal patterns are not allowed");
+      throw new InvalidParameterError(
+        "path traversal patterns are not allowed",
+      );
     }
   }
 
@@ -342,7 +389,11 @@ function validateVerifyInput(input: VerifyExtendedInput): void {
   }
 
   if (input.kid !== undefined) {
-    if (typeof input.kid !== "string" || input.kid.length === 0 || input.kid.length > 128) {
+    if (
+      typeof input.kid !== "string" ||
+      input.kid.length === 0 ||
+      input.kid.length > 128
+    ) {
       throw new InvalidParameterError("Invalid kid");
     }
     if (!KID_RE.test(input.kid)) {
@@ -352,7 +403,9 @@ function validateVerifyInput(input: VerifyExtendedInput): void {
 }
 
 // Normalize secret to Uint8Array for HMAC operations
-function normalizeSecret(secret: ArrayBuffer | Uint8Array | string): Uint8Array {
+function normalizeSecret(
+  secret: ArrayBuffer | Uint8Array | string,
+): Uint8Array {
   if (typeof secret === "string") {
     // If it looks like base64, decode; otherwise treat as UTF-8
     if (isLikelyBase64(secret)) {
@@ -375,8 +428,13 @@ function normalizeSecret(secret: ArrayBuffer | Uint8Array | string): Uint8Array 
 // Note: bytesToBase64 helper is provided by src/encoding-utils and imported above.
 
 // Compute HMAC-SHA256 (cross-platform, ESM-safe)
-async function computeHmacSha256(keyBytes: Uint8Array, messageBytes: Uint8Array): Promise<Uint8Array> {
-  const subtle = (globalThis as unknown as { crypto?: { subtle?: SubtleCrypto } }).crypto?.subtle;
+async function computeHmacSha256(
+  keyBytes: Uint8Array,
+  messageBytes: Uint8Array,
+): Promise<Uint8Array> {
+  const subtle = (
+    globalThis as unknown as { crypto?: { subtle?: SubtleCrypto } }
+  ).crypto?.subtle;
   if (subtle) {
     // Copy into fresh buffers to satisfy typed array semantics
     const keyCopy = new Uint8Array(keyBytes.length);
@@ -393,9 +451,17 @@ async function computeHmacSha256(keyBytes: Uint8Array, messageBytes: Uint8Array)
       );
       const signature = await subtle.sign("HMAC", key, msgCopy);
       return new Uint8Array(signature);
+    // eslint-disable-next-line sonarjs/no-useless-catch -- Intentional catch: avoids an upstream plugin crash on empty catch/finally AST shapes while preserving behavior
+    } catch (err) {
+      throw err;
     } finally {
       // Best-effort wipe of keyCopy
+      /* eslint-disable functional/no-let, functional/immutable-data, security/detect-object-injection --
+         Justification: Local secure wipe of a temporary Uint8Array. This is an isolated, in-place
+         zeroization of transient key material; mutation is intentional and does not escape.
+      */
       for (let i = 0; i < keyBytes.length; i++) keyCopy[i] = 0;
+      /* eslint-enable functional/no-let, functional/immutable-data, security/detect-object-injection */
     }
   }
 
@@ -408,7 +474,13 @@ async function computeHmacSha256(keyBytes: Uint8Array, messageBytes: Uint8Array)
   } catch {
     // Older Node alias (in case node:crypto is unavailable)
     const nodeCrypto = await import("crypto");
-    const hmac = (nodeCrypto as any).createHmac("sha256", Buffer.from(keyBytes));
+    const nodeCryptoMod = nodeCrypto as unknown as {
+      createHmac(
+        algo: "sha256",
+        key: Buffer,
+      ): { update(data: Buffer): void; digest(): Buffer };
+    };
+    const hmac = nodeCryptoMod.createHmac("sha256", Buffer.from(keyBytes));
     hmac.update(Buffer.from(messageBytes));
     return Uint8Array.from(hmac.digest());
   }
@@ -416,16 +488,16 @@ async function computeHmacSha256(keyBytes: Uint8Array, messageBytes: Uint8Array)
 
 /**
  * Verify API request signature using shared canonicalization and atomic nonce operations.
- * 
+ *
  * SECURITY FEATURES:
  * - Uses shared canonicalization (same as client) to ensure signature consistency
  * - Atomic nonce operations prevent replay attacks in distributed systems
  * - Constant-time byte comparison prevents timing attacks
  * - Comprehensive input validation with positive validation
- * 
+ *
  * Throws typed errors on any failure:
  * - InvalidParameterError | TimestampError | ReplayAttackError | SignatureVerificationError | InvalidConfigurationError
- * 
+ *
  * @returns Promise resolving to true if signature is valid (otherwise throws)
  */
 export async function verifyApiRequestSignature(
@@ -439,7 +511,17 @@ export async function verifyApiRequestSignature(
     throw new InvalidParameterError("nonceStore is required");
   }
 
-  const { secret, payload, nonce, timestamp, signatureBase64, kid, method, path, bodyHash } = input;
+  const {
+    secret,
+    payload,
+    nonce,
+    timestamp,
+    signatureBase64,
+    kid,
+    method,
+    path,
+    bodyHash,
+  } = input;
   const maxSkew = options?.maxSkewMs ?? DEFAULT_SKEW_MS;
   const nonceTtl = options?.nonceTtlMs ?? NONCE_TTL_MS;
 
@@ -447,13 +529,24 @@ export async function verifyApiRequestSignature(
   const now = Date.now();
   const skew = Math.abs(now - timestamp);
   if (skew > maxSkew) {
-    throw new TimestampError('timestamp out of reasonable range');
+    throw new TimestampError("timestamp out of reasonable range");
   }
 
   // Normalize secret and enforce length constraints
   const keyBytes = normalizeSecret(secret);
-  if (keyBytes.length < MIN_SECRET_BYTES || keyBytes.length > MAX_SECRET_BYTES) {
+  if (
+    keyBytes.length < MIN_SECRET_BYTES ||
+    keyBytes.length > MAX_SECRET_BYTES
+  ) {
     throw new InvalidParameterError("Secret length is out of bounds");
+  }
+
+  // Pre-validate nonce store capability without performing any stateful operation.
+  // This surfaces configuration errors deterministically and does not leak signature validity.
+  if (typeof nonceStore.storeIfNotExists !== "function") {
+    throw new InvalidConfigurationError(
+      "NonceStore must implement storeIfNotExists() for atomic replay protection",
+    );
   }
 
   // Shared canonicalization for payload (match client behaviour)
@@ -472,47 +565,25 @@ export async function verifyApiRequestSignature(
   const canonical = canonicalParts.join(".");
   const messageBytes = SHARED_ENCODER.encode(canonical);
 
-  // Atomic nonce reservation first, if supported
-  const kidForStore = kid ?? "default";
-  const reserveTtl = Math.min(
-    DEFAULT_RESERVATION_TTL_MS,
-    Math.max(1000, Math.floor(nonceTtl / 10)),
-  );
-
-  if (typeof nonceStore.reserve === "function") {
-    const ok = await nonceStore.reserve(kidForStore, nonce, reserveTtl);
-    if (!ok) throw new ReplayAttackError("Nonce already used");
-  } else if (typeof nonceStore.storeIfNotExists === "function") {
-    const ok = await nonceStore.storeIfNotExists(kidForStore, nonce, reserveTtl);
-    if (!ok) throw new ReplayAttackError("Nonce already used");
-  } else {
-    // No atomic method available: insecure to proceed
-    throw new InvalidConfigurationError(
-      "NonceStore must implement reserve() or storeIfNotExists() for atomic replay protection",
-    );
-  }
-
-  // Compute HMAC and compare in constant time (bytes)
+  // Compute HMAC and compare in constant time (bytes) BEFORE touching the nonce store
   const mac = await computeHmacSha256(keyBytes, messageBytes);
   const sigBytes = base64ToBytes(signatureBase64);
   const equal = secureCompareBytes(mac, sigBytes);
   if (!equal) {
-    // Best-effort cleanup: keep reservation by default to throttle repeated bad attempts.
-    // Optionally delete if your operational policy prefers allowing immediate retry.
+    // Fail closed without interacting with the nonce store
     throw new SignatureVerificationError("Signature mismatch");
   }
 
-  // Finalize nonce to full TTL if reserve/finalize exists
-  if (typeof nonceStore.finalize === "function") {
-    try {
-      await nonceStore.finalize(kidForStore, nonce, nonceTtl);
-    } catch {
-      // If finalize fails, fail closed (prevents replay window)
-      throw new ReplayAttackError("Failed to persist nonce");
-    }
-  } else {
-    // If we used storeIfNotExists (with full TTL) there's nothing to finalize.
-    // In stores that only reserved to short TTL, ensure your implementation extends TTL on success.
+  // After signature verification succeeds, atomically store the nonce with full TTL
+  const kidForStore = kid ?? "default";
+  const stored = await nonceStore.storeIfNotExists(
+    kidForStore,
+    nonce,
+    nonceTtl,
+  );
+  if (!stored) {
+    // Nonce already present indicates replay
+    throw new ReplayAttackError("Nonce already used or reserved");
   }
 
   return true;

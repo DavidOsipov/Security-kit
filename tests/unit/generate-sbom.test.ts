@@ -33,7 +33,9 @@ describe("generate-sbom helpers", () => {
     expect(resolved).toContain(path.normalize(tmpDir));
 
     const outside = path.resolve("/etc/passwd");
-    expect(() => resolveAndValidateUserPath(outside, repoRoot, "test")).toThrow();
+    expect(() =>
+      resolveAndValidateUserPath(outside, repoRoot, "test"),
+    ).toThrow();
   });
 
   it("atomicWriteFileSync writes file atomically inside allowed base and rejects outside", () => {
@@ -53,6 +55,8 @@ describe("generate-sbom helpers", () => {
     const allowed = path.join(tmpDir, "a.txt");
     fs.writeFileSync(allowed, "x");
     expect(() => assertPathAllowed(allowed, base)).not.toThrow();
-    expect(() => assertPathAllowed(path.resolve("/etc/passwd"), base)).toThrow();
+    expect(() =>
+      assertPathAllowed(path.resolve("/etc/passwd"), base),
+    ).toThrow();
   });
 });

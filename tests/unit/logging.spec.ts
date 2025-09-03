@@ -25,6 +25,6 @@ describe("secureDevLog and _redact", () => {
   });
 
   it("does not throw when logging with secureDevLog in dev mode", () => {
-    expect(() => secureDevLog("info", "test", "hello", {a:1})).not.toThrow();
+    expect(() => secureDevLog("info", "test", "hello", { a: 1 })).not.toThrow();
   });
 });

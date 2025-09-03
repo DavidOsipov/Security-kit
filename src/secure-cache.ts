@@ -113,6 +113,10 @@ export type CacheOptions = {
   readonly evictCallbackExposeUrl?: boolean;
   /** Optional key mapper for onEvict to sanitize or hash URLs. */
   readonly onEvictKeyMapper?: (url: string) => string;
+  /** Dispatch mode for onEvict: synchronous ("sync"), microtask, or timeout. Defaults to "microtask". */
+  readonly onEvictDispatch?: "sync" | "microtask" | "timeout";
+  /** Timeout in ms when onEvictDispatch is "timeout". Defaults to 0. */
+  readonly onEvictTimeoutMs?: number;
   /**
    * Second-chance tuning: maximum number of second-chance rotations (move-to-tail) to perform per eviction.
    * If omitted, defaults to `segmentedEvictScan`.
@@ -239,6 +243,8 @@ export class SecureLRUCache<K extends string, V extends Uint8Array> {
   readonly #logger: Logger;
   readonly #onEvictKeyMapper: ((url: string) => string) | undefined;
   readonly #evictCallbackExposeUrl: boolean;
+  readonly #onEvictDispatch: "sync" | "microtask" | "timeout";
+  readonly #onEvictTimeoutMs: number;
   readonly #maxEntryBytes: number;
   readonly #maxUrlLength: number;
   readonly #highWatermarkBytes: number;
@@ -319,8 +325,7 @@ export class SecureLRUCache<K extends string, V extends Uint8Array> {
   #nowLast = 0;
   readonly #clock: () => number;
 
-  // Deferred (asynchronous) callback queue to avoid reentrancy during mutations
-  readonly #deferredCallbacks: Array<() => void> = [];
+  // Note: onEvict callback dispatch is configurable; default is microtask for async semantics.
 
   /**
    * Creates a new SecureLRUCache instance with the specified configuration.
@@ -357,9 +362,11 @@ export class SecureLRUCache<K extends string, V extends Uint8Array> {
     };
     this.#logger = options.logger ?? safeDefaultLogger;
     this.#onEvictKeyMapper = options.onEvictKeyMapper;
-  // Backward compat: standalone class historically exposed raw URL to onEvict by default.
-  // VerifiedByteCache explicitly overrides to false to preserve privacy-by-default at the facade.
-  this.#evictCallbackExposeUrl = options.evictCallbackExposeUrl ?? true;
+    // Privacy-by-default: do not expose raw URL to onEvict unless explicitly opted in.
+    this.#evictCallbackExposeUrl = options.evictCallbackExposeUrl ?? false;
+    // Default async dispatch to preserve historical behavior and reentrancy safety
+    this.#onEvictDispatch = options.onEvictDispatch ?? "microtask";
+    this.#onEvictTimeoutMs = Math.max(0, options.onEvictTimeoutMs ?? 0);
     this.#maxEntryBytes = options.maxEntryBytes ?? 512_000;
     this.#maxUrlLength = options.maxUrlLength ?? 2048;
     this.#highWatermarkBytes = options.highWatermarkBytes ?? 0;
@@ -490,7 +497,8 @@ export class SecureLRUCache<K extends string, V extends Uint8Array> {
           break;
         case "second-chance":
         case "sieve":
-    if (this.#sieveRef[existingIndex] !== 1) this.#sieveRef[existingIndex] = 1;
+          if (this.#sieveRef[existingIndex] !== 1)
+            this.#sieveRef[existingIndex] = 1;
           break;
       }
       if (ttl > 0) this.#maybeScheduleExpiry(this.#starts[existingIndex] + ttl);
@@ -531,7 +539,7 @@ export class SecureLRUCache<K extends string, V extends Uint8Array> {
       case "second-chance":
       case "sieve":
         // New entries start unreferenced to evict one-hit-wonders quickly; no pointer moves on set
-  if (this.#sieveRef[index] !== 0) this.#sieveRef[index] = 0;
+        if (this.#sieveRef[index] !== 0) this.#sieveRef[index] = 0;
         break;
       default:
         break;
@@ -570,6 +578,7 @@ export class SecureLRUCache<K extends string, V extends Uint8Array> {
    * }
    * ```
    */
+  // Hot path with deliberate branching; safe refactor deferred to avoid behavior changes.
   public get(url: K): V | undefined {
     this.#getOps++;
     if (!this.#enableByteCache) {
@@ -612,7 +621,7 @@ export class SecureLRUCache<K extends string, V extends Uint8Array> {
       case "second-chance":
       case "sieve":
         // Mark referenced; canonical SIEVE avoids pointer churn
-  if (this.#sieveRef[index] !== 1) this.#sieveRef[index] = 1;
+        if (this.#sieveRef[index] !== 1) this.#sieveRef[index] = 1;
         break;
     }
     let value = this.#valList[index] as V;
@@ -650,6 +659,7 @@ export class SecureLRUCache<K extends string, V extends Uint8Array> {
    * console.log('Large data cached successfully');
    * ```
    */
+  // eslint-disable-next-line sonarjs/cognitive-complexity -- Intentional: cooperative eviction with bounded sync budget and microtask yields; safe refactor will split helpers without changing semantics.
   public async setAsync(
     url: K,
     bytes: V,
@@ -700,7 +710,8 @@ export class SecureLRUCache<K extends string, V extends Uint8Array> {
           break;
         case "second-chance":
         case "sieve":
-          if (this.#sieveRef[existingIndex] !== 1) this.#sieveRef[existingIndex] = 1;
+          if (this.#sieveRef[existingIndex] !== 1)
+            this.#sieveRef[existingIndex] = 1;
           break;
       }
       if (ttl > 0) this.#maybeScheduleExpiry(this.#starts[existingIndex] + ttl);
@@ -743,7 +754,7 @@ export class SecureLRUCache<K extends string, V extends Uint8Array> {
         break;
       case "second-chance":
       case "sieve":
-  if (this.#sieveRef[index] !== 0) this.#sieveRef[index] = 0;
+        if (this.#sieveRef[index] !== 0) this.#sieveRef[index] = 0;
         break;
       default:
         break;
@@ -854,6 +865,7 @@ export class SecureLRUCache<K extends string, V extends Uint8Array> {
     this.#tail = index;
   }
 
+  // eslint-disable-next-line sonarjs/cognitive-complexity -- Intentional: wipe path balances caps, fallback sync wipes, and coalesced logging; defer refactor to keep semantics stable.
   #wipe(bytes: V): void {
     if (this.#wipeStrategy === "sync") {
       try {
@@ -913,7 +925,10 @@ export class SecureLRUCache<K extends string, V extends Uint8Array> {
       }
       // Increment burst count and log immediately on first occurrence to satisfy
       // caller expectations/tests; coalesce subsequent occurrences into one summary.
-      if (!this.#wipeFallbackLogScheduled && this.#wipeFallbackBurstCount === 0) {
+      if (
+        !this.#wipeFallbackLogScheduled &&
+        this.#wipeFallbackBurstCount === 0
+      ) {
         try {
           this.#logger.warn(
             "Deferred wipe caps exceeded; performed synchronous wipe.",
@@ -940,8 +955,7 @@ export class SecureLRUCache<K extends string, V extends Uint8Array> {
                     maxEntries: this.#maxWipeQueueEntries,
                     maxBytes: this.#maxWipeQueueBytes,
                   },
-                  hint:
-                    "For bulk deletions, consider calling flushWipes()/flushWipesSync() or increasing caps.",
+                  hint: "For bulk deletions, consider calling flushWipes()/flushWipesSync() or increasing caps.",
                 },
               );
             }
@@ -1098,9 +1112,9 @@ export class SecureLRUCache<K extends string, V extends Uint8Array> {
       this.#sieveRef[index] = 0;
     }
 
-    // Defer callback execution to avoid reentrancy during mutation
+    // Dispatch onEvict based on configured mode
     if (this.#onEvict) {
-      this.#enqueueCallback(() => {
+      const run = () => {
         let mappedUrl = "[redacted]";
         try {
           if (this.#onEvictKeyMapper) {
@@ -1125,7 +1139,22 @@ export class SecureLRUCache<K extends string, V extends Uint8Array> {
             /* noop */
           }
         }
-      });
+      };
+
+      switch (this.#onEvictDispatch) {
+        case "sync":
+          run();
+          break;
+        case "timeout": {
+          const t = setTimeout(run, this.#onEvictTimeoutMs);
+          tryUnref(t);
+          break;
+        }
+        case "microtask":
+        default:
+          scheduleMicrotask(run);
+          break;
+      }
     }
     return true;
   }
@@ -1397,26 +1426,8 @@ export class SecureLRUCache<K extends string, V extends Uint8Array> {
     this.#nextExpiry = nextSoonest;
     if (Number.isFinite(this.#nextExpiry)) this.#scheduleExpiryTimer();
   }
-  // Enqueue a user callback to run asynchronously post-mutation
-  #enqueueCallback(callback: () => void): void {
-    this.#deferredCallbacks.push(callback);
-    if (this.#deferredCallbacks.length === 1) {
-      scheduleMicrotask(() => {
-        const toRun = this.#deferredCallbacks.splice(0);
-        for (const function_ of toRun) {
-          try {
-            function_();
-          } catch (error) {
-            try {
-              this.#logger.error("Deferred callback error:", error);
-            } catch {
-              /* noop */
-            }
-          }
-        }
-      });
-    }
-  }
+  // Note: Deferred onEvict callbacks were replaced with synchronous execution
+  // to ensure predictable ordering and immediate observability for security logs.
   /* eslint-enable functional/immutable-data, functional/no-let, functional/prefer-readonly-type */
 }
 

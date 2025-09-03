@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: MIT
-import { describe, expect, test } from 'vitest';
+import { describe, expect, test } from "vitest";
 // Env knobs
-const PERF_LOG = process.env.PERF_LOG === '1' || process.env.PERF_LOG === 'true';
-import { SecureLRUCache } from '../../src/secure-lru-cache';
+const PERF_LOG =
+  process.env.PERF_LOG === "1" || process.env.PERF_LOG === "true";
+import { SecureLRUCache } from "../../src/secure-lru-cache";
 
 // Utilities (kept small and focused)
 function now(): number {
-  return typeof performance !== 'undefined' && performance.now
+  return typeof performance !== "undefined" && performance.now
     ? performance.now()
     : Date.now();
 }
@@ -18,7 +19,7 @@ async function warmup(fn: () => void, iterations = 100): Promise<void> {
 
 function forceGC(): void {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  if (typeof (globalThis as any).gc === 'function') {
+  if (typeof (globalThis as any).gc === "function") {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (globalThis as any).gc();
   }
@@ -42,8 +43,8 @@ function runBenchmark(fn: () => void, samples = 200): number[] {
   return out;
 }
 
-describe('SecureLRUCache - security performance benchmarks', () => {
-  test('wipe() cost under heavy evictions', async () => {
+describe("SecureLRUCache - security performance benchmarks", () => {
+  test("wipe() cost under heavy evictions", async () => {
     const cache = new SecureLRUCache<string, Uint8Array>({
       maxEntries: 50,
       maxBytes: 50 * 1024,
@@ -53,7 +54,7 @@ describe('SecureLRUCache - security performance benchmarks', () => {
       rejectSharedBuffers: true,
       maxEntryBytes: 32 * 1024,
       maxSyncEvictions: 16,
-      recencyMode: 'sieve',
+      recencyMode: "sieve",
     });
 
     // Fill cache with moderately large values
@@ -62,7 +63,7 @@ describe('SecureLRUCache - security performance benchmarks', () => {
       cache.set(`k-${i}`, v);
     }
 
-    await warmup(() => cache.get('k-0'));
+    await warmup(() => cache.get("k-0"));
 
     const samples = runBenchmark(() => {
       // Insert one that forces multiple evictions
@@ -75,7 +76,7 @@ describe('SecureLRUCache - security performance benchmarks', () => {
     expect(med).toBeLessThan(10);
   }, 30_000);
 
-  test('copyOnSet / copyOnGet overhead', async () => {
+  test("copyOnSet / copyOnGet overhead", async () => {
     const baseOptions = {
       maxEntries: 200,
       maxBytes: 2 * 1024 * 1024,
@@ -83,18 +84,34 @@ describe('SecureLRUCache - security performance benchmarks', () => {
       maxEntryBytes: 128 * 1024,
     } as const;
 
-  const cacheCopy = new SecureLRUCache<string, Uint8Array>({ ...baseOptions, copyOnSet: true, copyOnGet: true, recencyMode: 'sieve' });
-  const cacheNoCopy = new SecureLRUCache<string, Uint8Array>({ ...baseOptions, copyOnSet: false, copyOnGet: false, recencyMode: 'sieve' });
+    const cacheCopy = new SecureLRUCache<string, Uint8Array>({
+      ...baseOptions,
+      copyOnSet: true,
+      copyOnGet: true,
+      recencyMode: "sieve",
+    });
+    const cacheNoCopy = new SecureLRUCache<string, Uint8Array>({
+      ...baseOptions,
+      copyOnSet: false,
+      copyOnGet: false,
+      recencyMode: "sieve",
+    });
 
     const payload = new Uint8Array(16 * 1024);
 
     await warmup(() => {
-      cacheCopy.set('warm', payload);
-      cacheNoCopy.set('warm', payload);
+      cacheCopy.set("warm", payload);
+      cacheNoCopy.set("warm", payload);
     }, 50);
 
-    const samplesCopySet = runBenchmark(() => cacheCopy.set(`c-${Math.random()}`, payload), 200);
-    const samplesNoCopySet = runBenchmark(() => cacheNoCopy.set(`n-${Math.random()}`, payload), 200);
+    const samplesCopySet = runBenchmark(
+      () => cacheCopy.set(`c-${Math.random()}`, payload),
+      200,
+    );
+    const samplesNoCopySet = runBenchmark(
+      () => cacheNoCopy.set(`n-${Math.random()}`, payload),
+      200,
+    );
 
     const medCopy = median(samplesCopySet);
     const medNoCopy = median(samplesNoCopySet);
@@ -104,23 +121,23 @@ describe('SecureLRUCache - security performance benchmarks', () => {
     expect(medCopy / Math.max(1, medNoCopy)).toBeLessThan(8);
   }, 30_000);
 
-  test('rejectSharedBuffers performance and correctness', async () => {
+  test("rejectSharedBuffers performance and correctness", async () => {
     const cache = new SecureLRUCache<string, Uint8Array>({
       maxEntries: 20,
       maxBytes: 200 * 1024,
       rejectSharedBuffers: true,
-      recencyMode: 'sieve',
+      recencyMode: "sieve",
     });
 
     // Create a SharedArrayBuffer view if supported
     let sabSupported = false;
     try {
       // @ts-ignore
-      if (typeof SharedArrayBuffer !== 'undefined') {
+      if (typeof SharedArrayBuffer !== "undefined") {
         // @ts-ignore
         const sab = new SharedArrayBuffer(1024);
         const view = new Uint8Array(sab);
-        cache.set('sab', view);
+        cache.set("sab", view);
         sabSupported = true;
       }
     } catch {
@@ -132,7 +149,10 @@ describe('SecureLRUCache - security performance benchmarks', () => {
     const samples = runBenchmark(() => {
       try {
         // @ts-ignore
-        const v = typeof SharedArrayBuffer !== 'undefined' ? new Uint8Array(new SharedArrayBuffer(256)) : new Uint8Array(256);
+        const v =
+          typeof SharedArrayBuffer !== "undefined"
+            ? new Uint8Array(new SharedArrayBuffer(256))
+            : new Uint8Array(256);
         cache.set(`s-${Math.random()}`, v);
       } catch {
         // swallow; we're measuring performance impact not correctness here
@@ -142,23 +162,23 @@ describe('SecureLRUCache - security performance benchmarks', () => {
     const med = median(samples);
     expect(med).toBeLessThan(5);
     // Sanity: if SAB isn't supported we still ran the benchmark
-    expect(typeof sabSupported).toBe('boolean');
+    expect(typeof sabSupported).toBe("boolean");
   }, 20_000);
 
-  test('eviction storm: many small entries + rapid gets', async () => {
+  test("eviction storm: many small entries + rapid gets", async () => {
     const cache = new SecureLRUCache<string, Uint8Array>({
       maxEntries: 500,
       maxBytes: 512 * 1024,
       defaultTtlMs: 30_000,
       copyOnSet: true,
       maxSyncEvictions: 32,
-      recencyMode: 'sieve',
+      recencyMode: "sieve",
     });
 
     const small = new Uint8Array(64);
     for (let i = 0; i < 500; i++) cache.set(`pre-${i}`, small);
 
-    await warmup(() => cache.get('pre-0'), 50);
+    await warmup(() => cache.get("pre-0"), 50);
 
     const samples = runBenchmark(() => {
       for (let j = 0; j < 20; j++) {

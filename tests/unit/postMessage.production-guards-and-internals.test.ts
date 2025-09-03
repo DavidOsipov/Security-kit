@@ -3,7 +3,7 @@ import { expect, test, beforeEach } from "vitest";
 // This test exercises the runtime production guard that blocks test-only APIs
 // when environment.isProduction is true and no explicit allow flag is set.
 
-test('production guard blocks test-only APIs when not allowed', async () => {
+test("production guard blocks test-only APIs when not allowed", async () => {
   // Ensure environment is production for this test invocation
   const env = await import("../../src/environment");
   const pm = await import("../../src/postMessage");
@@ -37,6 +37,7 @@ test('production guard blocks test-only APIs when not allowed', async () => {
 
   // Restore environment to development for other tests
   env.environment.setExplicitEnv("development");
-  if (typeof prevEnv === "undefined") delete process.env.SECURITY_KIT_ALLOW_TEST_APIS;
+  if (typeof prevEnv === "undefined")
+    delete process.env.SECURITY_KIT_ALLOW_TEST_APIS;
   else process.env.SECURITY_KIT_ALLOW_TEST_APIS = prevEnv;
 });

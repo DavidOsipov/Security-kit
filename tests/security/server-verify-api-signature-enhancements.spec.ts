@@ -33,20 +33,33 @@ describe("Server API Signature Verification - Security Enhancements", () => {
   describe("Base64url signature acceptance", () => {
     it("accepts base64url-encoded signature", async () => {
       const secret = Buffer.from("a-strong-shared-secret-32bytes-min-please!");
-  const kid = "0123456789abcdef0123456789abcdef";
+      const kid = "0123456789abcdef0123456789abcdef";
       const payload = { foo: "bar" };
       const timestamp = Date.now();
-      const nonce = Buffer.from(getSecureRandomBytesSync(16)).toString("base64");
+      const nonce = Buffer.from(getSecureRandomBytesSync(16)).toString(
+        "base64",
+      );
 
       const payloadStr = safeStableStringify(payload);
-      const canonical = [String(timestamp), nonce, "", "", "", payloadStr, kid].join(".");
+      const canonical = [
+        String(timestamp),
+        nonce,
+        "",
+        "",
+        "",
+        payloadStr,
+        kid,
+      ].join(".");
       const msgBytes = SHARED_ENCODER.encode(canonical);
 
       const h = crypto.createHmac("sha256", secret);
       h.update(Buffer.from(msgBytes));
       const sigBytes = Uint8Array.from(h.digest());
       const b64 = Buffer.from(sigBytes).toString("base64");
-      const b64url = b64.replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, ""); // make base64url
+      const b64url = b64
+        .replace(/\+/g, "-")
+        .replace(/\//g, "_")
+        .replace(/=+$/, ""); // make base64url
 
       const ok = await verifyApiRequestSignature(
         {
@@ -67,10 +80,20 @@ describe("Server API Signature Verification - Security Enhancements", () => {
       const secret = Buffer.from("another-strong-secret-key-32-bytes!!");
       const payload = { test: "data" };
       const timestamp = Date.now();
-      const nonce = Buffer.from(getSecureRandomBytesSync(16)).toString("base64");
+      const nonce = Buffer.from(getSecureRandomBytesSync(16)).toString(
+        "base64",
+      );
 
       const payloadStr = safeStableStringify(payload);
-      const canonical = [String(timestamp), nonce, "", "", "", payloadStr, ""].join(".");
+      const canonical = [
+        String(timestamp),
+        nonce,
+        "",
+        "",
+        "",
+        payloadStr,
+        "",
+      ].join(".");
       const msgBytes = SHARED_ENCODER.encode(canonical);
 
       const h = crypto.createHmac("sha256", secret);
@@ -93,10 +116,13 @@ describe("Server API Signature Verification - Security Enhancements", () => {
     });
 
     it("rejects invalid base64/base64url signatures", async () => {
-      const secret = "test-secret-32-bytes-owasp-compliant-256bit-entropy-strength";
+      const secret =
+        "test-secret-32-bytes-owasp-compliant-256bit-entropy-strength";
       const payload = { test: "data" };
       const timestamp = Date.now();
-      const nonce = Buffer.from(getSecureRandomBytesSync(16)).toString("base64");
+      const nonce = Buffer.from(getSecureRandomBytesSync(16)).toString(
+        "base64",
+      );
 
       await expect(
         verifyApiRequestSignature(
@@ -115,10 +141,13 @@ describe("Server API Signature Verification - Security Enhancements", () => {
 
   describe("Safe wrapper behavior", () => {
     it("returns false on invalid signature without throwing", async () => {
-      const secret = "test-secret-32-bytes-owasp-compliant-256bit-entropy-strength";
+      const secret =
+        "test-secret-32-bytes-owasp-compliant-256bit-entropy-strength";
       const payload = { test: "data" };
       const timestamp = Date.now();
-      const nonce = Buffer.from(getSecureRandomBytesSync(16)).toString("base64");
+      const nonce = Buffer.from(getSecureRandomBytesSync(16)).toString(
+        "base64",
+      );
 
       const ok = await verifyApiRequestSignatureSafe(
         {
@@ -152,10 +181,20 @@ describe("Server API Signature Verification - Security Enhancements", () => {
       const secret = Buffer.from("a-strong-shared-secret-32bytes-min-please!");
       const payload = { foo: "bar" };
       const timestamp = Date.now();
-      const nonce = Buffer.from(getSecureRandomBytesSync(16)).toString("base64");
+      const nonce = Buffer.from(getSecureRandomBytesSync(16)).toString(
+        "base64",
+      );
 
       const payloadStr = safeStableStringify(payload);
-      const canonical = [String(timestamp), nonce, "", "", "", payloadStr, ""].join(".");
+      const canonical = [
+        String(timestamp),
+        nonce,
+        "",
+        "",
+        "",
+        payloadStr,
+        "",
+      ].join(".");
       const msgBytes = SHARED_ENCODER.encode(canonical);
 
       const h = crypto.createHmac("sha256", secret);
@@ -183,7 +222,9 @@ describe("Server API Signature Verification - Security Enhancements", () => {
       const shortSecret = "short"; // Less than MIN_SECRET_BYTES after normalization
       const payload = { test: "data" };
       const timestamp = Date.now();
-      const nonce = Buffer.from(getSecureRandomBytesSync(16)).toString("base64");
+      const nonce = Buffer.from(getSecureRandomBytesSync(16)).toString(
+        "base64",
+      );
 
       await expect(
         verifyApiRequestSignature(
@@ -203,7 +244,9 @@ describe("Server API Signature Verification - Security Enhancements", () => {
       const secret = Buffer.from("a-strong-shared-secret-32bytes-min-please!");
       const payload = { test: "data" };
       const timestamp = Date.now();
-      const nonce = Buffer.from(getSecureRandomBytesSync(16)).toString("base64");
+      const nonce = Buffer.from(getSecureRandomBytesSync(16)).toString(
+        "base64",
+      );
 
       await expect(
         verifyApiRequestSignature(
@@ -223,10 +266,20 @@ describe("Server API Signature Verification - Security Enhancements", () => {
       const secret = Buffer.from("a-strong-shared-secret-32bytes-min-please!");
       const payload = { test: "data" };
       const timestamp = Date.now();
-      const nonce = Buffer.from(getSecureRandomBytesSync(16)).toString("base64");
+      const nonce = Buffer.from(getSecureRandomBytesSync(16)).toString(
+        "base64",
+      );
 
       const payloadStr = safeStableStringify(payload);
-      const canonical = [String(timestamp), nonce, "", "", "", payloadStr, ""].join(".");
+      const canonical = [
+        String(timestamp),
+        nonce,
+        "",
+        "",
+        "",
+        payloadStr,
+        "",
+      ].join(".");
       const msgBytes = SHARED_ENCODER.encode(canonical);
 
       const h = crypto.createHmac("sha256", secret);
@@ -247,7 +300,9 @@ describe("Server API Signature Verification - Security Enhancements", () => {
       expect(ok1).toBe(true);
 
       // Second verification with same nonce should fail
-      await expect(verifyApiRequestSignature(input, nonceStore)).rejects.toThrow(ReplayAttackError);
+      await expect(
+        verifyApiRequestSignature(input, nonceStore),
+      ).rejects.toThrow(ReplayAttackError);
     });
   });
 
@@ -297,10 +352,20 @@ describe("Server API Signature Verification - Security Enhancements", () => {
       const secret = Buffer.from("a-strong-shared-secret-32bytes-min-please!");
       const payload = { test: "data" };
       const timestamp = Date.now();
-      const nonce = Buffer.from(getSecureRandomBytesSync(16)).toString("base64");
+      const nonce = Buffer.from(getSecureRandomBytesSync(16)).toString(
+        "base64",
+      );
 
       const payloadStr = safeStableStringify(payload);
-      const canonical = [String(timestamp), nonce, "", "", "", payloadStr, ""].join(".");
+      const canonical = [
+        String(timestamp),
+        nonce,
+        "",
+        "",
+        "",
+        payloadStr,
+        "",
+      ].join(".");
       const msgBytes = SHARED_ENCODER.encode(canonical);
 
       const h = crypto.createHmac("sha256", secret);
@@ -330,7 +395,9 @@ describe("Server API Signature Verification - Security Enhancements", () => {
       const shortBase64Secret = "dGVzdGtleQ=="; // "testkey" in base64 = 7 bytes
       const payload = { test: "data" };
       const timestamp = Date.now();
-      const nonce = Buffer.from(getSecureRandomBytesSync(16)).toString("base64");
+      const nonce = Buffer.from(getSecureRandomBytesSync(16)).toString(
+        "base64",
+      );
 
       await expect(
         verifyApiRequestSignature(
@@ -350,10 +417,20 @@ describe("Server API Signature Verification - Security Enhancements", () => {
       const utfSecret = "this-is-a-strong-utf8-secret-key-32-plus-chars!"; // 48 chars > 32 bytes
       const payload = { test: "data" };
       const timestamp = Date.now();
-      const nonce = Buffer.from(getSecureRandomBytesSync(16)).toString("base64");
+      const nonce = Buffer.from(getSecureRandomBytesSync(16)).toString(
+        "base64",
+      );
 
       const payloadStr = safeStableStringify(payload);
-      const canonical = [String(timestamp), nonce, "", "", "", payloadStr, ""].join(".");
+      const canonical = [
+        String(timestamp),
+        nonce,
+        "",
+        "",
+        "",
+        payloadStr,
+        "",
+      ].join(".");
       const msgBytes = SHARED_ENCODER.encode(canonical);
 
       const secretBytes = Buffer.from(utfSecret, "utf8");
@@ -381,10 +458,20 @@ describe("Server API Signature Verification - Security Enhancements", () => {
       const base64Secret = Buffer.from(secretBytes).toString("base64");
       const payload = { test: "data" };
       const timestamp = Date.now();
-      const nonce = Buffer.from(getSecureRandomBytesSync(16)).toString("base64");
+      const nonce = Buffer.from(getSecureRandomBytesSync(16)).toString(
+        "base64",
+      );
 
       const payloadStr = safeStableStringify(payload);
-      const canonical = [String(timestamp), nonce, "", "", "", payloadStr, ""].join(".");
+      const canonical = [
+        String(timestamp),
+        nonce,
+        "",
+        "",
+        "",
+        payloadStr,
+        "",
+      ].join(".");
       const msgBytes = SHARED_ENCODER.encode(canonical);
 
       const h = crypto.createHmac("sha256", Buffer.from(secretBytes));

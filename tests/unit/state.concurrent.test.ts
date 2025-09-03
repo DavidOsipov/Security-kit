@@ -6,7 +6,8 @@ import {
   InvalidParameterError,
 } from "../../src/errors";
 
-const { __test_resetCryptoStateForUnitTests, getInternalTestUtils } = (state as any);
+const { __test_resetCryptoStateForUnitTests, getInternalTestUtils } =
+  state as any;
 
 describe("state concurrency and failure paths", () => {
   beforeEach(() => {
@@ -58,7 +59,10 @@ describe("state concurrency and failure paths", () => {
 
   it("generation counter prevents stale async resolution when reset during init", async () => {
     // This test uses internal test utils when available to inspect generation
-    const utils = typeof getInternalTestUtils === "function" ? getInternalTestUtils() : undefined;
+    const utils =
+      typeof getInternalTestUtils === "function"
+        ? getInternalTestUtils()
+        : undefined;
     if (!utils) {
       // If internal utils are not exposed, skip this fine-grained test
       return;
@@ -80,9 +84,10 @@ describe("state concurrency and failure paths", () => {
     const genAfter = utils._getCryptoGenerationForTest();
     expect(genAfter).toBeGreaterThanOrEqual(genBefore + 1);
 
-  // The original promise should now reject with the specific reset error
-  await expect(p).rejects.toThrow(/Crypto initialization was reset/);
+    // The original promise should now reject with the specific reset error
+    await expect(p).rejects.toThrow(/Crypto initialization was reset/);
 
-    if (typeof origGlobal !== "undefined") (globalThis as any).crypto = origGlobal;
+    if (typeof origGlobal !== "undefined")
+      (globalThis as any).crypto = origGlobal;
   });
 });

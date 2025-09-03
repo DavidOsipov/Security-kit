@@ -32,12 +32,12 @@ describe("postMessage fingerprint salt concurrency", () => {
     (globalThis as any).__SECURITY_KIT_ALLOW_TEST_APIS = true;
 
     // Kick off multiple concurrent ensureFingerprintSalt via test accessor
-  const p1 = postMessage.__test_ensureFingerprintSalt();
-  const p2 = postMessage.__test_ensureFingerprintSalt();
+    const p1 = postMessage.__test_ensureFingerprintSalt();
+    const p2 = postMessage.__test_ensureFingerprintSalt();
 
-  // advance fake timers so any pending delays in ensureCrypto resolve
-  await vi.runAllTimersAsync();
-  const [s1, s2] = await Promise.all([p1, p2]);
+    // advance fake timers so any pending delays in ensureCrypto resolve
+    await vi.runAllTimersAsync();
+    const [s1, s2] = await Promise.all([p1, p2]);
 
     expect(s1).toBeInstanceOf(Uint8Array);
     expect(s2).toBeInstanceOf(Uint8Array);

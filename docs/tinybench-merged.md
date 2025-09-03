@@ -37,11 +37,11 @@ The JavaScript runtime environment.
 # Function hrtimeNow
 
 ```ts
-function hrtimeNow(): number
+function hrtimeNow(): number;
 ```
 
-
 ### Returns
+
 number the current high resolution timestamp in milliseconds
 
 ---
@@ -49,13 +49,15 @@ number the current high resolution timestamp in milliseconds
 # Function nToMs
 
 ```ts
-function nToMs(ns: number): number
+function nToMs(ns: number): number;
 ```
 
-
 ### Parameters
+
 - ns — number the nanoseconds to convert ####
+
 ### Returns
+
 - number the milliseconds
 - - ns: number the nanoseconds to convert
 
@@ -85,11 +87,13 @@ interface BenchEventsMap {
   warmup: [EventListener](../types/EventListener.html)
 }
 ```
+
 ---
 
 # Interface BenchOptions
 
 Bench options
+
 ```ts
 interface BenchOptions {
   iterations?: number
@@ -105,6 +109,7 @@ interface BenchOptions {
   warmupTime?: number
 }
 ```
+
 #### Hierarchy (View Summary)
 
 - BenchOptions[ResolvedBenchOptions](ResolvedBenchOptions.html)
@@ -115,6 +120,7 @@ interface BenchOptions {
 # Interface FnOptions
 
 The task function options
+
 ```ts
 interface FnOptions {
   afterAll?: [FnHook](../types/FnHook.html)
@@ -123,21 +129,25 @@ interface FnOptions {
   beforeEach?: [FnHook](../types/FnHook.html)
 }
 ```
+
 ---
 
 # Interface FnReturnedObject
 
 A possible object returned by task functions to override default behaviors, like the duration of the function itself.
+
 ```ts
 interface FnReturnedObject {
-  overriddenDuration?: number
+  overriddenDuration?: number;
 }
 ```
+
 ---
 
 # Interface ResolvedBenchOptions
 
 Bench options
+
 ```ts
 interface ResolvedBenchOptions {
   iterations: number
@@ -153,6 +163,7 @@ interface ResolvedBenchOptions {
   warmupTime: number
 }
 ```
+
 #### Hierarchy (View Summary)
 
 - [BenchOptions](BenchOptions.html)ResolvedBenchOptions
@@ -163,28 +174,30 @@ interface ResolvedBenchOptions {
 # Interface Statistics
 
 The statistics object
+
 ```ts
 interface Statistics {
-  aad: undefined | number
-  critical: number
-  df: number
-  mad: undefined | number
-  max: number
-  mean: number
-  min: number
-  moe: number
-  p50: undefined | number
-  p75: undefined | number
-  p99: undefined | number
-  p995: undefined | number
-  p999: undefined | number
-  rme: number
-  samples: number[]
-  sd: number
-  sem: number
-  variance: number
+  aad: undefined | number;
+  critical: number;
+  df: number;
+  mad: undefined | number;
+  max: number;
+  mean: number;
+  min: number;
+  moe: number;
+  p50: undefined | number;
+  p75: undefined | number;
+  p99: undefined | number;
+  p995: undefined | number;
+  p999: undefined | number;
+  rme: number;
+  samples: number[];
+  sd: number;
+  sem: number;
+  variance: number;
 }
 ```
+
 ---
 
 # Interface TaskEventsMap
@@ -200,11 +213,13 @@ interface TaskEventsMap {
   warmup: [EventListener](../types/EventListener.html)
 }
 ```
+
 ---
 
 # Interface TaskResult
 
 The task result object
+
 ```ts
 interface TaskResult {
   aborted: boolean
@@ -233,6 +248,7 @@ interface TaskResult {
   variance: number
 }
 ```
+
 ---
 
 # Type Alias BenchEvent
@@ -244,7 +260,7 @@ Bench event
 
 # Type Alias BenchEvents
 
-BenchEvents:    | "abort"    | "add"    | "complete"    | "cycle"    | "error"    | "remove"    | "reset"    | "start"    | "warmup"
+BenchEvents: | "abort" | "add" | "complete" | "cycle" | "error" | "remove" | "reset" | "start" | "warmup"
 Bench events
 
 ---
@@ -256,16 +272,24 @@ Event listener
 
 #### Type declaration
 
-- (evt: [BenchEvent](BenchEvent.html)): void #### 
+- (evt: [BenchEvent](BenchEvent.html)): void ####
+
 ### Parameters
+
 - evt — [BenchEvent](BenchEvent.html) ####
+
 ### Returns
+
 - void
 - - (evt: [BenchEvent](BenchEvent.html)): void
 - - ####
+
 ### Parameters
+
 - evt — [BenchEvent](BenchEvent.html) ####
+
 ### Returns
+
 - void
 - - evt: [BenchEvent](BenchEvent.html)
 
@@ -280,12 +304,16 @@ If you need to provide a custom duration for the task (e.g.: because you want to
 
 #### Type declaration
 
-- (): [FnReturnedObject](../interfaces/FnReturnedObject.html) | Promise<[FnReturnedObject](../interfaces/FnReturnedObject.html) | unknown> | unknown #### 
+- (): [FnReturnedObject](../interfaces/FnReturnedObject.html) | Promise<[FnReturnedObject](../interfaces/FnReturnedObject.html) | unknown> | unknown ####
+
 ### Returns
+
 - FnReturnedObject | Promise<FnReturnedObject | unknown> | unknown
 - - (): [FnReturnedObject](../interfaces/FnReturnedObject.html) | Promise<[FnReturnedObject](../interfaces/FnReturnedObject.html) | unknown> | unknown
 - - ####
+
 ### Returns
+
 FnReturnedObject | Promise<FnReturnedObject | unknown> | unknown
 
 ---
@@ -297,16 +325,24 @@ The task hook function signature. If warmup is enabled, the hook will be called 
 
 #### Type declaration
 
-- (this: [Task](../classes/Task.html), mode?: "run" | "warmup"): Promise<void> | void #### 
+- (this: [Task](../classes/Task.html), mode?: "run" | "warmup"): Promise<void> | void ####
+
 ### Parameters
+
 - this — [Task](../classes/Task.html)Optional mode: "run" | "warmup" the mode where the hook is being called ####
+
 ### Returns
+
 - Promise<void> | void
 - - (this: [Task](../classes/Task.html), mode?: "run" | "warmup"): Promise<void> | void
 - - ####
+
 ### Parameters
+
 - this — [Task](../classes/Task.html)Optional mode: "run" | "warmup" the mode where the hook is being called ####
+
 ### Returns
+
 - Promise<void> | void
 - - this: [Task](../classes/Task.html)
 - - Optional mode: "run" | "warmup" the mode where the hook is being called
@@ -320,16 +356,24 @@ The hook function signature. If warmup is enabled, the hook will be called twice
 
 #### Type declaration
 
-- (task?: [Task](../classes/Task.html), mode?: "run" | "warmup"): Promise<void> | void #### 
+- (task?: [Task](../classes/Task.html), mode?: "run" | "warmup"): Promise<void> | void ####
+
 ### Parameters
+
 - Optional — task: [Task](../classes/Task.html) the task instance Optional mode: "run" | "warmup" the mode where the hook is being called ####
+
 ### Returns
+
 - Promise<void> | void
 - - (task?: [Task](../classes/Task.html), mode?: "run" | "warmup"): Promise<void> | void
 - - ####
+
 ### Parameters
+
 - Optional — task: [Task](../classes/Task.html) the task instance Optional mode: "run" | "warmup" the mode where the hook is being called ####
+
 ### Returns
+
 - Promise<void> | void
 - - Optional task: [Task](../classes/Task.html) the task instance
 - - Optional mode: "run" | "warmup" the mode where the hook is being called
@@ -338,7 +382,7 @@ The hook function signature. If warmup is enabled, the hook will be called twice
 
 # Type Alias TaskEvents
 
-TaskEvents:    | "abort"    | "complete"    | "cycle"    | "error"    | "reset"    | "start"    | "warmup"
+TaskEvents: | "abort" | "complete" | "cycle" | "error" | "reset" | "start" | "warmup"
 Task events
 
 ---
@@ -346,15 +390,20 @@ Task events
 # Variable nowConst
 
 - now
-now: () => number = performanceNow
+  now: () => number = performanceNow
+
 #### Type declaration
 
-- (): number 
+- (): number
+
 ### Returns
+
 - the current high resolution millisecond timestamp, where 0 represents the start of the current node process. #### Returns number #### Since v8.5.0
 - - (): number
 - -
+
 ### Returns
+
 the current high resolution millisecond timestamp, where 0 represents the start of the current node process. #### Returns number #### Since v8.5.0
 
 ---

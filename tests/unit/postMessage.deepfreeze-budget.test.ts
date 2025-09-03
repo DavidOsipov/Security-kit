@@ -7,7 +7,10 @@ describe("postMessage deepFreeze budget", () => {
   it("respects deepFreeze node budget and still calls handler", async () => {
     vi.resetModules();
     const state = await import("../../src/state");
-    vi.spyOn(state, "ensureCrypto").mockImplementation(async () => ({ getRandomValues: (b: Uint8Array) => b, subtle: undefined } as any));
+    vi.spyOn(state, "ensureCrypto").mockImplementation(
+      async () =>
+        ({ getRandomValues: (b: Uint8Array) => b, subtle: undefined }) as any,
+    );
 
     const postMessage = await import("../../src/postMessage");
     const onMessage = vi.fn();
@@ -23,9 +26,13 @@ describe("postMessage deepFreeze budget", () => {
       deepFreezeNodeBudget: 10,
     } as any);
 
-    const ev = new MessageEvent("message", { data: JSON.stringify(wide), origin: "http://localhost", source: window as any });
+    const ev = new MessageEvent("message", {
+      data: JSON.stringify(wide),
+      origin: "http://localhost",
+      source: window as any,
+    });
     window.dispatchEvent(ev);
-  await vi.runAllTimersAsync();
+    await vi.runAllTimersAsync();
     listener.destroy();
     expect(onMessage).toHaveBeenCalledTimes(1);
   });

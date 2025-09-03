@@ -26,6 +26,14 @@ export default [
       "tests/**/*",
       "tests/**",
       "tests/old_tests/**/*",
+      // Tooling and benchmarks are excluded from default lint runs to avoid
+      // parse errors and noisy findings that don't affect production code.
+      ".husky/**/*",
+      "benchmarks/**/*",
+      "demo/**/*",
+      "tsconfig-paths/**/*",
+      "scripts/**/*",
+      "tools/**/*",
     ],
   },
   // Global settings to help import resolver find packages and TS files when
@@ -187,8 +195,8 @@ export default [
           "ts-ignore": "allow-with-description", // Keep this for now, but be strict
           "ts-nocheck": true,
           "ts-check": false,
-          "minimumDescriptionLength": 10 // Force a real explanation
-        }
+          minimumDescriptionLength: 10, // Force a real explanation
+        },
       ],
       // NEW: Add rules that leverage your type information
       "@typescript-eslint/no-unsafe-assignment": "error",
@@ -196,21 +204,21 @@ export default [
       "@typescript-eslint/no-unsafe-member-access": "error",
       "@typescript-eslint/no-unsafe-return": "error",
 
-  // UNICORN CUSTOMIZATIONS: Enforce high-value patterns.
-  // Promote these to errors to enforce elite-level patterns across the
-  // library; fixes are often automatic or small mechanical edits.
-  "unicorn/prevent-abbreviations": "warn",
-  "unicorn/no-null": "error",
-  "unicorn/prefer-node-protocol": "error",
-  "unicorn/prefer-string-starts-ends-with": "error",
-    "unicorn/no-array-callback-reference": "error",
+      // UNICORN CUSTOMIZATIONS: Enforce high-value patterns.
+      // Promote these to errors to enforce elite-level patterns across the
+      // library; fixes are often automatic or small mechanical edits.
+      "unicorn/prevent-abbreviations": "warn",
+      "unicorn/no-null": "error",
+      "unicorn/prefer-node-protocol": "error",
+      "unicorn/prefer-string-starts-ends-with": "error",
+      "unicorn/no-array-callback-reference": "error",
 
-  // IMMUTABILITY RULES (functional plugin)
-  // Enforce immutability strictly for a security-critical library.
-  "functional/no-let": "error",
-  "functional/immutable-data": "error",
-  // Prefer readonly types where possible
-  "functional/prefer-readonly-type": "error",
+      // IMMUTABILITY RULES (functional plugin)
+      // Enforce immutability strictly for a security-critical library.
+      "functional/no-let": "error",
+      "functional/immutable-data": "error",
+      // Prefer readonly types where possible
+      "functional/prefer-readonly-type": "error",
 
       // Project-specific: forbid insecure/forbidden APIs
       "no-restricted-properties": [
@@ -233,6 +241,78 @@ export default [
       ],
     },
   },
+
+  // Server: lint server-side code with TypeScript-aware rules and Node/security plugins
+  {
+    files: ["server/**/*.ts", "server/**/*.tsx", "server/**/*.js"],
+    languageOptions: {
+      parser: tsParser,
+      parserOptions: {
+        ecmaVersion: "latest",
+        sourceType: "module",
+        projectService: true,
+        tsconfigRootDir: process.cwd(),
+        allowDefaultProject: true,
+      },
+    },
+    settings: {
+      "import/parsers": {
+        "@typescript-eslint/parser": [".ts", ".tsx"],
+      },
+      "import/resolver": {
+        typescript: {
+          alwaysTryTypes: true,
+        },
+        node: {
+          extensions: [".js", ".cjs", ".mjs", ".ts", ".tsx", ".json"],
+        },
+      },
+    },
+    plugins: {
+      "@typescript-eslint": tseslintPlugin,
+      n: nodePlugin,
+      "security-node": securityNode,
+      "no-unsanitized": noUnsanitized,
+      prettier: prettierPlugin,
+      functional: functionalPlugin,
+      local: localPlugin,
+      security: securityPlugin,
+    },
+    rules: {
+      "sonarjs/cognitive-complexity": ["error", 18],
+      "prettier/prettier": "error",
+      "@typescript-eslint/no-unused-vars": [
+        "error",
+        { argsIgnorePattern: "^_", varsIgnorePattern: "^_" },
+      ],
+      "@typescript-eslint/no-explicit-any": "error",
+      "@typescript-eslint/ban-ts-comment": [
+        "error",
+        {
+          "ts-expect-error": "allow-with-description",
+          "ts-ignore": "allow-with-description",
+          "ts-nocheck": true,
+          "ts-check": false,
+          minimumDescriptionLength: 10,
+        },
+      ],
+      "@typescript-eslint/no-floating-promises": [
+        "error",
+        { ignoreVoid: true },
+      ],
+      "no-eval": "error",
+      "no-implied-eval": "error",
+      "no-console": ["warn", { allow: ["warn", "error", "info", "debug"] }],
+      "security/detect-non-literal-regexp": "error",
+      "security/detect-object-injection": "error",
+      "security/detect-unsafe-regex": "error",
+      // Bring in most of security-node. We've fixed a small AST shape that
+      // previously triggered a plugin crash, so enable the recommended rules.
+      ...securityNode.configs.recommended.rules,
+      "functional/no-let": "error",
+      "functional/immutable-data": "error",
+    },
+  },
   // Allow internal encoder/decoder usage inside url.ts which implements safe wrappers
   {
     files: ["src/url.ts"],
@@ -250,7 +330,7 @@ export default [
       "no-restricted-globals": "off",
     },
   },
-  
+
   // Tests: downgrade noisy legacy checks to warnings so lint remains actionable
   {
     files: ["tests/**", "tests/old_tests/**"],
@@ -276,7 +356,7 @@ export default [
   },
   // Local rule: warn on secret-like identifier equality comparisons
   {
-    files: ["src/**","server/**","scripts/**"],
+    files: ["src/**", "server/**", "scripts/**"],
     plugins: { local: localPlugin },
     rules: {
       // Use a relative require to load the local rule implementation.

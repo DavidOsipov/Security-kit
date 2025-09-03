@@ -17,7 +17,9 @@ describe("logger", () => {
   });
 
   afterEach(() => {
-    environment.setExplicitEnv(originalIsProduction ? "production" : "development");
+    environment.setExplicitEnv(
+      originalIsProduction ? "production" : "development",
+    );
   });
 
   describe("createLogger", () => {
@@ -36,16 +38,36 @@ describe("logger", () => {
       const logger = createLogger("test-component");
 
       logger.debug("debug message", { key: "value" });
-      expect(secureDevLog).toHaveBeenCalledWith("debug", "test-component", "debug message", { key: "value" });
+      expect(secureDevLog).toHaveBeenCalledWith(
+        "debug",
+        "test-component",
+        "debug message",
+        { key: "value" },
+      );
 
       logger.info("info message");
-      expect(secureDevLog).toHaveBeenCalledWith("info", "test-component", "info message", undefined);
+      expect(secureDevLog).toHaveBeenCalledWith(
+        "info",
+        "test-component",
+        "info message",
+        undefined,
+      );
 
       logger.warn("warn message", "simple context");
-      expect(secureDevLog).toHaveBeenCalledWith("warn", "test-component", "warn message", "simple context");
+      expect(secureDevLog).toHaveBeenCalledWith(
+        "warn",
+        "test-component",
+        "warn message",
+        "simple context",
+      );
 
       logger.error("error message");
-      expect(secureDevLog).toHaveBeenCalledWith("error", "test-component", "error message", undefined);
+      expect(secureDevLog).toHaveBeenCalledWith(
+        "error",
+        "test-component",
+        "error message",
+        undefined,
+      );
     });
 
     it("child method creates a logger with prefixed component name", async () => {
@@ -54,7 +76,12 @@ describe("logger", () => {
       const childLogger = parentLogger.child("child");
 
       childLogger.info("child message");
-      expect(secureDevLog).toHaveBeenCalledWith("info", "parent:child", "child message", undefined);
+      expect(secureDevLog).toHaveBeenCalledWith(
+        "info",
+        "parent:child",
+        "child message",
+        undefined,
+      );
     });
 
     it("nested child loggers work correctly", async () => {
@@ -62,7 +89,12 @@ describe("logger", () => {
       const logger = createLogger("root").child("branch").child("leaf");
 
       logger.warn("nested message");
-      expect(secureDevLog).toHaveBeenCalledWith("warn", "root:branch:leaf", "nested message", undefined);
+      expect(secureDevLog).toHaveBeenCalledWith(
+        "warn",
+        "root:branch:leaf",
+        "nested message",
+        undefined,
+      );
     });
 
     it("handles all log levels correctly", async () => {
@@ -70,9 +102,14 @@ describe("logger", () => {
       const logger = createLogger("test");
 
       const levels: LogLevel[] = ["debug", "info", "warn", "error"];
-      levels.forEach(level => {
+      levels.forEach((level) => {
         logger[level](`${level} test`);
-        expect(secureDevLog).toHaveBeenCalledWith(level, "test", `${level} test`, undefined);
+        expect(secureDevLog).toHaveBeenCalledWith(
+          level,
+          "test",
+          `${level} test`,
+          undefined,
+        );
       });
     });
 
@@ -82,7 +119,12 @@ describe("logger", () => {
 
       const testContext = { userId: 123, action: "login" };
       logger.info("user action", testContext);
-      expect(secureDevLog).toHaveBeenCalledWith("info", "test", "user action", testContext);
+      expect(secureDevLog).toHaveBeenCalledWith(
+        "info",
+        "test",
+        "user action",
+        testContext,
+      );
     });
 
     it("handles empty component names", async () => {
@@ -90,7 +132,12 @@ describe("logger", () => {
       const logger = createLogger("");
 
       logger.info("message");
-      expect(secureDevLog).toHaveBeenCalledWith("info", "", "message", undefined);
+      expect(secureDevLog).toHaveBeenCalledWith(
+        "info",
+        "",
+        "message",
+        undefined,
+      );
     });
   });
 });

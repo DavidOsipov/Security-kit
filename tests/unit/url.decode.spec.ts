@@ -1,7 +1,5 @@
 import { describe, it, expect } from "vitest";
-import {
-  strictDecodeURIComponent,
-} from "../../src/url";
+import { strictDecodeURIComponent } from "../../src/url";
 import { InvalidParameterError } from "../../src/errors";
 
 describe("strictDecodeURIComponent", () => {

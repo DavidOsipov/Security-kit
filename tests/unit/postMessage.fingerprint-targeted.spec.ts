@@ -1,25 +1,27 @@
-import { expect, test, beforeEach, afterEach, vi } from 'vitest';
+import { expect, test, beforeEach, afterEach, vi } from "vitest";
 
 // enable runtime test APIs
 beforeEach(async () => {
   vi.resetModules();
   (globalThis as any).__SECURITY_KIT_ALLOW_TEST_APIS = true;
-  const postMessage = await import('../../src/postMessage');
+  const postMessage = await import("../../src/postMessage");
   (postMessage as any).__test_resetForUnitTests();
 });
 
 afterEach(async () => {
   delete (globalThis as any).__SECURITY_KIT_ALLOW_TEST_APIS;
-  const postMessage = await import('../../src/postMessage');
+  const postMessage = await import("../../src/postMessage");
   (postMessage as any).__test_resetForUnitTests();
 });
 
-test('ensureFingerprintSalt fallback when ensureCrypto rejects, then cached', async () => {
+test("ensureFingerprintSalt fallback when ensureCrypto rejects, then cached", async () => {
   // Arrange: monkey-patch ensureCrypto to reject once
-  const state = await import('../../src/state');
-  const spy = vi.spyOn(state, 'ensureCrypto').mockRejectedValue(new Error('no crypto'));
+  const state = await import("../../src/state");
+  const spy = vi
+    .spyOn(state, "ensureCrypto")
+    .mockRejectedValue(new Error("no crypto"));
 
-  const postMessage = await import('../../src/postMessage');
+  const postMessage = await import("../../src/postMessage");
   // First call should produce a fallback deterministic salt in test/dev
   const salt = await (postMessage as any).__test_ensureFingerprintSalt();
   expect(salt).toBeInstanceOf(Uint8Array);
@@ -34,8 +36,8 @@ test('ensureFingerprintSalt fallback when ensureCrypto rejects, then cached', as
   expect(salt2.length).toEqual(salt.length);
 });
 
-test('getPayloadFingerprint falls back when stableStringify fails due to depth', async () => {
-  const postMessage = await import('../../src/postMessage');
+test("getPayloadFingerprint falls back when stableStringify fails due to depth", async () => {
+  const postMessage = await import("../../src/postMessage");
   // Build a deeply nested object that exceeds POSTMESSAGE_MAX_PAYLOAD_DEPTH
   const depth = (postMessage as any).POSTMESSAGE_MAX_PAYLOAD_DEPTH ?? 8;
   let obj: any = { v: 0 };
@@ -46,6 +48,6 @@ test('getPayloadFingerprint falls back when stableStringify fails due to depth',
   }
 
   const fp = await (postMessage as any).__test_getPayloadFingerprint(obj);
-  expect(typeof fp).toBe('string');
+  expect(typeof fp).toBe("string");
   expect(fp.length).toBeGreaterThanOrEqual(1);
 });

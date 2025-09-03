@@ -122,7 +122,7 @@ describe("signing-worker", () => {
     const initMessage = {
       type: "init",
       secretBuffer: new ArrayBuffer(32),
-      options: {}
+      options: {},
     };
 
     // Create a proper MessageEvent and trigger the listener
@@ -132,7 +132,7 @@ describe("signing-worker", () => {
     });
 
     // Wait for the worker to initialize and capture the listener
-    await new Promise(resolve => setTimeout(resolve, 10));
+    await new Promise((resolve) => setTimeout(resolve, 10));
 
     expect(capturedOnMessage).toBeDefined();
 
@@ -146,7 +146,7 @@ describe("signing-worker", () => {
 
     // Verify the message was processed
     expect(mockPostMessage).toHaveBeenCalledWith({
-      type: "initialized"
+      type: "initialized",
     });
   });
 
@@ -155,7 +155,7 @@ describe("signing-worker", () => {
     const initMessage = {
       type: "init",
       secretBuffer: new ArrayBuffer(32),
-      options: {}
+      options: {},
     };
     const initEvent = new MessageEvent("message", {
       data: initMessage,
@@ -176,7 +176,7 @@ describe("signing-worker", () => {
     const signMessage = {
       type: "sign",
       requestId: 123,
-      canonical: "test-canonical-string"
+      canonical: "test-canonical-string",
     };
     const signEvent = new MessageEvent("message", {
       data: signMessage,
@@ -193,8 +193,8 @@ describe("signing-worker", () => {
     expect(mockPostMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         type: "signed",
-        requestId: 123
-      })
+        requestId: 123,
+      }),
     );
   });
 
@@ -203,7 +203,7 @@ describe("signing-worker", () => {
     const initMessage = {
       type: "init",
       secretBuffer: new ArrayBuffer(32),
-      options: {}
+      options: {},
     };
     const initEvent = new MessageEvent("message", {
       data: initMessage,
@@ -226,7 +226,7 @@ describe("signing-worker", () => {
     const handshakeMessage = {
       type: "handshake",
       nonce: "test-nonce-123",
-      replyPort: mockReplyPort
+      replyPort: mockReplyPort,
     };
     const handshakeEvent = new MessageEvent("message", {
       data: handshakeMessage,
@@ -244,8 +244,8 @@ describe("signing-worker", () => {
     expect(mockReplyPort.postMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         type: "handshake",
-        signature: expect.any(String)
-      })
+        signature: expect.any(String),
+      }),
     );
   });
 
@@ -254,7 +254,7 @@ describe("signing-worker", () => {
     const initMessage = {
       type: "init",
       secretBuffer: new ArrayBuffer(32),
-      options: {}
+      options: {},
     };
     const initEvent = new MessageEvent("message", {
       data: initMessage,
@@ -327,7 +327,7 @@ describe("signing-worker", () => {
 
     expect(mockPostMessage).toHaveBeenCalledWith({
       type: "error",
-      reason: "invalid-message-format"
+      reason: "invalid-message-format",
     });
   });
 });

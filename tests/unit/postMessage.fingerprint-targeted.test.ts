@@ -1,6 +1,6 @@
-import { expect, test, beforeEach, afterEach, vi } from 'vitest';
-import * as postMessage from '../../src/postMessage';
-import { ensureCrypto as realEnsureCrypto } from '../../src/state';
+import { expect, test, beforeEach, afterEach, vi } from "vitest";
+import * as postMessage from "../../src/postMessage";
+import { ensureCrypto as realEnsureCrypto } from "../../src/state";
 
 // enable runtime test APIs
 beforeEach(() => {
@@ -12,10 +12,12 @@ afterEach(() => {
   postMessage.__test_resetForUnitTests();
 });
 
-test('ensureFingerprintSalt fallback when ensureCrypto rejects, then cached', async () => {
+test("ensureFingerprintSalt fallback when ensureCrypto rejects, then cached", async () => {
   // Arrange: spy on ensureCrypto to reject once so we exercise the non-crypto fallback
-  const state = await import('../../src/state');
-  const spy = vi.spyOn(state, 'ensureCrypto').mockRejectedValueOnce(new Error('no crypto'));
+  const state = await import("../../src/state");
+  const spy = vi
+    .spyOn(state, "ensureCrypto")
+    .mockRejectedValueOnce(new Error("no crypto"));
 
   // First call should produce a fallback deterministic salt in test/dev
   const salt = await postMessage.__test_ensureFingerprintSalt();
@@ -30,7 +32,7 @@ test('ensureFingerprintSalt fallback when ensureCrypto rejects, then cached', as
   spy.mockRestore();
 });
 
-test('getPayloadFingerprint falls back when stableStringify fails', async () => {
+test("getPayloadFingerprint falls back when stableStringify fails", async () => {
   // Construct a deep, non-circular object that will exceed the stableStringify depth
   const depth = postMessage.POSTMESSAGE_MAX_PAYLOAD_DEPTH + 2;
   let obj: any = {};
@@ -41,7 +43,7 @@ test('getPayloadFingerprint falls back when stableStringify fails', async () => 
   }
 
   const fp = await postMessage.__test_getPayloadFingerprint(obj);
-  expect(typeof fp).toBe('string');
+  expect(typeof fp).toBe("string");
   // In dev/test non-crypto fallback, fingerprint should be a hex-like string or FINGERPRINT_ERR
   expect(fp.length).toBeGreaterThanOrEqual(1);
 });

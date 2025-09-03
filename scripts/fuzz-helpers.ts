@@ -71,4 +71,9 @@ export function makeHostilePayload(i: number) {
   return a;
 }
 
-export default { safeUrlForImport, safeImport, randomString, makeHostilePayload };
+export default {
+  safeUrlForImport,
+  safeImport,
+  randomString,
+  makeHostilePayload,
+};

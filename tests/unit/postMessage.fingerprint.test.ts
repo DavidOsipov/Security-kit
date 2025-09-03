@@ -4,7 +4,9 @@ describe("postMessage stable fingerprinting", () => {
   it("produces identical fingerprints for objects with different key insertion orders", async () => {
     vi.resetModules();
     const state = await import("../../src/state");
-    const fakeSubtle = { digest: async (b: ArrayBuffer) => new Uint8Array([1, 2, 3, 4]).buffer };
+    const fakeSubtle = {
+      digest: async (b: ArrayBuffer) => new Uint8Array([1, 2, 3, 4]).buffer,
+    };
     const fakeCrypto = {
       getRandomValues: (buf: Uint8Array) => {
         for (let i = 0; i < buf.length; i++) buf[i] = i & 0xff;
@@ -12,7 +14,9 @@ describe("postMessage stable fingerprinting", () => {
       },
       subtle: fakeSubtle,
     } as any;
-    vi.spyOn(state, "ensureCrypto").mockImplementation(async () => fakeCrypto as any);
+    vi.spyOn(state, "ensureCrypto").mockImplementation(
+      async () => fakeCrypto as any,
+    );
 
     const postMessage = await import("../../src/postMessage");
     // allow test internals via global flag

@@ -5,14 +5,14 @@
  * Tests the integer arithmetic implementation in refillTokens function.
  */
 
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from "vitest";
 
 // Mock Date.now to control time in tests
 const mockNow = vi.fn();
 Date.now = mockNow;
 
 // Since refillTokens is internal, we'll create a test version that replicates the logic
-describe('Token Bucket Refill - Fractional Accumulation', () => {
+describe("Token Bucket Refill - Fractional Accumulation", () => {
   interface WorkerState {
     readonly tokens: number;
     readonly burst: number;
@@ -65,13 +65,13 @@ describe('Token Bucket Refill - Fractional Accumulation', () => {
     };
   }
 
-  describe('Fractional Token Accumulation', () => {
+  describe("Fractional Token Accumulation", () => {
     beforeEach(() => {
       // Reset mock time to a known value
       mockNow.mockReturnValue(1000000000000); // 1 second in milliseconds
     });
 
-    it('accumulates fractional tokens over very short intervals', () => {
+    it("accumulates fractional tokens over very short intervals", () => {
       let state = createTestState({ tokens: 0, rateLimitPerMinute: 60 }); // 1 token per second
 
       // Simulate 100ms passing (should add 0.1 tokens)
@@ -90,7 +90,7 @@ describe('Token Bucket Refill - Fractional Accumulation', () => {
       expect(state.tokens).toBe(1); // Now we get 1 token
     });
 
-    it('handles floor-based refills correctly', () => {
+    it("handles floor-based refills correctly", () => {
       let state = createTestState({ tokens: 0, rateLimitPerMinute: 120 }); // 2 tokens per second
 
       // 1000ms should add 2 tokens (120 tokens/minute = 2 tokens/second)
@@ -104,7 +104,7 @@ describe('Token Bucket Refill - Fractional Accumulation', () => {
       expect(state.tokens).toBe(4);
     });
 
-    it('handles precision multiplier correctly for fractional rates', () => {
+    it("handles precision multiplier correctly for fractional rates", () => {
       let state = createTestState({ tokens: 0, rateLimitPerMinute: 1 }); // 1 token per minute
 
       // 120 seconds = 2.0 tokens (should add 2 tokens)
@@ -113,8 +113,12 @@ describe('Token Bucket Refill - Fractional Accumulation', () => {
       expect(state.tokens).toBe(2);
     });
 
-    it('respects burst capacity limits', () => {
-      let state = createTestState({ tokens: 0, burst: 5, rateLimitPerMinute: 120 });
+    it("respects burst capacity limits", () => {
+      let state = createTestState({
+        tokens: 0,
+        burst: 5,
+        rateLimitPerMinute: 120,
+      });
 
       // 3 seconds = 6 tokens, but burst is 5
       mockNow.mockReturnValue(1000000000000 + 3000); // +3 seconds
@@ -122,7 +126,7 @@ describe('Token Bucket Refill - Fractional Accumulation', () => {
       expect(state.tokens).toBe(5); // Capped at burst
     });
 
-    it('handles zero rate limit', () => {
+    it("handles zero rate limit", () => {
       let state = createTestState({ tokens: 0, rateLimitPerMinute: 0 });
 
       mockNow.mockReturnValue(1000000000000 + 1000); // +1 second
@@ -130,7 +134,7 @@ describe('Token Bucket Refill - Fractional Accumulation', () => {
       expect(state.tokens).toBe(0); // No refill when rate is 0
     });
 
-    it('handles negative rate limit', () => {
+    it("handles negative rate limit", () => {
       let state = createTestState({ tokens: 0, rateLimitPerMinute: -10 });
 
       mockNow.mockReturnValue(1000000000000 + 1000); // +1 second
@@ -138,7 +142,7 @@ describe('Token Bucket Refill - Fractional Accumulation', () => {
       expect(state.tokens).toBe(0); // No refill when rate is negative
     });
 
-    it('accumulates correctly with multiple small refills', () => {
+    it("accumulates correctly with multiple small refills", () => {
       let state = createTestState({ tokens: 0, rateLimitPerMinute: 60 });
 
       // 10 refills of 100ms each = 1 second = 1 token
@@ -149,7 +153,7 @@ describe('Token Bucket Refill - Fractional Accumulation', () => {
       expect(state.tokens).toBe(1);
     });
 
-    it('maintains precision across multiple operations', () => {
+    it("maintains precision across multiple operations", () => {
       let state = createTestState({ tokens: 0, rateLimitPerMinute: 120 });
 
       // First 1000ms = 2 tokens
@@ -163,7 +167,7 @@ describe('Token Bucket Refill - Fractional Accumulation', () => {
       expect(state.tokens).toBe(4);
     });
 
-    it('demonstrates fractional accumulation threshold', () => {
+    it("demonstrates fractional accumulation threshold", () => {
       let state = createTestState({ tokens: 0, rateLimitPerMinute: 60 }); // 1 token/second
 
       // With precision = 60000, perMs = floor((60 * 60000) / 60000) = 60
@@ -183,11 +187,15 @@ describe('Token Bucket Refill - Fractional Accumulation', () => {
       expect(state.tokens).toBe(1);
     });
 
-    it('prevents overflow in token accumulation', () => {
-      let state = createTestState({ tokens: 0, rateLimitPerMinute: 60, burst: 10 });
+    it("prevents overflow in token accumulation", () => {
+      let state = createTestState({
+        tokens: 0,
+        rateLimitPerMinute: 60,
+        burst: 10,
+      });
 
       // Simulate 2 hours passing (should be capped to 1 hour = 60 tokens, but burst is 10)
-      mockNow.mockReturnValue(1000000000000 + (2 * 60 * 60 * 1000)); // +2 hours
+      mockNow.mockReturnValue(1000000000000 + 2 * 60 * 60 * 1000); // +2 hours
       state = refillTokens(state);
       expect(state.tokens).toBe(10); // Capped at burst capacity
     });

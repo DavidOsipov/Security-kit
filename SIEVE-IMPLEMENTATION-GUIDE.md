@@ -1,11 +1,11 @@
 SIEVE policy implementation guide
 
-Goal
-----
+## Goal
+
 Implement a production-grade SIEVE recency policy for SecureLRUCache as an alternative to LRU and segmented. The SIEVE policy should provide an approximation of recency with a low-pointer-churn approach (second-chance-like semantics) while keeping strong security guarantees (zeroization, bounded sync evictions, etc.).
 
-Design overview
----------------
+## Design overview
+
 1. Data structures
    - Use an existing doubly-linked array model (keyList, valList, next, prev).
    - Add a low-memory "reference" bit per entry (`sieveRef: Uint8Array`) where `1` means recently referenced and `0` means not referenced.
@@ -54,11 +54,12 @@ Design overview
     - Add `experimental-sieve` profile as opt-in only.
 
 11. Performance measurement
-   - Use the existing `compare-lru-harness.mjs` and the `sweep-segmented-tuning.mjs` (adapted to run sieve tunables) to measure GET/SET/UPDATE performance.
-   - Diagnostics exposed via `getDebugStats()` include `sieveScans` and `sieveRotations`.
 
-Implementation checklist
-------------------------
+- Use the existing `compare-lru-harness.mjs` and the `sweep-segmented-tuning.mjs` (adapted to run sieve tunables) to measure GET/SET/UPDATE performance.
+- Diagnostics exposed via `getDebugStats()` include `sieveScans` and `sieveRotations`.
+
+## Implementation checklist
+
 - [x] Add `sieveRef: Uint8Array` to `SecureLRUCache` constructor and initialize.
 - [x] Initialize new entries with `sieveRef=0`.
 - [x] Add optional `sieveMaxRotationsPerEvict` tuning knob.
@@ -69,12 +70,12 @@ Implementation checklist
 - [ ] Add unit and integration tests covering correctness and performance.
 - [ ] Run micro-sweeps to find best `segmentedEvictScan` values for SIEVE.
 
-Security considerations
-----------------------
+## Security considerations
+
 - Ensure any pointer moves performed during rotation clear sensitive data invariants.
 - Make no changes to zeroization/wipe guarantees: wiped buffers must be wiped before onEvict callback.
 - Avoid additional data structures that may keep copies of sensitive values.
 
-Notes
------
+## Notes
+
 The current prototype in `src/secure-lru-cache.ts` includes a basic sieveRef implementation. The above checklist expands the productionization steps and tests required before promoting SIEVE to a non-experimental profile.

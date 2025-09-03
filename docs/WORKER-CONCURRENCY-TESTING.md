@@ -62,7 +62,7 @@ It is intended for maintainers and contributors who need to understand, extend, 
   - `MockMessageEvent` and `MockMessagePort` implement minimal behavior to emulate `MessageEvent` and `MessagePort` semantics for reply ports.
 
 - Avoiding flaky timing:
-  - Where tests need to simulate concurrent messages, they intentionally *do not await* the first handler and instead call the listener and yield a microtask (`await Promise.resolve()`) or poll briefly for expected `postMessage` calls. This reliably reproduces race windows in Node/Vitest test environment.
+  - Where tests need to simulate concurrent messages, they intentionally _do not await_ the first handler and instead call the listener and yield a microtask (`await Promise.resolve()`) or poll briefly for expected `postMessage` calls. This reliably reproduces race windows in Node/Vitest test environment.
   - Long-running crypto operations are stubbed using `mockSign.mockImplementation(async () => { await new Promise(r => setTimeout(r, 50)); return new ArrayBuffer(0); });` to force overlap.
 
 ## Recipes / Examples

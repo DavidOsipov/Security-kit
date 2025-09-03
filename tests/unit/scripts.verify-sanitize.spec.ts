@@ -14,13 +14,25 @@ const {
 
 describe("scripts/verify-sanitize helpers", () => {
   it("isMemberAccess detects identifier and literal properties", () => {
-    const ident = { type: "MemberExpression", object: { type: "Identifier", name: "env" }, property: { type: "Identifier", name: "isProd" } };
+    const ident = {
+      type: "MemberExpression",
+      object: { type: "Identifier", name: "env" },
+      property: { type: "Identifier", name: "isProd" },
+    };
     expect(isMemberAccess(ident, "env", "isProd")).toBe(true);
 
-    const lit = { type: "MemberExpression", object: { type: "Identifier", name: "env" }, property: { type: "Literal", value: "isProd" } };
+    const lit = {
+      type: "MemberExpression",
+      object: { type: "Identifier", name: "env" },
+      property: { type: "Literal", value: "isProd" },
+    };
     expect(isMemberAccess(lit, "env", "isProd")).toBe(true);
 
-    const not = { type: "MemberExpression", object: { type: "Identifier", name: "other" }, property: { type: "Identifier", name: "isProd" } };
+    const not = {
+      type: "MemberExpression",
+      object: { type: "Identifier", name: "other" },
+      property: { type: "Identifier", name: "isProd" },
+    };
     expect(isMemberAccess(not, "env", "isProd")).toBe(false);
   });
 
@@ -28,7 +40,11 @@ describe("scripts/verify-sanitize helpers", () => {
     const node1 = { type: "Identifier", name: "isDevelopment" };
     expect(nodeContainsDevGuard(node1)).toBe(true);
 
-    const node2 = { type: "MemberExpression", object: { type: "Identifier", name: "environment" }, property: { type: "Identifier", name: "isProduction" } };
+    const node2 = {
+      type: "MemberExpression",
+      object: { type: "Identifier", name: "environment" },
+      property: { type: "Identifier", name: "isProduction" },
+    };
     expect(nodeContainsDevGuard(node2)).toBe(true);
 
     const node3 = { type: "Literal", value: 42 };
@@ -46,10 +62,7 @@ describe("scripts/verify-sanitize helpers", () => {
     // line number of console.log is 3
     expect(isConsoleAllowed(3, src, false)).toBe(true);
 
-    const src2 = [
-      "// no guard here",
-      "console.error('oops')",
-    ];
+    const src2 = ["// no guard here", "console.error('oops')"];
     expect(isConsoleAllowed(2, src2, false)).toBe(false);
   });
 

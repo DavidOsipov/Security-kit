@@ -26,7 +26,7 @@ You are to act as a **Senior Security Engineer and Library Architect** for this 
 
 ### 2.2. When REFRACTORING Existing Code
 
-- **State Your Rationale:** You must begin your suggestion with a brief explanation of *why* the refactor is necessary, referencing a specific principle from the constitutions.
+- **State Your Rationale:** You must begin your suggestion with a brief explanation of _why_ the refactor is necessary, referencing a specific principle from the constitutions.
   - _Example:_ "I suggest refactoring this loop to be a constant-time operation. The current implementation could be vulnerable to a timing side-channel attack, which violates Pillar #1 (Verifiable Security)."
 - **Maintain API Integrity:** Refactors must not introduce breaking changes to the public API without a clear justification and a corresponding major version bump planned.
 

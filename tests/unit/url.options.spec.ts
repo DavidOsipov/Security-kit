@@ -14,7 +14,7 @@ describe("URL options hardening", () => {
     (params as any)["__proto__"] = "x";
     expect(() =>
       createSecureURL(base, [], params, undefined, { onUnsafeKey: "throw" }),
-  ).toThrow(InvalidParameterError);
+    ).toThrow(InvalidParameterError);
   });
 
   it("skips unsafe key when onUnsafeKey='skip'", () => {
@@ -34,7 +34,7 @@ describe("URL options hardening", () => {
     const base = "http://example.com/";
     expect(() =>
       createSecureURL(base, [], {}, undefined, { requireHTTPS: true }),
-  ).toThrow(InvalidParameterError);
+    ).toThrow(InvalidParameterError);
   });
 
   it("enforces maxLength in createSecureURL", () => {
@@ -42,14 +42,14 @@ describe("URL options hardening", () => {
     const longParam = "a".repeat(3000);
     expect(() =>
       createSecureURL(base, [], { p: longParam }, undefined, { maxLength: 10 }),
-  ).toThrow(InvalidParameterError);
+    ).toThrow(InvalidParameterError);
   });
 
   it("updateURLParams obeys requireHTTPS and maxLength", () => {
     const url = "http://example.com/?a=1";
     expect(() =>
       updateURLParams(url, { b: "2" }, { requireHTTPS: true }),
-  ).toThrow(InvalidParameterError);
+    ).toThrow(InvalidParameterError);
     expect(() =>
       updateURLParams("https://example.com/", { x: "y" }, { maxLength: 1 }),
     ).toThrow(InvalidParameterError);

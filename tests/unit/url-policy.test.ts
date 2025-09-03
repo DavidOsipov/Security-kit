@@ -4,7 +4,10 @@ import {
   getSafeSchemes,
   _resetUrlPolicyForTests,
 } from "../../src/url-policy";
-import { InvalidParameterError, InvalidConfigurationError } from "../../src/errors";
+import {
+  InvalidParameterError,
+  InvalidConfigurationError,
+} from "../../src/errors";
 
 describe("url-policy", () => {
   beforeEach(() => {
@@ -36,8 +39,8 @@ describe("url-policy", () => {
   });
 
   it("configureUrlPolicy rejects forbidden schemes like javascript:", () => {
-    expect(() => configureUrlPolicy({ safeSchemes: ["https:", "javascript:"] })).toThrow(
-      InvalidParameterError,
-    );
+    expect(() =>
+      configureUrlPolicy({ safeSchemes: ["https:", "javascript:"] }),
+    ).toThrow(InvalidParameterError);
   });
 });

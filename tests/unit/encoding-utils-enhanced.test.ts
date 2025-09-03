@@ -5,7 +5,11 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { base64ToBytes, isLikelyBase64, bytesToBase64 } from "../../src/encoding-utils.js";
+import {
+  base64ToBytes,
+  isLikelyBase64,
+  bytesToBase64,
+} from "../../src/encoding-utils.js";
 
 describe("Enhanced Encoding Utils", () => {
   describe("base64url normalization", () => {
@@ -29,11 +33,14 @@ describe("Enhanced Encoding Utils", () => {
       // Original data that results in + and / in standard base64
       const originalBytes = new Uint8Array([255, 254, 253, 252, 251, 250]);
       const standard = bytesToBase64(originalBytes); // Should contain + and/or /
-      const base64url = standard.replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-      
+      const base64url = standard
+        .replace(/\+/g, "-")
+        .replace(/\//g, "_")
+        .replace(/=+$/, "");
+
       const decodedFromStandard = base64ToBytes(standard);
       const decodedFromBase64url = base64ToBytes(base64url);
-      
+
       expect(decodedFromStandard).toEqual(originalBytes);
       expect(decodedFromBase64url).toEqual(originalBytes);
       expect(decodedFromStandard).toEqual(decodedFromBase64url);
@@ -43,11 +50,11 @@ describe("Enhanced Encoding Utils", () => {
       // Test case where base64url has - and _ characters
       const base64url = "SGVsbG8tV29ybGRfQSE"; // base64url with - and _
       const standard = "SGVsbG8tV29ybGRfQSE="; // same but with padding
-      
+
       // Both should decode to same result
       const decodedUrl = base64ToBytes(base64url);
       const decodedStd = base64ToBytes(standard);
-      
+
       expect(decodedUrl).toEqual(decodedStd);
     });
   });
@@ -84,7 +91,7 @@ describe("Enhanced Encoding Utils", () => {
       expect(isLikelyBase64("a")).toBe(true); // Gets padded to "a==="
       expect(isLikelyBase64("ab")).toBe(true); // Gets padded to "ab=="
       expect(isLikelyBase64("abc")).toBe(true); // Gets padded to "abc="
-      
+
       // But test that invalid character patterns still fail
       expect(isLikelyBase64("@")).toBe(false);
       expect(isLikelyBase64("!@")).toBe(false);
@@ -129,7 +136,7 @@ describe("Enhanced Encoding Utils", () => {
       const testBytes = new Uint8Array([72, 101, 108, 108, 111]); // "Hello"
       const encoded = bytesToBase64(testBytes);
       expect(isLikelyBase64(encoded)).toBe(true);
-      
+
       const decoded = base64ToBytes(encoded);
       expect(decoded).toEqual(testBytes);
       expect(new TextDecoder().decode(decoded)).toBe("Hello");
@@ -138,7 +145,7 @@ describe("Enhanced Encoding Utils", () => {
     it("gracefully handles missing global functions", () => {
       // This test ensures our code doesn't crash if global functions are missing
       const testBytes = new Uint8Array([116, 101, 115, 116]); // "test"
-      
+
       // Should not throw even if some globals are missing
       expect(() => {
         const encoded = bytesToBase64(testBytes);

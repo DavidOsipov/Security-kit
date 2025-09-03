@@ -2202,7 +2202,7 @@ We practice **Trust is Not Transitive**. Every new dependency must be vetted for
 #### 5.2.1. Proactive Supply Chain Hardening (MUST)
 
 - **Statement:** The project's dependency management strategy must be proactive, not just reactive. In addition to scanning for known vulnerabilities (CVEs), all dependencies **MUST** be analyzed for risky characteristics and all code commits **MUST** be scanned for inadvertently committed secrets.
-- **Rationale:** The modern threat landscape has shifted from exploiting *vulnerable* dependencies to creating actively *malicious* dependencies (e.g., protestware, credential stealers). A reactive CVE scan is no longer sufficient. We must adopt a **Zero Trust** model for our supply chain, analyzing dependencies for suspicious behaviors and preventing secrets from ever entering the repository's history.
+- **Rationale:** The modern threat landscape has shifted from exploiting _vulnerable_ dependencies to creating actively _malicious_ dependencies (e.g., protestware, credential stealers). A reactive CVE scan is no longer sufficient. We must adopt a **Zero Trust** model for our supply chain, analyzing dependencies for suspicious behaviors and preventing secrets from ever entering the repository's history.
 - **Implementation:**
   1.  **Behavioral Dependency Analysis:** A tool that analyzes package characteristics, such as **Socket.dev**, **MUST** be used. It should be configured to flag new dependencies that use install scripts, have broad permissions (network/filesystem access), or exhibit other risky signals. These findings must be reviewed on every pull request.
   2.  **Automated Secret Scanning:** A secret-scanning tool, with **Gitleaks** as the reference implementation, **MUST** be integrated.

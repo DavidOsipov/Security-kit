@@ -41,18 +41,18 @@ describe("prototype-pollution fuzz tests", () => {
 
   it("sanitizer does not mutate Object.prototype when sanitizing malicious inputs", () => {
     const before = Object.prototype.hasOwnProperty("polluted");
-      // Instantiate a local DOMPurify-compatible object for the Sanitizer
-      const dp: any = { sanitize: (s: string) => (s || "") };
-      const s = new Sanitizer(dp, { strict: STRICT_HTML_POLICY_CONFIG });
-      for (const p of payloads) {
-        try {
-          // sanitizer API expects strings/html; stringify objects safely
-          const html = JSON.stringify(p, (_k, v) => (v === undefined ? null : v));
-          s.getSanitizedString(html, "strict");
-        } catch {
-          // ignore errors; main assertion is about prototype pollution
-        }
+    // Instantiate a local DOMPurify-compatible object for the Sanitizer
+    const dp: any = { sanitize: (s: string) => s || "" };
+    const s = new Sanitizer(dp, { strict: STRICT_HTML_POLICY_CONFIG });
+    for (const p of payloads) {
+      try {
+        // sanitizer API expects strings/html; stringify objects safely
+        const html = JSON.stringify(p, (_k, v) => (v === undefined ? null : v));
+        s.getSanitizedString(html, "strict");
+      } catch {
+        // ignore errors; main assertion is about prototype pollution
       }
+    }
     const after = Object.prototype.hasOwnProperty("polluted");
     expect(after).toBe(before);
   });

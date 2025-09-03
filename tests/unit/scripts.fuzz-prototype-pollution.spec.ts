@@ -9,8 +9,12 @@ describe("scripts/fuzz-prototype-pollution helpers", () => {
   it("safeUrlForImport accepts file and http/https URLs and rejects invalid ones", () => {
     const fileUrl = new url.URL("file:///tmp/some/file.js").href;
     expect(fuzz.safeUrlForImport(fileUrl)).toBe(fileUrl);
-    expect(fuzz.safeUrlForImport("http://example.com/a.js")).toBe("http://example.com/a.js");
-    expect(fuzz.safeUrlForImport("https://example.com/a.js")).toBe("https://example.com/a.js");
+    expect(fuzz.safeUrlForImport("http://example.com/a.js")).toBe(
+      "http://example.com/a.js",
+    );
+    expect(fuzz.safeUrlForImport("https://example.com/a.js")).toBe(
+      "https://example.com/a.js",
+    );
     expect(fuzz.safeUrlForImport("ftp://example.com/a.js")).toBeUndefined();
     expect(fuzz.safeUrlForImport("not a url")).toBeUndefined();
   });

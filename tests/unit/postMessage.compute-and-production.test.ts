@@ -1,10 +1,14 @@
-import { test, expect, vi } from 'vitest';
-import { __test_getPayloadFingerprint, __test_resetForUnitTests, __test_ensureFingerprintSalt } from '../../src/postMessage';
-import * as state from '../../src/state';
-import { environment } from '../../src/environment';
-import { CryptoUnavailableError } from '../../src/errors';
+import { test, expect, vi } from "vitest";
+import {
+  __test_getPayloadFingerprint,
+  __test_resetForUnitTests,
+  __test_ensureFingerprintSalt,
+} from "../../src/postMessage";
+import * as state from "../../src/state";
+import { environment } from "../../src/environment";
+import { CryptoUnavailableError } from "../../src/errors";
 
-test('computeFingerprintFromString uses subtle.digest when available', async () => {
+test("computeFingerprintFromString uses subtle.digest when available", async () => {
   (globalThis as any).__SECURITY_KIT_ALLOW_TEST_APIS = true;
   try {
     __test_resetForUnitTests();
@@ -16,11 +20,14 @@ test('computeFingerprintFromString uses subtle.digest when available', async () 
     });
 
     const fakeCrypto = {
-      getRandomValues: (buf: Uint8Array) => { for (let i = 0; i < buf.length; i++) buf[i] = i & 0xff; return buf; },
+      getRandomValues: (buf: Uint8Array) => {
+        for (let i = 0; i < buf.length; i++) buf[i] = i & 0xff;
+        return buf;
+      },
       subtle: { digest: fakeDigest },
     } as unknown as Crypto;
 
-    if (typeof (state as any)._setCrypto === 'function') {
+    if (typeof (state as any)._setCrypto === "function") {
       (state as any)._setCrypto(fakeCrypto);
     } else {
       (globalThis as any).crypto = fakeCrypto;
@@ -30,19 +37,19 @@ test('computeFingerprintFromString uses subtle.digest when available', async () 
     const salt = await __test_ensureFingerprintSalt();
     expect(salt).toBeInstanceOf(Uint8Array);
 
-  const fp = await __test_getPayloadFingerprint('hello world');
-    expect(typeof fp).toBe('string');
+    const fp = await __test_getPayloadFingerprint("hello world");
+    expect(typeof fp).toBe("string");
     expect(fp.length).toBeGreaterThan(0);
   } finally {
     delete (globalThis as any).__SECURITY_KIT_ALLOW_TEST_APIS;
   }
 });
 
-test('ensureFingerprintSalt throws in production when crypto missing', async () => {
+test("ensureFingerprintSalt throws in production when crypto missing", async () => {
   (globalThis as any).__SECURITY_KIT_ALLOW_TEST_APIS = true;
   const prev = (environment as any).__explicitEnv;
   try {
-    environment.setExplicitEnv('production');
+    environment.setExplicitEnv("production");
     __test_resetForUnitTests();
 
     // Make sure crypto is not available synchronously
@@ -50,10 +57,12 @@ test('ensureFingerprintSalt throws in production when crypto missing', async () 
       delete (globalThis as any).crypto;
     } catch {}
 
-    await expect(__test_ensureFingerprintSalt()).rejects.toThrow(CryptoUnavailableError);
+    await expect(__test_ensureFingerprintSalt()).rejects.toThrow(
+      CryptoUnavailableError,
+    );
   } finally {
     try {
-      environment.setExplicitEnv(prev === undefined ? 'development' : prev);
+      environment.setExplicitEnv(prev === undefined ? "development" : prev);
     } catch {}
     delete (globalThis as any).__SECURITY_KIT_ALLOW_TEST_APIS;
   }

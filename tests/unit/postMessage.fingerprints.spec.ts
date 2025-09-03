@@ -55,7 +55,10 @@ describe("postMessage fingerprinting and toNullProto/freeze cache", () => {
 
     (globalThis as any).crypto = fakeCrypto;
 
-  const fp = await (post as any).__test_getPayloadFingerprint({ a: 1, b: "x" });
+    const fp = await (post as any).__test_getPayloadFingerprint({
+      a: 1,
+      b: "x",
+    });
     expect(typeof fp).toBe("string");
     expect(fp.length).toBeGreaterThan(0);
     // ensure subtle.digest was called
@@ -72,11 +75,11 @@ describe("postMessage fingerprinting and toNullProto/freeze cache", () => {
     } as unknown as Crypto;
     (globalThis as any).crypto = fakeCrypto;
 
-  const fp = await (post as any).__test_getPayloadFingerprint({ foo: "bar" });
-  // Implementation may return either a short base64 or a hex string
-  expect(typeof fp).toBe("string");
-  expect(fp.length).toBeGreaterThan(0);
-  expect(fp).not.toBe("FINGERPRINT_ERR");
+    const fp = await (post as any).__test_getPayloadFingerprint({ foo: "bar" });
+    // Implementation may return either a short base64 or a hex string
+    expect(typeof fp).toBe("string");
+    expect(fp.length).toBeGreaterThan(0);
+    expect(fp).not.toBe("FINGERPRINT_ERR");
   });
 
   it("ensureFingerprintSalt fallback when no crypto available uses time entropy", async () => {
@@ -85,7 +88,7 @@ describe("postMessage fingerprinting and toNullProto/freeze cache", () => {
     // Force production=false so fallback isn't disabled
     environment.setExplicitEnv?.("development");
 
-  const fp = await (post as any).__test_getPayloadFingerprint({ z: 123 });
+    const fp = await (post as any).__test_getPayloadFingerprint({ z: 123 });
     expect(typeof fp).toBe("string");
     // It may return either hex or FINGERPRINT_ERR; ensure it's not throwing
   });
@@ -103,7 +106,7 @@ describe("postMessage fingerprinting and toNullProto/freeze cache", () => {
     (obj as any)[sym] = "hidden";
     (obj as any)["__proto__"] = { polluted: true };
 
-  const sanitized = (post as any).__test_toNullProto(obj);
+    const sanitized = (post as any).__test_toNullProto(obj);
     // sanitized should be a null-proto object containing only 'safe'
     expect(Object.getPrototypeOf(sanitized)).toBe(null);
     expect((sanitized as any).safe).toBe(1);
@@ -117,37 +120,46 @@ describe("postMessage fingerprinting and toNullProto/freeze cache", () => {
     const o: any = { x: 1 };
     // Use exported deepFreeze to ensure freezing works; avoid relying on
     // nested listener helpers which are not exported.
-  (post as any).__test_deepFreeze(o);
+    (post as any).__test_deepFreeze(o);
     expect(Object.isFrozen(o)).toBe(true);
     // Second call is a no-op but should not throw
-  (post as any).__test_deepFreeze(o);
+    (post as any).__test_deepFreeze(o);
     expect(Object.isFrozen(o)).toBe(true);
   });
 });
 
 // Additional security-focused tests (mirroring security-fixes additions)
-describe('security-fixes: sanitize/typedarray and listener immutability', () => {
-  it('sendSecurePostMessage fails fast with incompatible sanitize=true + allowTypedArrays=true', () => {
-    const payload = new Uint8Array([5,6,7]);
+describe("security-fixes: sanitize/typedarray and listener immutability", () => {
+  it("sendSecurePostMessage fails fast with incompatible sanitize=true + allowTypedArrays=true", () => {
+    const payload = new Uint8Array([5, 6, 7]);
     const fakeWin = { postMessage: (_p: any, _o: string) => {} } as any;
 
     expect(() =>
-      (post as any).sendSecurePostMessage({ targetWindow: fakeWin, payload, targetOrigin: 'https://example.com', wireFormat: 'structured', sanitize: true, allowTypedArrays: true } as any),
+      (post as any).sendSecurePostMessage({
+        targetWindow: fakeWin,
+        payload,
+        targetOrigin: "https://example.com",
+        wireFormat: "structured",
+        sanitize: true,
+        allowTypedArrays: true,
+      } as any),
     ).toThrow();
   });
 
-  it('listener configuration is immutable after creation (TOCTOU fix)', () => {
+  it("listener configuration is immutable after creation (TOCTOU fix)", () => {
     const originalValidator = (() => false) as any;
     const permissiveValidator = (() => true) as any;
 
     const options: any = {
-      allowedOrigins: ['https://example.com'],
+      allowedOrigins: ["https://example.com"],
       onMessage: () => {},
       validate: originalValidator,
       allowExtraProps: false,
     };
 
-    const listener = (post as any).createSecurePostMessageListener(options as any);
+    const listener = (post as any).createSecurePostMessageListener(
+      options as any,
+    );
 
     options.validate = permissiveValidator;
     options.allowExtraProps = true;

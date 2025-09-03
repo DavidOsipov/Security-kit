@@ -10,7 +10,10 @@ afterEach(() => {
 });
 
 test("freeze cache avoids repeated deep freeze work", () => {
-  const win = { addEventListener: () => {}, removeEventListener: () => {} } as unknown as Window;
+  const win = {
+    addEventListener: () => {},
+    removeEventListener: () => {},
+  } as unknown as Window;
   const payload = { x: { y: 1 } };
   const calls: any[] = [];
   const listener = createSecurePostMessageListener({

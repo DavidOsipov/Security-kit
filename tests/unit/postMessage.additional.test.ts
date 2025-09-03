@@ -28,11 +28,15 @@ describe("postMessage additional hardening tests", () => {
     });
 
     const payload = { nested: { x: 1 } };
-    const ev = new MessageEvent("message", { data: JSON.stringify(payload), origin: "http://localhost", source: window });
+    const ev = new MessageEvent("message", {
+      data: JSON.stringify(payload),
+      origin: "http://localhost",
+      source: window,
+    });
     window.dispatchEvent(ev);
 
-  // give event loop a tick
-  await vi.runAllTimersAsync();
+    // give event loop a tick
+    await vi.runAllTimersAsync();
 
     expect(onMessage).toHaveBeenCalled();
     const calledArg = onMessage.mock.calls[0][0];
@@ -57,17 +61,25 @@ describe("postMessage additional hardening tests", () => {
     });
 
     const payload = { x: 1 };
-    const ev1 = new MessageEvent("message", { data: JSON.stringify(payload), origin: "http://localhost", source: window });
+    const ev1 = new MessageEvent("message", {
+      data: JSON.stringify(payload),
+      origin: "http://localhost",
+      source: window,
+    });
     window.dispatchEvent(ev1);
 
     // dispatch from a fake other source (MessagePort) should be dropped
     const fakePort = new MessageChannel().port1;
-    const ev2 = new MessageEvent("message", { data: JSON.stringify(payload), origin: "http://localhost", source: fakePort as any });
+    const ev2 = new MessageEvent("message", {
+      data: JSON.stringify(payload),
+      origin: "http://localhost",
+      source: fakePort as any,
+    });
     window.dispatchEvent(ev2);
 
-  await vi.runAllTimersAsync();
-  // only first call should succeed
-  expect(onMessage).toHaveBeenCalledTimes(1);
+    await vi.runAllTimersAsync();
+    // only first call should succeed
+    expect(onMessage).toHaveBeenCalledTimes(1);
 
     listener.destroy();
   });
@@ -76,7 +88,9 @@ describe("postMessage additional hardening tests", () => {
     const postMessage = await import("../../src/postMessage");
 
     // forbidden key present
-    const r1 = postMessage._validatePayload({ __proto__: { hacked: 1 } }, { a: "number" } as any);
+    const r1 = postMessage._validatePayload({ __proto__: { hacked: 1 } }, {
+      a: "number",
+    } as any);
     expect(r1.valid).toBe(false);
 
     // non-plain object (e.g., function)
@@ -95,10 +109,17 @@ describe("postMessage additional hardening tests", () => {
 
   it("_validatePayloadWithExtras enforces unexpected property rejection when allowExtraProps=false", async () => {
     const postMessage = await import("../../src/postMessage");
-    const r = postMessage._validatePayloadWithExtras({ a: 1, extra: 2 }, { a: "number" });
+    const r = postMessage._validatePayloadWithExtras(
+      { a: 1, extra: 2 },
+      { a: "number" },
+    );
     expect(r.valid).toBe(false);
     expect(r.reason).toContain("Unexpected property");
-    const r2 = postMessage._validatePayloadWithExtras({ a: 1, extra: 2 }, { a: "number" }, true);
+    const r2 = postMessage._validatePayloadWithExtras(
+      { a: 1, extra: 2 },
+      { a: "number" },
+      true,
+    );
     expect(r2.valid).toBe(true);
   });
 });

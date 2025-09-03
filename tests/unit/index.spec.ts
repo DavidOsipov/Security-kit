@@ -3,13 +3,17 @@ import { describe, it, expect } from "vitest";
 // Test that the main index exports work correctly
 describe("index", () => {
   it("can import core crypto functions", async () => {
-    const { hasSyncCrypto, getCryptoCapabilities } = await import("../../src/index.js");
+    const { hasSyncCrypto, getCryptoCapabilities } = await import(
+      "../../src/index.js"
+    );
     expect(typeof hasSyncCrypto).toBe("function");
     expect(typeof getCryptoCapabilities).toBe("function");
   });
 
   it("can import error classes", async () => {
-    const { InvalidParameterError, CryptoUnavailableError } = await import("../../src/index.js");
+    const { InvalidParameterError, CryptoUnavailableError } = await import(
+      "../../src/index.js"
+    );
     expect(typeof InvalidParameterError).toBe("function");
     expect(typeof CryptoUnavailableError).toBe("function");
   });
@@ -27,7 +31,8 @@ describe("index", () => {
   });
 
   it("can import postMessage utilities", async () => {
-    const { sendSecurePostMessage, createSecurePostMessageListener } = await import("../../src/index.js");
+    const { sendSecurePostMessage, createSecurePostMessageListener } =
+      await import("../../src/index.js");
     expect(typeof sendSecurePostMessage).toBe("function");
     expect(typeof createSecurePostMessageListener).toBe("function");
   });

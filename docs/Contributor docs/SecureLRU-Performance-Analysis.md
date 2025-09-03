@@ -1,7 +1,5 @@
 # SecureLRU Performance Analysis (Contributor Guide)# SecureLRU Performance Profiles
 
-
-
 This document provides comprehensive performance analysis for SecureLRU cache implementations, including detailed benchmark results, algorithm comparisons, and performance optimization insights for contributors.This guide documents ready-to-use benchmark profiles and tuning knobs to evaluate SecureLRU evictOverall guidance
 
 - Small/read-heavy: pick second-chance (SEG_SCAN≈8, SC_MAX_ROT≈8) for the fastest GET.
@@ -12,7 +10,7 @@ This document provides comprehensive performance analysis for SecureLRU cache im
 
 Benchmarks executed on:
 
-- **CPU**: Intel(R) Core(TM) i5-10210U @ 1.60GHz (8 CPUs), ~2.1GHz  ## No-Copy Performance Analysis (2025-09-02)
+- **CPU**: Intel(R) Core(TM) i5-10210U @ 1.60GHz (8 CPUs), ~2.1GHz ## No-Copy Performance Analysis (2025-09-02)
 
 - **Memory**: 8192MB RAM (8026MB available)
 
@@ -25,8 +23,6 @@ Benchmarks executed on:
 - nocopy8k-sieve → results-compare-lru-1756831989147.json
 
 ## Benchmark Profiles- nocopy8k-second-chance → results-compare-lru-1756832031451.json
-
-
 
 This guide documents ready-to-use benchmark profiles and tuning knobs to evaluate SecureLRU eviction algorithms across different workloads.**64KB No-Copy Results:**
 
@@ -54,9 +50,7 @@ This guide documents ready-to-use benchmark profiles and tuning knobs to evaluat
 
 - `write64k-segmented`: Segmented LRU with 64KB values| Second-chance (tuned) | SET | 111K ops/s | 125K ops/s | 13% faster |
 
-
-
-**Baseline Profiles (1KB values):****64KB Values (No Copy):**
+**Baseline Profiles (1KB values):\*\***64KB Values (No Copy):\*\*
 
 - `sieve`: Basic SIEVE performance baseline- SIEVE (tuned): GET ≈ 2.13M ops/s, SET ≈ 33K ops/s
 
@@ -114,9 +108,7 @@ This guide documents ready-to-use benchmark profiles and tuning knobs to evaluat
 
 - `PROMOTE_RATE`: Sampling rate for promote mode (default: 4)### Practical Implications
 
-
-
-**Security and Copying:****Security vs Performance Trade-off Quantified:**
+**Security and Copying:\*\***Security vs Performance Trade-off Quantified:\*\*
 
 - `COPY_ON_SET`: Copy values during set operations (default: true)- OWASP ASVS L3 immutability guarantee costs 20-90% performance depending on value size
 
@@ -133,8 +125,6 @@ This guide documents ready-to-use benchmark profiles and tuning knobs to evaluat
 - SIEVE's advantage is more pronounced than originally measured
 
 ## Recent Benchmark Results- The "second-chance leads GET" pattern is less consistent without copying interferencepolicies (LRU, segmented, second-chance, SIEVE) under different workloads. It also explains when each policy tends to perform best.
-
-
 
 ### 2025-09-02 Full Profile Analysis## TL;DR
 
@@ -154,33 +144,30 @@ These are encoded in `benchmarks/compare-lru-harness.mjs` via PROFILE and other 
 
 - write64k-sieve → results-compare-lru-1756830889385.json- write8k-sieve
 
-- write64k-second-chance → results-compare-lru-1756830925937.json  - RECENCY_MODE=sieve, SEG_SCAN=8, VALUE_BYTES=8192, BENCH_ITER=2000
+- write64k-second-chance → results-compare-lru-1756830925937.json - RECENCY_MODE=sieve, SEG_SCAN=8, VALUE_BYTES=8192, BENCH_ITER=2000
 
-- write64k-segmented → results-compare-lru-1756830981566.json  - Purpose: Larger values (8KB), mixed ops; showcases SIEVE vs second-chance.
+- write64k-segmented → results-compare-lru-1756830981566.json - Purpose: Larger values (8KB), mixed ops; showcases SIEVE vs second-chance.
 
 - write64k-sieve
 
-**1KB Baseline Results:**  - RECENCY_MODE=sieve, SEG_SCAN=8, VALUE_BYTES=65536, BENCH_ITER=1500
+**1KB Baseline Results:** - RECENCY_MODE=sieve, SEG_SCAN=8, VALUE_BYTES=65536, BENCH_ITER=1500
 
-- sieve baseline → results-compare-lru-1756831023103.json  - Purpose: Heavy copy/pointer churn; SIEVE advantage is more visible.
+- sieve baseline → results-compare-lru-1756831023103.json - Purpose: Heavy copy/pointer churn; SIEVE advantage is more visible.
 
 - second-chance baseline → results-compare-lru-1756831060834.json- write8k-second-chance (alias: write8k-2nd)
-
   - RECENCY_MODE=second-chance, SEG_SCAN=8, SC_MAX_ROT=8, VALUE_BYTES=8192, BENCH_ITER=2000
 
 **No-Copy Analysis Results:**- write64k-second-chance (alias: write64k-2nd)
 
-- nocopy8k-sieve → results-compare-lru-1756831989147.json  - RECENCY_MODE=second-chance, SEG_SCAN=8, SC_MAX_ROT=8, VALUE_BYTES=65536, BENCH_ITER=1500
+- nocopy8k-sieve → results-compare-lru-1756831989147.json - RECENCY_MODE=second-chance, SEG_SCAN=8, SC_MAX_ROT=8, VALUE_BYTES=65536, BENCH_ITER=1500
 
 - nocopy8k-second-chance → results-compare-lru-1756832031451.json- write8k-segmented
 
-- nocopy64k-sieve → results-compare-lru-1756832071249.json  - RECENCY_MODE=segmented, SEG_SCAN=8, VALUE_BYTES=8192
+- nocopy64k-sieve → results-compare-lru-1756832071249.json - RECENCY_MODE=segmented, SEG_SCAN=8, VALUE_BYTES=8192
 
 - write64k-segmented
 
-## Performance Patterns Analysis  - RECENCY_MODE=segmented, SEG_SCAN=8, VALUE_BYTES=65536
-
-
+## Performance Patterns Analysis - RECENCY_MODE=segmented, SEG_SCAN=8, VALUE_BYTES=65536
 
 ### 1KB Baseline PerformanceYou can also run baseline sieve/second-chance with smaller values:
 
@@ -205,10 +192,9 @@ These are encoded in `benchmarks/compare-lru-harness.mjs` via PROFILE and other 
 ### 64KB Large Value Performance
 
 - **Convergence**: All SecureLRU variants cluster around:Other knobs used by the harness for fairness/noise control:
-
   - GET: 162K–203K ops/s- QUIET_SECURELRU_WARN=1: quiets wipe-queue fallback warnings in benchmarks
 
-  - SET/UPDATE/DELETE: 16K–24K ops/s- WIPE_*: deferred wipe scheduling and caps (profiles set reasonable defaults)
+  - SET/UPDATE/DELETE: 16K–24K ops/s- WIPE\_\*: deferred wipe scheduling and caps (profiles set reasonable defaults)
 
 - **SIEVE Advantage**: More consistent performance across operations- PROMOTE_MODE/PROMOTE_RATE: sampled promotions to reduce promotion overhead in read-heavy tasks
 
@@ -248,13 +234,11 @@ These are encoded in `benchmarks/compare-lru-harness.mjs` via PROFILE and other 
 
 - **SIEVE (tuned) with copy**: GET ≈ 162K ops/s, SET ≈ 19K ops/s- 8KB SIEVE:
 
-- **Performance impact**: Copying reduces GET by ~92%, SET by ~42%  - PROFILE=write8k-sieve BENCH_RUNS=1 npm run -s bench:compare
+- **Performance impact**: Copying reduces GET by ~92%, SET by ~42% - PROFILE=write8k-sieve BENCH_RUNS=1 npm run -s bench:compare
 
 - 64KB Second-chance:
 
-### Key Findings  - PROFILE=write64k-second-chance BENCH_RUNS=1 npm run -s bench:compare
-
-
+### Key Findings - PROFILE=write64k-second-chance BENCH_RUNS=1 npm run -s bench:compare
 
 **Copying Overhead Quantified:**## Tips
 
@@ -263,8 +247,6 @@ These are encoded in `benchmarks/compare-lru-harness.mjs` via PROFILE and other 
 - **64KB**: Copying reduces performance by 40-90%- Use VALUE_BYTES to simulate realistic payload sizes and observe SIEVE’s relative gains under write-heavy workloads.
 
 - **Scaling**: The larger the value, the more copying dominates total cost- Keep BENCH_RUNS low for sweeps; aggregate multiple outputs for stability if needed.
-
-
 
 **Pure Algorithm Performance:**## Recent results snapshot and anomalies
 
@@ -310,8 +292,6 @@ These are encoded in `benchmarks/compare-lru-harness.mjs` via PROFILE and other 
 
 - **Design Decision**: Intentional security-first approach, not performance bug- second-chance (1KB baseline) → results-compare-lru-1756831060834.json
 
-
-
 ## Algorithm Selection GuidanceHigh-level patterns observed:
 
 - 8KB payloads: SIEVE (tuned) improves relative SET/UPDATE vs second-chance; second-chance still leads pure GET.
@@ -325,19 +305,17 @@ These are encoded in `benchmarks/compare-lru-harness.mjs` via PROFILE and other 
 - Balanced operation performance needed across SET/GET/UPDATE/DELETEAnomalies and explanations:
 
 - **Settings**: `RECENCY_MODE=sieve, SEG_SCAN=8`- Missing SET/UPDATE (null metrics) on 64KB profiles (initial runs):
-
   - Cause: VALUE_BYTES exceeded default caps (maxEntryBytes=512KB ok, but total maxBytes=1MB and large KEYSPACE can exhaust capacity; errors inside tasks lead to unrecorded metrics).
 
-### Choose Second-Chance When:  - Mitigation: profiles now set KEYSPACE=1000 and allow MAX_ENTRY_BYTES/MAX_BYTES overrides. Re-runs produced valid metrics.
+### Choose Second-Chance When: - Mitigation: profiles now set KEYSPACE=1000 and allow MAX_ENTRY_BYTES/MAX_BYTES overrides. Re-runs produced valid metrics.
 
 - Read-heavy workloads (high GET:SET ratio)- SecureLRU much slower than third-party for large values:
 
-- Small values (≤1KB) where copying overhead is minimal  - Cause: SecureLRU copies on set/get by default; others typically do not. Copying 8–64KB per op is expensive but chosen for OWASP ASVS L3 safety (immutability, isolation). You can temporarily test with copyOnGet=false/copyOnSet=false to compare apples-to-apples, but keep defaults in production.
+- Small values (≤1KB) where copying overhead is minimal - Cause: SecureLRU copies on set/get by default; others typically do not. Copying 8–64KB per op is expensive but chosen for OWASP ASVS L3 safety (immutability, isolation). You can temporarily test with copyOnGet=false/copyOnSet=false to compare apples-to-apples, but keep defaults in production.
 
 - Maximum GET throughput is priority- One-off slowdown for “SecureLRU (tuned)” in write8k-second-chance:
 
-- **Settings**: `RECENCY_MODE=second-chance, SEG_SCAN=8, SC_MAX_ROT=8`  - Symptom: Very low ops/sec with exactly 2000 samples captured.
-
+- **Settings**: `RECENCY_MODE=second-chance, SEG_SCAN=8, SC_MAX_ROT=8` - Symptom: Very low ops/sec with exactly 2000 samples captured.
   - Hypothesis: GC pressure or incidental background work in that process; not reproduced in other runs. If it recurs, try BENCH_RUNS=3 and WIPE_SCHED=microtask, or re-run just that profile.
 
 ### Choose Segmented When:
@@ -358,17 +336,17 @@ The comprehensive performance analysis demonstrates that SecureLRU achieves its 
 
 - 1KB baselines
 
-1. **Security-First Architecture**: OWASP ASVS L3 compliance maintained with quantified performance trade-offs  - GET: second-chance (tuned) ≈ 1.69M ops/s edges out SIEVE (tuned) ≈ 1.54M ops/s.
+1. **Security-First Architecture**: OWASP ASVS L3 compliance maintained with quantified performance trade-offs - GET: second-chance (tuned) ≈ 1.69M ops/s edges out SIEVE (tuned) ≈ 1.54M ops/s.
 
-2. **Algorithm Quality**: Core implementations perform competitively when isolated from copying overhead  - SET/UPDATE: both near 200–232K ops/s depending on profile.
+2. **Algorithm Quality**: Core implementations perform competitively when isolated from copying overhead - SET/UPDATE: both near 200–232K ops/s depending on profile.
 
 3. **Practical Guidance**: Clear selection criteria provided for different workload characteristics
 
 4. **No Hidden Issues**: Thorough testing reveals no performance bugs or algorithmic inefficiencies- 8KB write-heavy profiles
 
-  - SIEVE (tuned) delivered the highest GET in write8k-sieve (≈ 1.63M ops/s) with SET ≈ 104K; second-chance (tuned) also strong on GET (≈ 1.92M in the second-chance profile) with SET ≈ 111K.
+- SIEVE (tuned) delivered the highest GET in write8k-sieve (≈ 1.63M ops/s) with SET ≈ 104K; second-chance (tuned) also strong on GET (≈ 1.92M in the second-chance profile) with SET ≈ 111K.
 
-The 10-20x performance cost for large values represents an **intentional security design decision** rather than implementation deficiency, enabling secure-by-default caching for security-sensitive applications.  - Note on “SecureLRU (tuned)” vs “SecureLRU”: tuned profiles may promote on get more aggressively; this turns some GETs into writes and can reduce GET throughput by design. Not an anomaly.
+The 10-20x performance cost for large values represents an **intentional security design decision** rather than implementation deficiency, enabling secure-by-default caching for security-sensitive applications. - Note on “SecureLRU (tuned)” vs “SecureLRU”: tuned profiles may promote on get more aggressively; this turns some GETs into writes and can reduce GET throughput by design. Not an anomaly.
 
 - 64KB write-heavy profiles (with MAX_ENTRY_BYTES=98304, MAX_BYTES=20,000,000, KEYSPACE=1000)
   - Across SIEVE/second-chance/segmented, SecureLRU variants cluster around:
@@ -380,14 +358,17 @@ The 10-20x performance cost for large values represents an **intentional securit
   - Show 1.5M–2.2M+ ops/s even at 64KB because they typically return references and avoid copying. SecureLRU defaults to copyOnSet/copyOnGet for isolation (OWASP ASVS L3), which imposes a per-op copy cost proportional to VALUE_BYTES. For apples-to-apples, you can temporarily disable copying in a test variant.
 
 Overall guidance
+
 - Small/read-heavy: pick second-chance (SEG_SCAN≈8, SC_MAX_ROT≈8) for the fastest GET.
 - Large/write-heavy: pick SIEVE (SEG_SCAN≈8). The larger the values, the more SIEVE’s relative benefits show up in update-heavy flows.
 - Ensure capacity knobs match VALUE_BYTES to avoid masked errors and missing metrics.
+
 # SecureLRU Performance Profiles
 
 This guide explains the built-in cache profiles, how to pick one, and how to customize options securely. All profiles preserve OWASP ASVS L3 posture: zeroization on eviction, defensive copying by default, SharedArrayBuffer rejection, TTL enforcement, and bounded synchronous evictions.
 
 What changed recently:
+
 - We now distinguish between two SIEVE-like modes:
   - second-chance: a classic second-chance policy using a reference bit and bounded move-to-tail rotations on eviction.
   - sieve: canonical SIEVE with a persistent hand pointer — no node moves; only reference bits are flipped.
@@ -425,10 +406,10 @@ What changed recently:
 TypeScript:
 
 ```ts
-import { SecureLRUCache } from '@david-osipov/security-kit';
-import { resolveSecureLRUOptions } from '@david-osipov/security-kit/src/config';
+import { SecureLRUCache } from "@david-osipov/security-kit";
+import { resolveSecureLRUOptions } from "@david-osipov/security-kit/src/config";
 
-const opts = resolveSecureLRUOptions('balanced');
+const opts = resolveSecureLRUOptions("balanced");
 const cache = new SecureLRUCache<string, Uint8Array>({
   maxEntries: 1000,
   maxBytes: 2 * 1024 * 1024,
@@ -441,24 +422,25 @@ const cache = new SecureLRUCache<string, Uint8Array>({
 You can set your own profiles or override the default:
 
 ```ts
-import { setSecureLRUProfiles } from '@david-osipov/security-kit/src/config';
+import { setSecureLRUProfiles } from "@david-osipov/security-kit/src/config";
 
 setSecureLRUProfiles({
-  defaultProfile: 'balanced',
+  defaultProfile: "balanced",
   profiles: [
     {
-      name: 'my-fast',
-      description: 'Higher throughput with sampled promotion and larger wipe batches',
+      name: "my-fast",
+      description:
+        "Higher throughput with sampled promotion and larger wipe batches",
       options: {
         ttlAutopurge: true,
         ttlResolutionMs: 1000,
-        promoteOnGet: 'sampled',
+        promoteOnGet: "sampled",
         promoteOnGetSampleRate: 8,
         maxDeferredWipesPerFlush: 512,
-        deferredWipeScheduler: 'auto',
+        deferredWipeScheduler: "auto",
         deferredWipeTimeoutMs: 1,
         // recencyMode: 'lru' | 'segmented' | 'second-chance' | 'sieve'
-        recencyMode: 'lru',
+        recencyMode: "lru",
         // For segmented: window size to scan near the head during eviction
         segmentedEvictScan: 8,
         segmentRotateEveryOps: 10_000,
@@ -473,6 +455,7 @@ setSecureLRUProfiles({
 All options are merged directly into the `SecureLRUCache` constructor. See code docs for the full list.
 
 Important defaults:
+
 - VerifiedByteCache forces `promoteOnGet: 'always'` to provide deterministic strict-LRU semantics regardless of profile.
 - TTL clocks use `Date.now()` and respect `ttlResolutionMs` to bound jitter; fake timers in tests are supported.
 
@@ -481,10 +464,10 @@ Important defaults:
 You can change the global default without redefining profiles:
 
 ```ts
-import { setSecureLRUProfiles } from '@david-osipov/security-kit/src/config';
+import { setSecureLRUProfiles } from "@david-osipov/security-kit/src/config";
 
 // Set default to a built-in profile name
-setSecureLRUProfiles({ defaultProfile: 'read-heavy-lru-coarse' });
+setSecureLRUProfiles({ defaultProfile: "read-heavy-lru-coarse" });
 ```
 
 ## Security notes

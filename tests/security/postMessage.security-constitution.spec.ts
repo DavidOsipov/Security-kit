@@ -5,7 +5,7 @@ import {
   validateTransferables,
   TransferableNotAllowedError,
   __test_toNullProto,
-  __test_resetForUnitTests
+  __test_resetForUnitTests,
 } from "../../src/postMessage";
 import { InvalidParameterError } from "../../src/errors";
 
@@ -21,7 +21,7 @@ const mockWindow = {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  Object.defineProperty(global, 'window', {
+  Object.defineProperty(global, "window", {
     writable: true,
     value: mockWindow,
   });
@@ -29,7 +29,9 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.restoreAllMocks();
-  try { __test_resetForUnitTests(); } catch {}
+  try {
+    __test_resetForUnitTests();
+  } catch {}
 });
 
 /**
@@ -44,26 +46,26 @@ afterEach(() => {
 test("Pillar 1: Zero Trust - Transferables are rejected by default", () => {
   const payload = {
     message: "test",
-    port: ({ constructor: { name: 'MessagePort' } } as any),
+    port: { constructor: { name: "MessagePort" } } as any,
   };
 
   // Debug: Check MessagePort properties
-  console.log('MessagePort constructor.name:', payload.port.constructor.name);
-  console.log('MessagePort type:', typeof payload.port);
-  
+  console.log("MessagePort constructor.name:", payload.port.constructor.name);
+  console.log("MessagePort type:", typeof payload.port);
+
   // Manual test of the logic
   const testValidate = (obj: any, depth = 0): boolean => {
     if (depth > 10) return false;
     if (obj === null || typeof obj !== "object") return false;
-    
+
     const ctorName = obj?.constructor?.name;
     console.log(`Depth ${depth}: Checking ${ctorName} for ${obj}`);
-    
+
     if (ctorName === "MessagePort") {
-      console.log('Found MessagePort, should throw error');
+      console.log("Found MessagePort, should throw error");
       return true; // Found MessagePort
     }
-    
+
     if (Array.isArray(obj)) {
       for (const item of obj) {
         if (testValidate(item, depth + 1)) return true;
@@ -76,9 +78,9 @@ test("Pillar 1: Zero Trust - Transferables are rejected by default", () => {
     }
     return false;
   };
-  
-  console.log('Manual test result:', testValidate(payload));
-  
+
+  console.log("Manual test result:", testValidate(payload));
+
   // Test that TransferableNotAllowedError can be thrown
   expect(() => {
     throw new TransferableNotAllowedError("test error");
@@ -166,7 +168,7 @@ test("Pillar 2: Hardened Simplicity - Constant-time validation", () => {
   const validPayload = { message: "valid" };
   const invalidPayload = {
     message: "invalid",
-    port: ({ constructor: { name: 'MessagePort' } } as any),
+    port: { constructor: { name: "MessagePort" } } as any,
   };
 
   // Both should complete in similar time (no early exit timing leaks)
@@ -212,7 +214,7 @@ test("Pillar 2: Hardened Simplicity - Circular references prevented", () => {
 test("Pillar 3: Ergonomic API - Transferables require explicit opt-in", () => {
   const payload = {
     message: "test",
-    port: ({ constructor: { name: 'MessagePort' } } as any),
+    port: { constructor: { name: "MessagePort" } } as any,
   };
 
   // Implementation may throw a TransferableNotAllowedError or a generic Error
@@ -281,7 +283,7 @@ test("Pillar 3: Ergonomic API - TypedArrays require explicit opt-in", () => {
 test("Pillar 3: Ergonomic API - Clear error messages for security violations", () => {
   const payload = {
     message: "test",
-    port: ({ constructor: { name: 'MessagePort' } } as any),
+    port: { constructor: { name: "MessagePort" } } as any,
   };
 
   try {
@@ -318,7 +320,7 @@ test("Pillar 4: Absolute Testability - Adversarial inputs handled", () => {
     new Set(),
   ];
 
-  adversarialInputs.forEach(input => {
+  adversarialInputs.forEach((input) => {
     // Either sanitization succeeds and returns a null-proto object, or it
     // rejects with InvalidParameterError for unsupported host types. Accept
     // both behaviors to make tests resilient to internal refactors.
@@ -340,11 +342,11 @@ test("Pillar 4: Absolute Testability - Nested transferables validation", () => {
       level2: {
         data: "safe",
         // Use a fake MessagePort to avoid host-specific behavior in tests
-        port: ({ constructor: { name: 'MessagePort' } } as any),
+        port: { constructor: { name: "MessagePort" } } as any,
       },
       array: [
         "safe",
-        { nestedPort: ({ constructor: { name: 'MessagePort' } } as any) },
+        { nestedPort: { constructor: { name: "MessagePort" } } as any },
         new ArrayBuffer(8),
       ],
     },
@@ -379,7 +381,7 @@ test("Pillar 4: Absolute Testability - Memory hygiene with secureWipe", () => {
 test("Security: TOCTOU prevention - Transferables validated before processing", () => {
   const payload = {
     message: "test",
-    port: ({ constructor: { name: 'MessagePort' } } as any),
+    port: { constructor: { name: "MessagePort" } } as any,
   };
   // We can't reliably spy on the module-local validateTransferables function
   // from this test environment. Assert the observable contract instead:
@@ -415,7 +417,7 @@ test("Security: Input validation - All parameters validated", () => {
       payload: validPayload,
       targetOrigin: "https://example.com",
       wireFormat: "structured",
-    })
+    }),
   ).toThrow(InvalidParameterError);
 
   // Invalid targetOrigin
@@ -425,7 +427,7 @@ test("Security: Input validation - All parameters validated", () => {
       payload: validPayload,
       targetOrigin: "*",
       wireFormat: "structured",
-    })
+    }),
   ).toThrow(InvalidParameterError);
 
   // Invalid targetOrigin format
@@ -435,7 +437,7 @@ test("Security: Input validation - All parameters validated", () => {
       payload: validPayload,
       targetOrigin: "invalid-origin",
       wireFormat: "structured",
-    })
+    }),
   ).toThrow(InvalidParameterError);
 });
 

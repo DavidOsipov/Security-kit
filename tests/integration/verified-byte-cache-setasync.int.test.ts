@@ -2,8 +2,8 @@
 
 // Comprehensive integration test for VerifiedByteCache.setAsync cooperative eviction behavior
 
-import { describe, it, expect, beforeEach } from 'vitest';
-import { VerifiedByteCache } from '../../src/secure-lru-cache';
+import { describe, it, expect, beforeEach } from "vitest";
+import { VerifiedByteCache } from "../../src/secure-lru-cache";
 
 // Helper to create test data
 function makeBytes(size: number, fill: number = 0): Uint8Array {
@@ -11,53 +11,55 @@ function makeBytes(size: number, fill: number = 0): Uint8Array {
 }
 
 // Helper to measure async operation time
-async function timeAsync<T>(fn: () => Promise<T>): Promise<{ result: T; duration: number }> {
+async function timeAsync<T>(
+  fn: () => Promise<T>,
+): Promise<{ result: T; duration: number }> {
   const start = performance.now();
   const result = await fn();
   const duration = performance.now() - start;
   return { result, duration };
 }
 
-describe('VerifiedByteCache.setAsync comprehensive integration', () => {
+describe("VerifiedByteCache.setAsync comprehensive integration", () => {
   beforeEach(() => {
     // Clear cache before each test to ensure clean state
     VerifiedByteCache.clear();
   });
 
-  describe('Basic setAsync functionality', () => {
-    it('setAsync works for basic operations', async () => {
+  describe("Basic setAsync functionality", () => {
+    it("setAsync works for basic operations", async () => {
       const SMALL_BYTES = new Uint8Array(64).fill(1);
-      await VerifiedByteCache.setAsync('basic-key', SMALL_BYTES);
+      await VerifiedByteCache.setAsync("basic-key", SMALL_BYTES);
 
-      const retrieved = VerifiedByteCache.get('basic-key');
+      const retrieved = VerifiedByteCache.get("basic-key");
       expect(retrieved).toBeInstanceOf(Uint8Array);
       expect(retrieved?.length).toBe(SMALL_BYTES.length);
       expect(retrieved).not.toBe(SMALL_BYTES); // Should be a copy
     });
 
-    it('setAsync respects TTL', async () => {
+    it("setAsync respects TTL", async () => {
       const SMALL_BYTES = new Uint8Array(64).fill(1);
-      await VerifiedByteCache.setAsync('ttl-key', SMALL_BYTES);
-      expect(VerifiedByteCache.get('ttl-key')).toBeDefined();
+      await VerifiedByteCache.setAsync("ttl-key", SMALL_BYTES);
+      expect(VerifiedByteCache.get("ttl-key")).toBeDefined();
 
       // Wait for TTL to expire (default is 2 minutes, but we'll use a shorter one)
-      await new Promise(resolve => setTimeout(resolve, 100));
+      await new Promise((resolve) => setTimeout(resolve, 100));
       // Note: VerifiedByteCache uses default TTL from config, which may be longer
       // This test mainly ensures setAsync doesn't break TTL functionality
     });
 
-    it('setAsync handles large payloads', async () => {
+    it("setAsync handles large payloads", async () => {
       const largePayload = makeBytes(50000, 42); // 50KB
-      await VerifiedByteCache.setAsync('large-key', largePayload);
+      await VerifiedByteCache.setAsync("large-key", largePayload);
 
-      const retrieved = VerifiedByteCache.get('large-key');
+      const retrieved = VerifiedByteCache.get("large-key");
       expect(retrieved?.length).toBe(50000);
       expect(retrieved?.[0]).toBe(42);
     });
   });
 
-  describe('Cooperative eviction under pressure', () => {
-    it('setAsync succeeds where sync set would fail due to eviction budget', async () => {
+  describe("Cooperative eviction under pressure", () => {
+    it("setAsync succeeds where sync set would fail due to eviction budget", async () => {
       // Fill cache to near capacity (maxEntries is 10)
       const entries = 8;
       for (let i = 0; i < entries; i++) {
@@ -71,26 +73,28 @@ describe('VerifiedByteCache.setAsync comprehensive integration', () => {
       const largeEntry = makeBytes(50000, 99);
 
       // Sync set should succeed (cache handles eviction)
-      VerifiedByteCache.set('pressure-test-sync', largeEntry);
+      VerifiedByteCache.set("pressure-test-sync", largeEntry);
 
-      const retrievedSync = VerifiedByteCache.get('pressure-test-sync');
+      const retrievedSync = VerifiedByteCache.get("pressure-test-sync");
       expect(retrievedSync).toBeDefined();
       expect(retrievedSync?.length).toBe(50000);
 
       // Async set should also succeed
-      await VerifiedByteCache.setAsync('pressure-test-async', largeEntry);
+      await VerifiedByteCache.setAsync("pressure-test-async", largeEntry);
 
-      const retrievedAsync = VerifiedByteCache.get('pressure-test-async');
+      const retrievedAsync = VerifiedByteCache.get("pressure-test-async");
       expect(retrievedAsync).toBeDefined();
       expect(retrievedAsync?.length).toBe(50000);
 
       const statsAfter = VerifiedByteCache.getStats();
       expect(statsAfter.size).toBeGreaterThan(0);
       // Evictions may or may not occur depending on cache state
-      expect(statsAfter.evictions).toBeGreaterThanOrEqual(statsBefore.evictions);
+      expect(statsAfter.evictions).toBeGreaterThanOrEqual(
+        statsBefore.evictions,
+      );
     });
 
-    it('setAsync maintains cache invariants during cooperative eviction', async () => {
+    it("setAsync maintains cache invariants during cooperative eviction", async () => {
       // Create a scenario requiring eviction (maxEntries is 10)
       const initialEntries = 9;
       for (let i = 0; i < initialEntries; i++) {
@@ -102,7 +106,7 @@ describe('VerifiedByteCache.setAsync comprehensive integration', () => {
 
       // Add a very large entry that will evict some items
       const hugeEntry = makeBytes(100000, 255);
-      await VerifiedByteCache.setAsync('huge-entry', hugeEntry);
+      await VerifiedByteCache.setAsync("huge-entry", hugeEntry);
 
       const statsAfter = VerifiedByteCache.getStats();
 
@@ -110,10 +114,12 @@ describe('VerifiedByteCache.setAsync comprehensive integration', () => {
       expect(statsAfter.size).toBeGreaterThan(0);
       expect(statsAfter.totalBytes).toBeGreaterThan(0);
       // Evictions may or may not occur depending on cache state and recency mode
-      expect(statsAfter.evictions).toBeGreaterThanOrEqual(statsBefore.evictions);
+      expect(statsAfter.evictions).toBeGreaterThanOrEqual(
+        statsBefore.evictions,
+      );
 
       // Verify the large entry was stored
-      const retrieved = VerifiedByteCache.get('huge-entry');
+      const retrieved = VerifiedByteCache.get("huge-entry");
       expect(retrieved?.length).toBe(100000);
       expect(retrieved?.[0]).toBe(255);
 
@@ -122,15 +128,15 @@ describe('VerifiedByteCache.setAsync comprehensive integration', () => {
     });
   });
 
-  describe('Concurrent setAsync operations', () => {
-    it('handles multiple concurrent setAsync operations', async () => {
+  describe("Concurrent setAsync operations", () => {
+    it("handles multiple concurrent setAsync operations", async () => {
       const concurrentOps = 5; // Limited by maxEntries of 10
       const promises = [];
 
       for (let i = 0; i < concurrentOps; i++) {
         const promise = VerifiedByteCache.setAsync(
           `concurrent-${i}`,
-          makeBytes(1000 + i * 100, i % 256)
+          makeBytes(1000 + i * 100, i % 256),
         );
         promises.push(promise);
       }
@@ -155,7 +161,7 @@ describe('VerifiedByteCache.setAsync comprehensive integration', () => {
       expect(stats.setOps).toBeGreaterThanOrEqual(concurrentOps); // May include failed operations
     });
 
-    it('maintains consistency under high concurrency with eviction pressure', async () => {
+    it("maintains consistency under high concurrency with eviction pressure", async () => {
       // Pre-fill cache to create eviction pressure (maxEntries is 10)
       const prefillCount = 8;
       for (let i = 0; i < prefillCount; i++) {
@@ -169,7 +175,7 @@ describe('VerifiedByteCache.setAsync comprehensive integration', () => {
       for (let i = 0; i < concurrentOps; i++) {
         const promise = VerifiedByteCache.setAsync(
           `stress-${i}`,
-          makeBytes(3000 + i * 200, (i + 100) % 256)
+          makeBytes(3000 + i * 200, (i + 100) % 256),
         );
         promises.push(promise);
       }
@@ -197,14 +203,14 @@ describe('VerifiedByteCache.setAsync comprehensive integration', () => {
     });
   });
 
-  describe('Performance characteristics', () => {
-    it('setAsync has reasonable performance under normal conditions', async () => {
+  describe("Performance characteristics", () => {
+    it("setAsync has reasonable performance under normal conditions", async () => {
       const iterations = 5; // Limited by maxEntries of 10
       const times = [];
 
       for (let i = 0; i < iterations; i++) {
         const { duration } = await timeAsync(() =>
-          VerifiedByteCache.setAsync(`perf-${i}`, makeBytes(512, i % 256))
+          VerifiedByteCache.setAsync(`perf-${i}`, makeBytes(512, i % 256)),
         );
         times.push(duration);
       }
@@ -221,7 +227,7 @@ describe('VerifiedByteCache.setAsync comprehensive integration', () => {
       expect(stats.size).toBe(iterations);
     });
 
-    it('setAsync performance degrades gracefully under extreme pressure', async () => {
+    it("setAsync performance degrades gracefully under extreme pressure", async () => {
       // Create extreme pressure scenario (fill cache to capacity)
       const extremeEntries = 10;
       for (let i = 0; i < extremeEntries; i++) {
@@ -229,107 +235,109 @@ describe('VerifiedByteCache.setAsync comprehensive integration', () => {
       }
 
       const { duration } = await timeAsync(() =>
-        VerifiedByteCache.setAsync('extreme-test', makeBytes(10000, 255))
+        VerifiedByteCache.setAsync("extreme-test", makeBytes(10000, 255)),
       );
 
       // Should still complete in reasonable time despite pressure
       expect(duration).toBeLessThan(200); // Allow more time for extreme case
 
-      const retrieved = VerifiedByteCache.get('extreme-test');
+      const retrieved = VerifiedByteCache.get("extreme-test");
       expect(retrieved?.length).toBe(10000);
     });
   });
 
-  describe('Error handling and edge cases', () => {
-    it('setAsync handles invalid inputs appropriately', async () => {
+  describe("Error handling and edge cases", () => {
+    it("setAsync handles invalid inputs appropriately", async () => {
       const SMALL_BYTES = new Uint8Array(64).fill(1);
 
       // Invalid URL (empty string) - should be handled gracefully
       await expect(
-        VerifiedByteCache.setAsync('', SMALL_BYTES)
+        VerifiedByteCache.setAsync("", SMALL_BYTES),
       ).resolves.toBeUndefined();
 
       // Invalid URL (too long) - should throw
-      const longUrl = 'a'.repeat(3000);
+      const longUrl = "a".repeat(3000);
       await expect(
-        VerifiedByteCache.setAsync(longUrl, SMALL_BYTES)
-      ).rejects.toThrow('Invalid URL');
+        VerifiedByteCache.setAsync(longUrl, SMALL_BYTES),
+      ).rejects.toThrow("Invalid URL");
 
       // Invalid bytes (not Uint8Array) - should throw
       await expect(
-        VerifiedByteCache.setAsync('test', 'not bytes' as any)
-      ).rejects.toThrow('Invalid value');
+        VerifiedByteCache.setAsync("test", "not bytes" as any),
+      ).rejects.toThrow("Invalid value");
 
       // Empty bytes - should be handled gracefully (no explicit rejection)
       await expect(
-        VerifiedByteCache.setAsync('test', new Uint8Array(0))
+        VerifiedByteCache.setAsync("test", new Uint8Array(0)),
       ).resolves.toBeUndefined();
     });
 
-    it('setAsync handles SharedArrayBuffer rejection', async () => {
+    it("setAsync handles SharedArrayBuffer rejection", async () => {
       // Create a SharedArrayBuffer-backed view if available
-      if (typeof SharedArrayBuffer !== 'undefined') {
+      if (typeof SharedArrayBuffer !== "undefined") {
         const sab = new SharedArrayBuffer(64);
         const sabView = new Uint8Array(sab);
 
         await expect(
-          VerifiedByteCache.setAsync('sab-test', sabView)
-        ).rejects.toThrow('SharedArrayBuffer-backed views are not permitted');
+          VerifiedByteCache.setAsync("sab-test", sabView),
+        ).rejects.toThrow("SharedArrayBuffer-backed views are not permitted");
       }
     });
 
-    it('setAsync handles oversized entries', async () => {
+    it("setAsync handles oversized entries", async () => {
       // Entry larger than maxEntryBytes (default 512KB)
       const oversized = makeBytes(600000, 42); // 600KB
 
       await expect(
-        VerifiedByteCache.setAsync('oversized', oversized)
-      ).rejects.toThrow('Entry too large');
+        VerifiedByteCache.setAsync("oversized", oversized),
+      ).rejects.toThrow("Entry too large");
     });
   });
 
-  describe('Integration with other cache features', () => {
-    it('setAsync works with cache statistics', async () => {
+  describe("Integration with other cache features", () => {
+    it("setAsync works with cache statistics", async () => {
       const MEDIUM_BYTES = new Uint8Array(256).fill(2);
       const statsBefore = VerifiedByteCache.getStats();
 
-      await VerifiedByteCache.setAsync('stats-test', MEDIUM_BYTES);
+      await VerifiedByteCache.setAsync("stats-test", MEDIUM_BYTES);
 
       const statsAfter = VerifiedByteCache.getStats();
 
       expect(statsAfter.size).toBe(statsBefore.size + 1);
       expect(statsAfter.setOps).toBe(statsBefore.setOps + 1);
-      expect(statsAfter.totalBytes).toBe(statsBefore.totalBytes + MEDIUM_BYTES.length);
+      expect(statsAfter.totalBytes).toBe(
+        statsBefore.totalBytes + MEDIUM_BYTES.length,
+      );
     });
 
-    it('setAsync integrates with delete operations', async () => {
+    it("setAsync integrates with delete operations", async () => {
       const MEDIUM_BYTES = new Uint8Array(256).fill(2);
-      await VerifiedByteCache.setAsync('delete-test', MEDIUM_BYTES);
-      expect(VerifiedByteCache.get('delete-test')).toBeDefined();
+      await VerifiedByteCache.setAsync("delete-test", MEDIUM_BYTES);
+      expect(VerifiedByteCache.get("delete-test")).toBeDefined();
 
-      VerifiedByteCache.delete('delete-test');
-      expect(VerifiedByteCache.get('delete-test')).toBeUndefined();
+      VerifiedByteCache.delete("delete-test");
+      expect(VerifiedByteCache.get("delete-test")).toBeUndefined();
     });
 
-    it('setAsync works with clear operations', async () => {
+    it("setAsync works with clear operations", async () => {
       const SMALL_BYTES = new Uint8Array(64).fill(1);
       const MEDIUM_BYTES = new Uint8Array(256).fill(2);
 
-      await VerifiedByteCache.setAsync('clear-test-1', SMALL_BYTES);
-      await VerifiedByteCache.setAsync('clear-test-2', MEDIUM_BYTES);
+      await VerifiedByteCache.setAsync("clear-test-1", SMALL_BYTES);
+      await VerifiedByteCache.setAsync("clear-test-2", MEDIUM_BYTES);
 
       expect(VerifiedByteCache.getStats().size).toBe(2);
 
       VerifiedByteCache.clear();
 
       expect(VerifiedByteCache.getStats().size).toBe(0);
-      expect(VerifiedByteCache.get('clear-test-1')).toBeUndefined();
-      expect(VerifiedByteCache.get('clear-test-2')).toBeUndefined();
+      expect(VerifiedByteCache.get("clear-test-1")).toBeUndefined();
+      expect(VerifiedByteCache.get("clear-test-2")).toBeUndefined();
     });
   });
 
-  describe('Memory and resource management', () => {
-    it('setAsync properly manages memory during cooperative eviction', async () => {
+  describe("Memory and resource management", () => {
+    it("setAsync properly manages memory during cooperative eviction", async () => {
       // Track memory usage pattern during eviction
       const initialStats = VerifiedByteCache.getStats();
 
@@ -343,7 +351,7 @@ describe('VerifiedByteCache.setAsync comprehensive integration', () => {
       expect(filledStats.size).toBe(fillCount);
 
       // Add large entry that will cause evictions
-      await VerifiedByteCache.setAsync('memory-test', makeBytes(20000, 128));
+      await VerifiedByteCache.setAsync("memory-test", makeBytes(20000, 128));
 
       const finalStats = VerifiedByteCache.getStats();
 
@@ -351,61 +359,86 @@ describe('VerifiedByteCache.setAsync comprehensive integration', () => {
       expect(finalStats.totalBytes).toBeGreaterThan(0);
       expect(finalStats.totalBytes).toBeLessThanOrEqual(1048576); // 1MB limit
       // Evictions may or may not occur depending on cache state and recency mode
-      expect(finalStats.evictions).toBeGreaterThanOrEqual(initialStats.evictions);
+      expect(finalStats.evictions).toBeGreaterThanOrEqual(
+        initialStats.evictions,
+      );
 
       // Verify the new entry exists and old entries were properly evicted
-      expect(VerifiedByteCache.get('memory-test')).toBeDefined();
+      expect(VerifiedByteCache.get("memory-test")).toBeDefined();
     });
 
-    it('setAsync handles zero-length entries appropriately', async () => {
+    it("setAsync handles zero-length entries appropriately", async () => {
       // Zero-length entries are handled gracefully (no explicit rejection)
       await expect(
-        VerifiedByteCache.setAsync('zero-length', new Uint8Array(0))
+        VerifiedByteCache.setAsync("zero-length", new Uint8Array(0)),
       ).resolves.toBeUndefined();
     });
   });
 
-  describe('Boundary testing for cache limits', () => {
-    it('setAsync handles exact maxEntries boundary', async () => {
+  describe("Boundary testing for cache limits", () => {
+    it("setAsync handles exact maxEntries boundary", async () => {
       // Clear cache and add exactly maxEntries items
       VerifiedByteCache.clear();
       const maxEntries = 10; // Based on cache configuration
 
       // Add exactly maxEntries items
       for (let i = 0; i < maxEntries; i++) {
-        await VerifiedByteCache.setAsync(`boundary-${i}`, makeBytes(100, i % 256));
+        await VerifiedByteCache.setAsync(
+          `boundary-${i}`,
+          makeBytes(100, i % 256),
+        );
       }
 
       const statsAfterFill = VerifiedByteCache.getStats();
       expect(statsAfterFill.size).toBe(maxEntries);
 
       // Try to add one more - should trigger eviction
-      await VerifiedByteCache.setAsync('boundary-overflow', makeBytes(100, 255));
+      await VerifiedByteCache.setAsync(
+        "boundary-overflow",
+        makeBytes(100, 255),
+      );
 
       const statsAfterOverflow = VerifiedByteCache.getStats();
       expect(statsAfterOverflow.size).toBe(maxEntries); // Should still be maxEntries
-      expect(statsAfterOverflow.evictions).toBeGreaterThan(statsAfterFill.evictions);
+      expect(statsAfterOverflow.evictions).toBeGreaterThan(
+        statsAfterFill.evictions,
+      );
 
       // Verify the new entry exists
-      expect(VerifiedByteCache.get('boundary-overflow')).toBeDefined();
+      expect(VerifiedByteCache.get("boundary-overflow")).toBeDefined();
     });
 
-    it('setAsync handles maxBytes limit precisely', async () => {
+    it("setAsync handles maxBytes limit precisely", async () => {
       VerifiedByteCache.clear();
       const maxBytes = 1048576; // 1MB default
       const largeEntrySize = 100000; // 100KB - well under maxEntryBytes limit of 512KB
 
       // Add entries that approach the byte limit
-      await VerifiedByteCache.setAsync('bytes-test-1', makeBytes(largeEntrySize, 1));
-      await VerifiedByteCache.setAsync('bytes-test-2', makeBytes(largeEntrySize, 2));
-      await VerifiedByteCache.setAsync('bytes-test-3', makeBytes(largeEntrySize, 3));
-      await VerifiedByteCache.setAsync('bytes-test-4', makeBytes(largeEntrySize, 4));
+      await VerifiedByteCache.setAsync(
+        "bytes-test-1",
+        makeBytes(largeEntrySize, 1),
+      );
+      await VerifiedByteCache.setAsync(
+        "bytes-test-2",
+        makeBytes(largeEntrySize, 2),
+      );
+      await VerifiedByteCache.setAsync(
+        "bytes-test-3",
+        makeBytes(largeEntrySize, 3),
+      );
+      await VerifiedByteCache.setAsync(
+        "bytes-test-4",
+        makeBytes(largeEntrySize, 4),
+      );
 
       const stats = VerifiedByteCache.getStats();
       expect(stats.totalBytes).toBeLessThanOrEqual(maxBytes);
 
       // Adding another entry should work (may trigger eviction)
-      await VerifiedByteCache.setAsync('bytes-test-5', makeBytes(largeEntrySize, 5));
+      await VerifiedByteCache.setAsync(
+        "bytes-test-5",
+        makeBytes(largeEntrySize, 5),
+      );
 
       const finalStats = VerifiedByteCache.getStats();
       expect(finalStats.totalBytes).toBeLessThanOrEqual(maxBytes);
@@ -413,38 +446,38 @@ describe('VerifiedByteCache.setAsync comprehensive integration', () => {
       expect(finalStats.evictions).toBeGreaterThanOrEqual(stats.evictions);
     });
 
-    it('setAsync handles maxEntryBytes limit', async () => {
+    it("setAsync handles maxEntryBytes limit", async () => {
       const maxEntryBytes = 512000; // 512KB default
       const oversized = makeBytes(maxEntryBytes + 1000, 42);
 
       // Should reject entries larger than maxEntryBytes
       await expect(
-        VerifiedByteCache.setAsync('max-entry-test', oversized)
+        VerifiedByteCache.setAsync("max-entry-test", oversized),
       ).rejects.toThrow(/Entry too large|exceeds maximum/);
 
       // Should accept entries exactly at the limit
       const atLimit = makeBytes(maxEntryBytes, 42);
       await expect(
-        VerifiedByteCache.setAsync('at-limit-test', atLimit)
+        VerifiedByteCache.setAsync("at-limit-test", atLimit),
       ).resolves.toBeUndefined();
 
-      const retrieved = VerifiedByteCache.get('at-limit-test');
+      const retrieved = VerifiedByteCache.get("at-limit-test");
       expect(retrieved?.length).toBe(maxEntryBytes);
     });
 
-    it('setAsync handles minimum valid entry size', async () => {
+    it("setAsync handles minimum valid entry size", async () => {
       // Test with smallest possible valid entry
       const minimalEntry = new Uint8Array(1).fill(42);
-      await VerifiedByteCache.setAsync('minimal-test', minimalEntry);
+      await VerifiedByteCache.setAsync("minimal-test", minimalEntry);
 
-      const retrieved = VerifiedByteCache.get('minimal-test');
+      const retrieved = VerifiedByteCache.get("minimal-test");
       expect(retrieved?.length).toBe(1);
       expect(retrieved?.[0]).toBe(42);
     });
   });
 
-  describe('Race condition and timing-sensitive scenarios', () => {
-    it('setAsync handles rapid sequential operations without corruption', async () => {
+  describe("Race condition and timing-sensitive scenarios", () => {
+    it("setAsync handles rapid sequential operations without corruption", async () => {
       VerifiedByteCache.clear();
       const operations = 20;
       const results = [];
@@ -467,7 +500,7 @@ describe('VerifiedByteCache.setAsync comprehensive integration', () => {
       expect(stats.setOps).toBeGreaterThanOrEqual(operations);
     });
 
-    it('setAsync handles interleaved read/write operations', async () => {
+    it("setAsync handles interleaved read/write operations", async () => {
       VerifiedByteCache.clear();
 
       // Interleave setAsync and get operations
@@ -479,7 +512,10 @@ describe('VerifiedByteCache.setAsync comprehensive integration', () => {
         keys.push(key);
 
         // Start async set operation
-        const setPromise = VerifiedByteCache.setAsync(key, makeBytes(128, i % 256));
+        const setPromise = VerifiedByteCache.setAsync(
+          key,
+          makeBytes(128, i % 256),
+        );
         promises.push(setPromise);
 
         // Immediately try to read (may or may not succeed depending on timing)
@@ -502,15 +538,18 @@ describe('VerifiedByteCache.setAsync comprehensive integration', () => {
       });
     });
 
-    it('setAsync handles concurrent operations with same key', async () => {
+    it("setAsync handles concurrent operations with same key", async () => {
       VerifiedByteCache.clear();
-      const key = 'same-key-race';
+      const key = "same-key-race";
       const concurrentOps = 5;
       const promises = [];
 
       // Launch multiple concurrent operations on the same key
       for (let i = 0; i < concurrentOps; i++) {
-        const promise = VerifiedByteCache.setAsync(key, makeBytes(256, i % 256));
+        const promise = VerifiedByteCache.setAsync(
+          key,
+          makeBytes(256, i % 256),
+        );
         promises.push(promise);
       }
 
@@ -525,7 +564,7 @@ describe('VerifiedByteCache.setAsync comprehensive integration', () => {
       expect(stats.setOps).toBeGreaterThanOrEqual(concurrentOps);
     });
 
-    it('setAsync maintains consistency during eviction storms', async () => {
+    it("setAsync maintains consistency during eviction storms", async () => {
       VerifiedByteCache.clear();
 
       // Create a scenario with many rapid evictions
@@ -539,7 +578,7 @@ describe('VerifiedByteCache.setAsync comprehensive integration', () => {
       for (let i = 0; i < 5; i++) {
         const promise = VerifiedByteCache.setAsync(
           `storm-${i}`,
-          makeBytes(10000 + i * 1000, (i + 50) % 256)
+          makeBytes(10000 + i * 1000, (i + 50) % 256),
         );
         stormPromises.push(promise);
       }
@@ -553,26 +592,26 @@ describe('VerifiedByteCache.setAsync comprehensive integration', () => {
       expect(stats.totalBytes).toBeLessThanOrEqual(1048576); // 1MB limit
 
       // Should be able to perform normal operations after the storm
-      await VerifiedByteCache.setAsync('post-storm', makeBytes(512, 100));
-      expect(VerifiedByteCache.get('post-storm')).toBeDefined();
+      await VerifiedByteCache.setAsync("post-storm", makeBytes(512, 100));
+      expect(VerifiedByteCache.get("post-storm")).toBeDefined();
     });
   });
 
-  describe('Recovery and resilience scenarios', () => {
-    it('setAsync recovers gracefully from previous errors', async () => {
+  describe("Recovery and resilience scenarios", () => {
+    it("setAsync recovers gracefully from previous errors", async () => {
       // First, trigger an error
       const oversized = makeBytes(600000, 42); // 600KB > 512KB limit
       await expect(
-        VerifiedByteCache.setAsync('error-recovery', oversized)
+        VerifiedByteCache.setAsync("error-recovery", oversized),
       ).rejects.toThrow();
 
       // Cache should still be functional after the error
       const validEntry = makeBytes(1024, 100);
       await expect(
-        VerifiedByteCache.setAsync('recovery-test', validEntry)
+        VerifiedByteCache.setAsync("recovery-test", validEntry),
       ).resolves.toBeUndefined();
 
-      const retrieved = VerifiedByteCache.get('recovery-test');
+      const retrieved = VerifiedByteCache.get("recovery-test");
       expect(retrieved?.length).toBe(1024);
       expect(retrieved?.[0]).toBe(100);
 
@@ -581,16 +620,20 @@ describe('VerifiedByteCache.setAsync comprehensive integration', () => {
       expect(stats.size).toBeGreaterThanOrEqual(1);
     });
 
-    it('setAsync handles partial failure scenarios', async () => {
+    it("setAsync handles partial failure scenarios", async () => {
       VerifiedByteCache.clear();
 
       // Mix of valid and invalid operations
       const operations = [
-        { key: 'valid-1', data: makeBytes(512, 1), shouldSucceed: true },
-        { key: '', data: makeBytes(512, 2), shouldSucceed: false }, // Empty key
-        { key: 'valid-2', data: makeBytes(512, 3), shouldSucceed: true },
-        { key: 'a'.repeat(3000), data: makeBytes(512, 4), shouldSucceed: false }, // Too long key
-        { key: 'valid-3', data: makeBytes(512, 5), shouldSucceed: true },
+        { key: "valid-1", data: makeBytes(512, 1), shouldSucceed: true },
+        { key: "", data: makeBytes(512, 2), shouldSucceed: false }, // Empty key
+        { key: "valid-2", data: makeBytes(512, 3), shouldSucceed: true },
+        {
+          key: "a".repeat(3000),
+          data: makeBytes(512, 4),
+          shouldSucceed: false,
+        }, // Too long key
+        { key: "valid-3", data: makeBytes(512, 5), shouldSucceed: true },
       ];
 
       const results = [];
@@ -599,7 +642,11 @@ describe('VerifiedByteCache.setAsync comprehensive integration', () => {
           await VerifiedByteCache.setAsync(op.key, op.data);
           results.push({ key: op.key, success: true });
         } catch (error) {
-          results.push({ key: op.key, success: false, error: error instanceof Error ? error.message : String(error) });
+          results.push({
+            key: op.key,
+            success: false,
+            error: error instanceof Error ? error.message : String(error),
+          });
         }
       }
 
@@ -611,16 +658,19 @@ describe('VerifiedByteCache.setAsync comprehensive integration', () => {
       expect(results[4].success).toBe(true); // valid-3 should succeed
 
       // Valid entries should be retrievable
-      expect(VerifiedByteCache.get('valid-1')).toBeDefined();
-      expect(VerifiedByteCache.get('valid-2')).toBeDefined();
-      expect(VerifiedByteCache.get('valid-3')).toBeDefined();
+      expect(VerifiedByteCache.get("valid-1")).toBeDefined();
+      expect(VerifiedByteCache.get("valid-2")).toBeDefined();
+      expect(VerifiedByteCache.get("valid-3")).toBeDefined();
     });
 
-    it('setAsync maintains cache integrity after clear during operation', async () => {
+    it("setAsync maintains cache integrity after clear during operation", async () => {
       VerifiedByteCache.clear();
 
       // Start an async operation
-      const setPromise = VerifiedByteCache.setAsync('integrity-test', makeBytes(1024, 42));
+      const setPromise = VerifiedByteCache.setAsync(
+        "integrity-test",
+        makeBytes(1024, 42),
+      );
 
       // Clear cache while operation is in progress
       VerifiedByteCache.clear();
@@ -634,10 +684,10 @@ describe('VerifiedByteCache.setAsync comprehensive integration', () => {
 
       // The entry might or might not be there depending on timing, but cache should not be corrupted
       expect(() => VerifiedByteCache.getStats()).not.toThrow();
-      expect(() => VerifiedByteCache.get('integrity-test')).not.toThrow();
+      expect(() => VerifiedByteCache.get("integrity-test")).not.toThrow();
     });
 
-    it('setAsync handles memory pressure gracefully', async () => {
+    it("setAsync handles memory pressure gracefully", async () => {
       VerifiedByteCache.clear();
 
       // Simulate memory pressure by filling cache repeatedly
@@ -649,7 +699,7 @@ describe('VerifiedByteCache.setAsync comprehensive integration', () => {
         for (let i = 0; i < entriesPerRound; i++) {
           const promise = VerifiedByteCache.setAsync(
             `pressure-${round}-${i}`,
-            makeBytes(2000 + round * 100, (round * entriesPerRound + i) % 256)
+            makeBytes(2000 + round * 100, (round * entriesPerRound + i) % 256),
           );
           promises.push(promise);
         }
@@ -663,25 +713,28 @@ describe('VerifiedByteCache.setAsync comprehensive integration', () => {
         expect(stats.totalBytes).toBeLessThanOrEqual(1048576);
 
         // Should be able to add more entries
-        await VerifiedByteCache.setAsync(`recovery-${round}`, makeBytes(512, round % 256));
+        await VerifiedByteCache.setAsync(
+          `recovery-${round}`,
+          makeBytes(512, round % 256),
+        );
         expect(VerifiedByteCache.get(`recovery-${round}`)).toBeDefined();
       }
     });
 
-    it('setAsync recovers from SharedArrayBuffer detection failures', async () => {
+    it("setAsync recovers from SharedArrayBuffer detection failures", async () => {
       // Test recovery when SAB detection encounters edge cases
-      if (typeof SharedArrayBuffer !== 'undefined') {
+      if (typeof SharedArrayBuffer !== "undefined") {
         const sab = new SharedArrayBuffer(64);
         const sabView = new Uint8Array(sab);
 
         // First operation should fail
         await expect(
-          VerifiedByteCache.setAsync('sab-fail', sabView)
+          VerifiedByteCache.setAsync("sab-fail", sabView),
         ).rejects.toThrow();
 
         // Subsequent valid operations should work
-        await VerifiedByteCache.setAsync('post-sab', makeBytes(256, 100));
-        expect(VerifiedByteCache.get('post-sab')).toBeDefined();
+        await VerifiedByteCache.setAsync("post-sab", makeBytes(256, 100));
+        expect(VerifiedByteCache.get("post-sab")).toBeDefined();
 
         // Cache stats should still be accessible
         const stats = VerifiedByteCache.getStats();
@@ -690,10 +743,10 @@ describe('VerifiedByteCache.setAsync comprehensive integration', () => {
     });
   });
 
-  describe('Advanced SharedArrayBuffer detection edge cases', () => {
-    it('setAsync detects various SharedArrayBuffer-backed views', async () => {
-      if (typeof SharedArrayBuffer === 'undefined') {
-        console.warn('SharedArrayBuffer not available, skipping SAB tests');
+  describe("Advanced SharedArrayBuffer detection edge cases", () => {
+    it("setAsync detects various SharedArrayBuffer-backed views", async () => {
+      if (typeof SharedArrayBuffer === "undefined") {
+        console.warn("SharedArrayBuffer not available, skipping SAB tests");
         return;
       }
 
@@ -701,27 +754,29 @@ describe('VerifiedByteCache.setAsync comprehensive integration', () => {
 
       // Test different view types on SharedArrayBuffer
       const viewTypes = [
-        { name: 'Uint8Array', view: new Uint8Array(sab) },
-        { name: 'Uint16Array', view: new Uint16Array(sab) },
-        { name: 'Uint32Array', view: new Uint32Array(sab) },
-        { name: 'Int8Array', view: new Int8Array(sab) },
-        { name: 'Int16Array', view: new Int16Array(sab) },
-        { name: 'Int32Array', view: new Int32Array(sab) },
-        { name: 'Float32Array', view: new Float32Array(sab, 0, 16) },
-        { name: 'Float64Array', view: new Float64Array(sab, 0, 8) },
+        { name: "Uint8Array", view: new Uint8Array(sab) },
+        { name: "Uint16Array", view: new Uint16Array(sab) },
+        { name: "Uint32Array", view: new Uint32Array(sab) },
+        { name: "Int8Array", view: new Int8Array(sab) },
+        { name: "Int16Array", view: new Int16Array(sab) },
+        { name: "Int32Array", view: new Int32Array(sab) },
+        { name: "Float32Array", view: new Float32Array(sab, 0, 16) },
+        { name: "Float64Array", view: new Float64Array(sab, 0, 8) },
       ];
 
       for (const { name, view } of viewTypes) {
         // The cache may reject non-Uint8Array types before SAB detection
         await expect(
-          VerifiedByteCache.setAsync(`sab-${name}`, view as Uint8Array)
-        ).rejects.toThrow(/Invalid value|SharedArrayBuffer.*not permitted|must be/);
+          VerifiedByteCache.setAsync(`sab-${name}`, view as Uint8Array),
+        ).rejects.toThrow(
+          /Invalid value|SharedArrayBuffer.*not permitted|must be/,
+        );
       }
     });
 
-    it('setAsync handles SharedArrayBuffer with offsets and lengths', async () => {
-      if (typeof SharedArrayBuffer === 'undefined') {
-        console.warn('SharedArrayBuffer not available, skipping SAB tests');
+    it("setAsync handles SharedArrayBuffer with offsets and lengths", async () => {
+      if (typeof SharedArrayBuffer === "undefined") {
+        console.warn("SharedArrayBuffer not available, skipping SAB tests");
         return;
       }
 
@@ -732,17 +787,17 @@ describe('VerifiedByteCache.setAsync comprehensive integration', () => {
       const partialView = new Uint8Array(sab, 0, 50); // first 50 bytes
 
       await expect(
-        VerifiedByteCache.setAsync('sab-offset', offsetView)
+        VerifiedByteCache.setAsync("sab-offset", offsetView),
       ).rejects.toThrow(/SharedArrayBuffer.*not permitted/);
 
       await expect(
-        VerifiedByteCache.setAsync('sab-partial', partialView)
+        VerifiedByteCache.setAsync("sab-partial", partialView),
       ).rejects.toThrow(/SharedArrayBuffer.*not permitted/);
     });
 
-    it('setAsync distinguishes regular ArrayBuffer from SharedArrayBuffer', async () => {
-      if (typeof SharedArrayBuffer === 'undefined') {
-        console.warn('SharedArrayBuffer not available, skipping SAB tests');
+    it("setAsync distinguishes regular ArrayBuffer from SharedArrayBuffer", async () => {
+      if (typeof SharedArrayBuffer === "undefined") {
+        console.warn("SharedArrayBuffer not available, skipping SAB tests");
         return;
       }
 
@@ -752,10 +807,10 @@ describe('VerifiedByteCache.setAsync comprehensive integration', () => {
       regularView.fill(42);
 
       await expect(
-        VerifiedByteCache.setAsync('regular-buffer', regularView)
+        VerifiedByteCache.setAsync("regular-buffer", regularView),
       ).resolves.toBeUndefined();
 
-      const retrieved = VerifiedByteCache.get('regular-buffer');
+      const retrieved = VerifiedByteCache.get("regular-buffer");
       expect(retrieved?.length).toBe(256);
       expect(retrieved?.[0]).toBe(42);
 
@@ -765,13 +820,13 @@ describe('VerifiedByteCache.setAsync comprehensive integration', () => {
       sharedView.fill(84);
 
       await expect(
-        VerifiedByteCache.setAsync('shared-buffer', sharedView)
+        VerifiedByteCache.setAsync("shared-buffer", sharedView),
       ).rejects.toThrow(/SharedArrayBuffer.*not permitted/);
     });
 
-    it('setAsync handles edge cases in SAB detection', async () => {
-      if (typeof SharedArrayBuffer === 'undefined') {
-        console.warn('SharedArrayBuffer not available, skipping SAB tests');
+    it("setAsync handles edge cases in SAB detection", async () => {
+      if (typeof SharedArrayBuffer === "undefined") {
+        console.warn("SharedArrayBuffer not available, skipping SAB tests");
         return;
       }
 
@@ -780,7 +835,7 @@ describe('VerifiedByteCache.setAsync comprehensive integration', () => {
       const emptyView = new Uint8Array(emptySab);
 
       await expect(
-        VerifiedByteCache.setAsync('empty-sab', emptyView)
+        VerifiedByteCache.setAsync("empty-sab", emptyView),
       ).rejects.toThrow(/SharedArrayBuffer.*not permitted/);
 
       // Test with very large SharedArrayBuffer
@@ -788,15 +843,15 @@ describe('VerifiedByteCache.setAsync comprehensive integration', () => {
       const largeView = new Uint8Array(largeSab);
 
       await expect(
-        VerifiedByteCache.setAsync('large-sab', largeView)
+        VerifiedByteCache.setAsync("large-sab", largeView),
       ).rejects.toThrow(/SharedArrayBuffer.*not permitted/);
 
       // Verify normal operations still work after SAB rejections
-      await VerifiedByteCache.setAsync('post-sab-normal', makeBytes(512, 100));
-      expect(VerifiedByteCache.get('post-sab-normal')).toBeDefined();
+      await VerifiedByteCache.setAsync("post-sab-normal", makeBytes(512, 100));
+      expect(VerifiedByteCache.get("post-sab-normal")).toBeDefined();
     });
 
-    it('setAsync handles cross-realm ArrayBuffer scenarios', async () => {
+    it("setAsync handles cross-realm ArrayBuffer scenarios", async () => {
       // Test with ArrayBuffer from different context (if available)
       // This simulates cross-realm scenarios that might occur in some environments
 
@@ -806,15 +861,18 @@ describe('VerifiedByteCache.setAsync comprehensive integration', () => {
 
       // Should work normally
       await expect(
-        VerifiedByteCache.setAsync('cross-realm-regular', regularView)
+        VerifiedByteCache.setAsync("cross-realm-regular", regularView),
       ).resolves.toBeUndefined();
 
-      const retrieved = VerifiedByteCache.get('cross-realm-regular');
+      const retrieved = VerifiedByteCache.get("cross-realm-regular");
       expect(retrieved?.length).toBe(128);
       expect(retrieved?.[0]).toBe(42);
 
       // Test with detached ArrayBuffer (if supported)
-      if (typeof regularBuffer.transfer === 'function' || typeof regularBuffer.transferToFixedLength === 'function') {
+      if (
+        typeof regularBuffer.transfer === "function" ||
+        typeof regularBuffer.transferToFixedLength === "function"
+      ) {
         try {
           // Detach the buffer
           const detachedView = new Uint8Array(regularBuffer.slice(0)); // Create a copy before detaching
@@ -822,18 +880,18 @@ describe('VerifiedByteCache.setAsync comprehensive integration', () => {
           // The detached buffer scenario would depend on the specific implementation
           // This tests that the cache handles various buffer states gracefully
           await expect(
-            VerifiedByteCache.setAsync('detached-test', detachedView)
+            VerifiedByteCache.setAsync("detached-test", detachedView),
           ).resolves.toBeUndefined();
         } catch (error) {
           // Detached buffer handling may vary by implementation
-          console.log('Detached buffer test skipped:', error);
+          console.log("Detached buffer test skipped:", error);
         }
       }
     });
   });
 
-  describe('TTL integration with setAsync operations', () => {
-    it('setAsync respects TTL for cache entries', async () => {
+  describe("TTL integration with setAsync operations", () => {
+    it("setAsync respects TTL for cache entries", async () => {
       VerifiedByteCache.clear();
 
       const shortTtlEntry = makeBytes(256, 42);
@@ -841,19 +899,19 @@ describe('VerifiedByteCache.setAsync comprehensive integration', () => {
 
       // Set entries with different TTL values (if supported by the cache)
       // Note: VerifiedByteCache may use default TTL, so we'll test basic TTL behavior
-      await VerifiedByteCache.setAsync('ttl-short', shortTtlEntry);
-      await VerifiedByteCache.setAsync('ttl-long', longTtlEntry);
+      await VerifiedByteCache.setAsync("ttl-short", shortTtlEntry);
+      await VerifiedByteCache.setAsync("ttl-long", longTtlEntry);
 
       // Both should be available immediately
-      expect(VerifiedByteCache.get('ttl-short')).toBeDefined();
-      expect(VerifiedByteCache.get('ttl-long')).toBeDefined();
+      expect(VerifiedByteCache.get("ttl-short")).toBeDefined();
+      expect(VerifiedByteCache.get("ttl-long")).toBeDefined();
 
       // Wait a short time (TTL behavior depends on cache implementation)
-      await new Promise(resolve => setTimeout(resolve, 100));
+      await new Promise((resolve) => setTimeout(resolve, 100));
 
       // Entries should still be available (or expired based on cache TTL settings)
-      const shortResult = VerifiedByteCache.get('ttl-short');
-      const longResult = VerifiedByteCache.get('ttl-long');
+      const shortResult = VerifiedByteCache.get("ttl-short");
+      const longResult = VerifiedByteCache.get("ttl-long");
 
       // The exact TTL behavior depends on the cache implementation
       // We mainly verify that setAsync doesn't break TTL functionality
@@ -867,15 +925,15 @@ describe('VerifiedByteCache.setAsync comprehensive integration', () => {
       }
     });
 
-    it('setAsync handles TTL edge cases', async () => {
+    it("setAsync handles TTL edge cases", async () => {
       VerifiedByteCache.clear();
 
       // Test with zero-length entry and TTL
       const emptyEntry = new Uint8Array(0);
-      await VerifiedByteCache.setAsync('ttl-empty', emptyEntry);
+      await VerifiedByteCache.setAsync("ttl-empty", emptyEntry);
 
       // Should handle gracefully (empty entries might be treated specially)
-      const emptyResult = VerifiedByteCache.get('ttl-empty');
+      const emptyResult = VerifiedByteCache.get("ttl-empty");
       if (emptyResult !== undefined) {
         expect(emptyResult.length).toBe(0);
       }
@@ -883,7 +941,10 @@ describe('VerifiedByteCache.setAsync comprehensive integration', () => {
       // Test rapid TTL expiration scenarios
       const rapidEntries = 5;
       for (let i = 0; i < rapidEntries; i++) {
-        await VerifiedByteCache.setAsync(`ttl-rapid-${i}`, makeBytes(64, i % 256));
+        await VerifiedByteCache.setAsync(
+          `ttl-rapid-${i}`,
+          makeBytes(64, i % 256),
+        );
       }
 
       // All should be retrievable immediately
@@ -895,28 +956,36 @@ describe('VerifiedByteCache.setAsync comprehensive integration', () => {
       }
     });
 
-    it('setAsync maintains TTL consistency during eviction', async () => {
+    it("setAsync maintains TTL consistency during eviction", async () => {
       VerifiedByteCache.clear();
 
       // Fill cache with entries that have TTL
       const prefillCount = 8;
       for (let i = 0; i < prefillCount; i++) {
-        await VerifiedByteCache.setAsync(`ttl-prefill-${i}`, makeBytes(512, i % 256));
+        await VerifiedByteCache.setAsync(
+          `ttl-prefill-${i}`,
+          makeBytes(512, i % 256),
+        );
       }
 
       const statsBefore = VerifiedByteCache.getStats();
 
       // Add a large entry that will trigger eviction
-      await VerifiedByteCache.setAsync('ttl-eviction-test', makeBytes(20000, 255));
+      await VerifiedByteCache.setAsync(
+        "ttl-eviction-test",
+        makeBytes(20000, 255),
+      );
 
       const statsAfter = VerifiedByteCache.getStats();
 
       // Verify eviction occurred and cache remains consistent
-      expect(statsAfter.evictions).toBeGreaterThanOrEqual(statsBefore.evictions);
+      expect(statsAfter.evictions).toBeGreaterThanOrEqual(
+        statsBefore.evictions,
+      );
       expect(statsAfter.size).toBeGreaterThan(0);
 
       // The large entry should be present
-      const largeResult = VerifiedByteCache.get('ttl-eviction-test');
+      const largeResult = VerifiedByteCache.get("ttl-eviction-test");
       expect(largeResult?.length).toBe(20000);
       expect(largeResult?.[0]).toBe(255);
 
@@ -924,7 +993,7 @@ describe('VerifiedByteCache.setAsync comprehensive integration', () => {
       // This is normal behavior and should not affect TTL consistency
     });
 
-    it('setAsync works with concurrent TTL operations', async () => {
+    it("setAsync works with concurrent TTL operations", async () => {
       VerifiedByteCache.clear();
 
       // Launch multiple setAsync operations with potential TTL interactions
@@ -934,7 +1003,7 @@ describe('VerifiedByteCache.setAsync comprehensive integration', () => {
       for (let i = 0; i < concurrentTtlOps; i++) {
         const promise = VerifiedByteCache.setAsync(
           `concurrent-ttl-${i}`,
-          makeBytes(256 + i * 32, (i + 100) % 256)
+          makeBytes(256 + i * 32, (i + 100) % 256),
         );
         promises.push(promise);
       }
@@ -955,8 +1024,8 @@ describe('VerifiedByteCache.setAsync comprehensive integration', () => {
     });
   });
 
-  describe('Cache warming and cold start scenarios', () => {
-    it('setAsync performance during cache warming', async () => {
+  describe("Cache warming and cold start scenarios", () => {
+    it("setAsync performance during cache warming", async () => {
       VerifiedByteCache.clear();
 
       const warmingEntries = 10;
@@ -965,7 +1034,7 @@ describe('VerifiedByteCache.setAsync comprehensive integration', () => {
       // Measure performance during cache warming phase
       for (let i = 0; i < warmingEntries; i++) {
         const { duration } = await timeAsync(() =>
-          VerifiedByteCache.setAsync(`warm-${i}`, makeBytes(1024, i % 256))
+          VerifiedByteCache.setAsync(`warm-${i}`, makeBytes(1024, i % 256)),
         );
         times.push(duration);
       }
@@ -982,7 +1051,7 @@ describe('VerifiedByteCache.setAsync comprehensive integration', () => {
       expect(stats.size).toBe(warmingEntries);
     });
 
-    it('setAsync handles cold start with immediate load', async () => {
+    it("setAsync handles cold start with immediate load", async () => {
       VerifiedByteCache.clear();
 
       // Simulate cold start with immediate high load
@@ -992,7 +1061,7 @@ describe('VerifiedByteCache.setAsync comprehensive integration', () => {
       for (let i = 0; i < coldStartOps; i++) {
         const promise = VerifiedByteCache.setAsync(
           `cold-${i}`,
-          makeBytes(2048 + i * 256, (i + 200) % 256)
+          makeBytes(2048 + i * 256, (i + 200) % 256),
         );
         promises.push(promise);
       }
@@ -1011,7 +1080,7 @@ describe('VerifiedByteCache.setAsync comprehensive integration', () => {
       }
     });
 
-    it('setAsync maintains performance under sustained load', async () => {
+    it("setAsync maintains performance under sustained load", async () => {
       VerifiedByteCache.clear();
 
       const sustainedRounds = 3;
@@ -1025,8 +1094,8 @@ describe('VerifiedByteCache.setAsync comprehensive integration', () => {
           const { duration } = await timeAsync(() =>
             VerifiedByteCache.setAsync(
               `sustained-${round}-${i}`,
-              makeBytes(512 + round * 64, (round * opsPerRound + i) % 256)
-            )
+              makeBytes(512 + round * 64, (round * opsPerRound + i) % 256),
+            ),
           );
           roundTimes.push(duration);
         }
@@ -1034,7 +1103,7 @@ describe('VerifiedByteCache.setAsync comprehensive integration', () => {
         allTimes.push(...roundTimes);
 
         // Brief pause between rounds
-        await new Promise(resolve => setTimeout(resolve, 10));
+        await new Promise((resolve) => setTimeout(resolve, 10));
       }
 
       const avgTime = allTimes.reduce((a, b) => a + b, 0) / allTimes.length;
@@ -1050,7 +1119,7 @@ describe('VerifiedByteCache.setAsync comprehensive integration', () => {
       expect(stats.size).toBeLessThanOrEqual(sustainedRounds * opsPerRound);
     });
 
-    it('setAsync handles cache warming with eviction pressure', async () => {
+    it("setAsync handles cache warming with eviction pressure", async () => {
       VerifiedByteCache.clear();
 
       // Pre-warm cache to near capacity
@@ -1067,8 +1136,8 @@ describe('VerifiedByteCache.setAsync comprehensive integration', () => {
         const { duration } = await timeAsync(() =>
           VerifiedByteCache.setAsync(
             `warm-evict-${i}`,
-            makeBytes(3000 + i * 200, (i + 150) % 256)
-          )
+            makeBytes(3000 + i * 200, (i + 150) % 256),
+          ),
         );
         times.push(duration);
       }
@@ -1094,7 +1163,7 @@ describe('VerifiedByteCache.setAsync comprehensive integration', () => {
       expect(foundCount).toBeGreaterThan(0);
     });
 
-    it('setAsync recovers quickly from cache clear during operation', async () => {
+    it("setAsync recovers quickly from cache clear during operation", async () => {
       VerifiedByteCache.clear();
 
       // Start multiple operations
@@ -1104,7 +1173,7 @@ describe('VerifiedByteCache.setAsync comprehensive integration', () => {
       for (let i = 0; i < recoveryOps; i++) {
         const promise = VerifiedByteCache.setAsync(
           `recovery-${i}`,
-          makeBytes(1024, i % 256)
+          makeBytes(1024, i % 256),
         );
         promises.push(promise);
       }
@@ -1116,9 +1185,9 @@ describe('VerifiedByteCache.setAsync comprehensive integration', () => {
       await Promise.all(promises);
 
       // Cache should be functional immediately after
-      await VerifiedByteCache.setAsync('post-clear', makeBytes(512, 100));
+      await VerifiedByteCache.setAsync("post-clear", makeBytes(512, 100));
 
-      const result = VerifiedByteCache.get('post-clear');
+      const result = VerifiedByteCache.get("post-clear");
       expect(result?.length).toBe(512);
       expect(result?.[0]).toBe(100);
 

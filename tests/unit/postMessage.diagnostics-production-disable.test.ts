@@ -15,7 +15,9 @@ afterEach(() => {
     __test_resetForUnitTests();
   } catch {}
   try {
-    if (typeof (state as any).__test_resetCryptoStateForUnitTests === "function")
+    if (
+      typeof (state as any).__test_resetCryptoStateForUnitTests === "function"
+    )
       (state as any).__test_resetCryptoStateForUnitTests();
   } catch {}
 });

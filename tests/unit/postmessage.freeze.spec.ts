@@ -24,10 +24,15 @@ describe("postMessage freezePayload option", () => {
     (globalThis as any).window = mockWin;
     let received: any = null;
     const postMessage = await import("../../src/postMessage");
-    const listener = (postMessage as any).createSecurePostMessageListener(
-      { allowedOrigins: ["https://trusted.example.com"], onMessage: (d: unknown) => (received = d), validate: () => true },
+    const listener = (postMessage as any).createSecurePostMessageListener({
+      allowedOrigins: ["https://trusted.example.com"],
+      onMessage: (d: unknown) => (received = d),
+      validate: () => true,
+    });
+    mockWin.postMessage(
+      JSON.stringify({ a: 1 }),
+      "https://trusted.example.com",
     );
-    mockWin.postMessage(JSON.stringify({ a: 1 }), "https://trusted.example.com");
     expect(received).not.toBeNull();
     expect(Object.isFrozen(received)).toBe(true);
   });
@@ -38,10 +43,16 @@ describe("postMessage freezePayload option", () => {
     (globalThis as any).window = mockWin;
     let received: any = null;
     const postMessage = await import("../../src/postMessage");
-    const listener = (postMessage as any).createSecurePostMessageListener(
-      { allowedOrigins: ["https://trusted.example.com"], onMessage: (d: unknown) => (received = d), validate: () => true, freezePayload: false },
+    const listener = (postMessage as any).createSecurePostMessageListener({
+      allowedOrigins: ["https://trusted.example.com"],
+      onMessage: (d: unknown) => (received = d),
+      validate: () => true,
+      freezePayload: false,
+    });
+    mockWin.postMessage(
+      JSON.stringify({ a: 1 }),
+      "https://trusted.example.com",
     );
-    mockWin.postMessage(JSON.stringify({ a: 1 }), "https://trusted.example.com");
     expect(received).not.toBeNull();
     // Should allow mutation
     (received as any).b = 2;

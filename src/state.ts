@@ -427,13 +427,10 @@ export const __test_resetCryptoStateForUnitTests: undefined | (() => void) =
     ? (() => {
         // runtime guard to prevent accidental execution in production
         // import lazily to avoid cycles at module load time
-        // Use a typed require to avoid `any` leakage into the surrounding scope
-        // while still loading the test guard lazily in test-only paths.
-        const _developmentGuards = require("./development-guards") as {
-          readonly assertTestApiAllowed: () => void;
-        };
-        _developmentGuards.assertTestApiAllowed();
-        return () => {
+        // Use dynamic import for ES modules
+        return async () => {
+          const _developmentGuards = await import("./development-guards");
+          _developmentGuards.assertTestApiAllowed();
           _cachedCrypto = undefined;
           _cryptoPromise = undefined;
           _cryptoState = CryptoState.Unconfigured;
@@ -486,8 +483,31 @@ export const getInternalTestUtilities = getInternalTestUtils;
 
 // Small test helper to inspect cached crypto in unit tests when allowed.
 export function __test_getCachedCrypto(): Crypto | null | undefined {
+  // For test environment, always return cached crypto
+  if (process.env["NODE_ENV"] === "test") {
+    return _cachedCrypto;
+  }
+  // Check compile-time flag
   if (typeof __TEST__ !== "undefined" && __TEST__) {
     return _cachedCrypto;
   }
+  // Also check runtime flag for test environments
+  const globalTestFlag = (globalThis as { readonly __TEST__?: boolean })
+    .__TEST__;
+  if (globalTestFlag === true) {
+    return _cachedCrypto;
+  }
   return undefined;
+}
+
+// Test helper to set cached crypto for testing
+export function __test_setCachedCrypto(crypto: Crypto | undefined): void {
+  if (process.env["NODE_ENV"] === "test") {
+    _cachedCrypto = crypto;
+    if (crypto) {
+      _cryptoState = CryptoState.Configured;
+    } else {
+      _cryptoState = CryptoState.Unconfigured;
+    }
+  }
 }

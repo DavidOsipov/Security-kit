@@ -16,9 +16,14 @@ test("handler sanitizes thrown validator errors and logs a warn", async () => {
   const listener = (postMessage as any).createSecurePostMessageListener({
     allowedOrigins: ["https://example.com"],
     onMessage: () => {},
-    validate: () => { throw new Error("secret-stack"); }
+    validate: () => {
+      throw new Error("secret-stack");
+    },
   });
-  const ev = new MessageEvent("message", { data: JSON.stringify({}), origin: "https://example.com" });
+  const ev = new MessageEvent("message", {
+    data: JSON.stringify({}),
+    origin: "https://example.com",
+  });
   const spy = vi.spyOn(console, "warn").mockImplementation(() => {});
   window.dispatchEvent(ev as any);
   expect(spy).toHaveBeenCalled();

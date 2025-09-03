@@ -7,7 +7,11 @@ import type { INonceStore } from "./verify-api-request-signature.js";
 
 /** Minimal Redis client subset used by this store. */
 export type RedisLike = {
-  set(key: string, value: string, opts: { NX?: boolean; PX?: number }): Promise<"OK" | null>;
+  set(
+    key: string,
+    value: string,
+    opts: { NX?: boolean; PX?: number },
+  ): Promise<"OK" | null>;
   pExpire(key: string, ttlMs: number): Promise<number>; // 1 if timeout set, 0 otherwise
   del(key: string): Promise<number>;
   exists?(key: string): Promise<number>; // optional: 1 if exists, 0 otherwise
@@ -40,23 +44,44 @@ export class RedisNonceStore implements INonceStore {
   }
 
   async store(kid: string, nonce: string, ttlMs: number): Promise<void> {
-    const res = await this.#redis.set(this.#key(kid, nonce), "1", { PX: Math.max(1, Math.floor(ttlMs)) });
-    if (res !== "OK") throw new Error("RedisNonceStore.store: failed to set key");
+    const res = await this.#redis.set(this.#key(kid, nonce), "1", {
+      PX: Math.max(1, Math.floor(ttlMs)),
+    });
+    if (res !== "OK")
+      throw new Error("RedisNonceStore.store: failed to set key");
   }
 
-  async storeIfNotExists(kid: string, nonce: string, ttlMs: number): Promise<boolean> {
-    const res = await this.#redis.set(this.#key(kid, nonce), "1", { NX: true, PX: Math.max(1, Math.floor(ttlMs)) });
+  async storeIfNotExists(
+    kid: string,
+    nonce: string,
+    ttlMs: number,
+  ): Promise<boolean> {
+    const res = await this.#redis.set(this.#key(kid, nonce), "1", {
+      NX: true,
+      PX: Math.max(1, Math.floor(ttlMs)),
+    });
     return res === "OK";
   }
 
-  async reserve(kid: string, nonce: string, reserveTtlMs: number): Promise<boolean> {
-    const res = await this.#redis.set(this.#key(kid, nonce), "1", { NX: true, PX: Math.max(1, Math.floor(reserveTtlMs)) });
+  async reserve(
+    kid: string,
+    nonce: string,
+    reserveTtlMs: number,
+  ): Promise<boolean> {
+    const res = await this.#redis.set(this.#key(kid, nonce), "1", {
+      NX: true,
+      PX: Math.max(1, Math.floor(reserveTtlMs)),
+    });
     return res === "OK";
   }
 
   async finalize(kid: string, nonce: string, ttlMs: number): Promise<void> {
-    const updated = await this.#redis.pExpire(this.#key(kid, nonce), Math.max(1, Math.floor(ttlMs)));
-    if (updated !== 1) throw new Error("RedisNonceStore.finalize: key missing during finalize");
+    const updated = await this.#redis.pExpire(
+      this.#key(kid, nonce),
+      Math.max(1, Math.floor(ttlMs)),
+    );
+    if (updated !== 1)
+      throw new Error("RedisNonceStore.finalize: key missing during finalize");
   }
 
   async delete(kid: string, nonce: string): Promise<void> {

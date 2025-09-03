@@ -25,7 +25,11 @@ test("_assertTestApiAllowedInline returns when environment accessor throws", asy
   } finally {
     // Restore original descriptor
     if (originalDesc) {
-      Object.defineProperty(envModule.environment, "isProduction", originalDesc);
+      Object.defineProperty(
+        envModule.environment,
+        "isProduction",
+        originalDesc,
+      );
     }
   }
 });

@@ -30,30 +30,37 @@ describe("dom.ts coverage targets", () => {
   });
 
   it("promiseWithTimeout rejects on timeout", async () => {
-  const mod: any = await import("../../src/dom");
-  // Create a promise that resolves after fake timer delay instead of real setTimeout
-  const slow = new Promise((res) => {
-    vi.useFakeTimers();
-    setTimeout(() => res("ok"), 50);
-  });
-  const p = mod.__test_promiseWithTimeout(slow as Promise<unknown>, 10, "boom");
-  // Attach a noop catch immediately to avoid unhandled rejection warnings
-  // when the timeout fires before the test attaches assertions.
-  p.catch(() => {});
-  try {
-    // Advance all timers so the timeout fires deterministically under fake timers
-    await vi.runAllTimersAsync();
-    // Ensure any microtask-scheduled handlers (Promise.resolve().then) run
-    await Promise.resolve();
-  } finally {
-    // Switch back to real timers before performing the assertion that awaits the promise
-    vi.useRealTimers();
-  }
-  await expect(p).rejects.toThrow("boom");
+    const mod: any = await import("../../src/dom");
+    // Create a promise that resolves after fake timer delay instead of real setTimeout
+    const slow = new Promise((res) => {
+      vi.useFakeTimers();
+      setTimeout(() => res("ok"), 50);
+    });
+    const p = mod.__test_promiseWithTimeout(
+      slow as Promise<unknown>,
+      10,
+      "boom",
+    );
+    // Attach a noop catch immediately to avoid unhandled rejection warnings
+    // when the timeout fires before the test attaches assertions.
+    p.catch(() => {});
+    try {
+      // Advance all timers so the timeout fires deterministically under fake timers
+      await vi.runAllTimersAsync();
+      // Ensure any microtask-scheduled handlers (Promise.resolve().then) run
+      await Promise.resolve();
+    } finally {
+      // Switch back to real timers before performing the assertion that awaits the promise
+      vi.useRealTimers();
+    }
+    await expect(p).rejects.toThrow("boom");
   });
 
   it("createDefaultDOMValidator normalizes sets and getDefaultDOMValidator returns singleton", () => {
-  const dv = createDefaultDOMValidator({ allowedRootSelectors: new Set(["#main-content"]), forbiddenRoots: new Set(["body"]) });
+    const dv = createDefaultDOMValidator({
+      allowedRootSelectors: new Set(["#main-content"]),
+      forbiddenRoots: new Set(["body"]),
+    });
     expect(dv).toBeDefined();
     const d2 = getDefaultDOMValidator();
     expect(d2).toBeDefined();
@@ -69,7 +76,9 @@ describe("dom.ts coverage targets", () => {
     vi.stubGlobal("crypto", {} as any);
     // Provide a fake node:crypto module via importer override to ensure the node path runs
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (mod.__test_sha256Hex as any).__test_importOverride = async (spec: string) => {
+    (mod.__test_sha256Hex as any).__test_importOverride = async (
+      spec: string,
+    ) => {
       if (spec === "node:crypto") {
         return {
           createHash: () => ({ update: () => ({ digest: () => "deadbeef" }) }),
@@ -82,7 +91,9 @@ describe("dom.ts coverage targets", () => {
       const res = await mod.__test_sha256Hex("input");
       expect(res).toBe("deadbeef");
     } finally {
-      try { delete (mod.__test_sha256Hex as any).__test_importOverride; } catch {}
+      try {
+        delete (mod.__test_sha256Hex as any).__test_importOverride;
+      } catch {}
     }
   });
 
@@ -101,17 +112,24 @@ describe("dom.ts coverage targets", () => {
       return Promise.reject(new Error("no"));
     };
 
-    const dv = createDefaultDOMValidator({ emitSelectorHash: true, auditHook: async (e) => { events.push(e); } });
+    const dv = createDefaultDOMValidator({
+      emitSelectorHash: true,
+      auditHook: async (e) => {
+        events.push(e);
+      },
+    });
 
     // Cause a validation failure by using a disallowed pseudo-class
-    await expect(async () => dv.validateSelectorSyntax(":has(.x)" as unknown as string)).rejects.toThrow();
+    await expect(async () =>
+      dv.validateSelectorSyntax(":has(.x)" as unknown as string),
+    ).rejects.toThrow();
 
-  // Wait briefly for async follow-up audit to run
-  try {
-    await vi.runAllTimersAsync();
-  } finally {
-    vi.useRealTimers();
-  }
+    // Wait briefly for async follow-up audit to run
+    try {
+      await vi.runAllTimersAsync();
+    } finally {
+      vi.useRealTimers();
+    }
 
     // We should have at least the base event and the follow-up hash event
     expect(events.length).toBeGreaterThanOrEqual(1);

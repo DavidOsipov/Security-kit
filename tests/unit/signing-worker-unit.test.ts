@@ -14,8 +14,12 @@ vi.mock("../../src/config", () => ({
 
 // Mock encoding utilities
 vi.mock("../../src/encoding-utils", () => ({
-  isLikelyBase64: vi.fn((str: string) => str.length > 0 && /^[A-Za-z0-9+/]*={0,2}$/.test(str)),
-  isLikelyBase64Url: vi.fn((str: string) => str.length > 0 && /^[A-Za-z0-9_-]*$/.test(str)),
+  isLikelyBase64: vi.fn(
+    (str: string) => str.length > 0 && /^[A-Za-z0-9+/]*={0,2}$/.test(str),
+  ),
+  isLikelyBase64Url: vi.fn(
+    (str: string) => str.length > 0 && /^[A-Za-z0-9_-]*$/.test(str),
+  ),
 }));
 
 // Import the worker module to test its functions
@@ -80,10 +84,10 @@ describe("signing-worker unit tests", () => {
   describe("comprehensive validation testing", () => {
     it("should test multiple validation scenarios to increase coverage", () => {
       const validate = workerModule.__test_validateHandshakeNonce;
-      
+
       // Test various scenarios to exercise different code paths
       expect(validate!("SGVsbG8gV29ybGQ=")).toBe(true); // base64
-      expect(validate!("SGVsbG8gV29ybGQ")).toBe(true);  // base64url
+      expect(validate!("SGVsbG8gV29ybGQ")).toBe(true); // base64url
       expect(validate!("48656c6c6f20576f726c64")).toBe(true); // hex
       expect(validate!("")).toBe(false); // empty
       expect(validate!("invalid@chars!")).toBe(false); // invalid
@@ -92,7 +96,7 @@ describe("signing-worker unit tests", () => {
 
     it("should handle edge cases in validation", () => {
       const validate = workerModule.__test_validateHandshakeNonce;
-      
+
       // Test edge cases
       expect(validate!("A")).toBe(true); // minimal valid
       expect(validate!("1")).toBe(true); // hex digit

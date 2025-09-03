@@ -1,8 +1,8 @@
-import { describe, beforeEach, afterEach, test, expect, vi } from 'vitest';
+import { describe, beforeEach, afterEach, test, expect, vi } from "vitest";
 
 // RULE-ID: deterministic-async
 
-describe('Scheduler deterministic timers', () => {
+describe("Scheduler deterministic timers", () => {
   beforeEach(() => {
     vi.useFakeTimers();
   });
@@ -11,7 +11,7 @@ describe('Scheduler deterministic timers', () => {
     vi.useRealTimers();
   });
 
-  test('setTimeout scheduled task runs after advancing timers', async () => {
+  test("setTimeout scheduled task runs after advancing timers", async () => {
     const cb = vi.fn();
     setTimeout(cb, 100);
 

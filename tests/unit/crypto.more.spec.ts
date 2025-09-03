@@ -32,7 +32,9 @@ function makeFakeCrypto(opts?: {
 
 describe("crypto - additional branches", () => {
   const reset = () => {
-    if (typeof (state as any).__test_resetCryptoStateForUnitTests === "function")
+    if (
+      typeof (state as any).__test_resetCryptoStateForUnitTests === "function"
+    )
       (state as any).__test_resetCryptoStateForUnitTests();
   };
 
@@ -117,7 +119,9 @@ describe("crypto - additional branches", () => {
     (state as any)._setCrypto(fake);
     const id = await cryptoModule.generateSecureUUID();
     // basic format check and ensure version nibble is '4'
-    expect(id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i);
+    expect(id).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i,
+    );
     const segments = id.split("-");
     expect(segments[2][0]).toBe("4");
   });
@@ -141,13 +145,19 @@ describe("crypto - additional branches", () => {
     expect(key).toBeDefined();
     // invalid usages should throw
     await expect(
-      cryptoModule.createOneTimeCryptoKey({ usages: ["encrypt", "bogus" as any] }),
+      cryptoModule.createOneTimeCryptoKey({
+        usages: ["encrypt", "bogus" as any],
+      }),
     ).rejects.toThrow(InvalidParameterError);
   });
 
   it("createAesGcmNonce validates byteLength bounds", () => {
-    expect(() => cryptoModule.createAesGcmNonce(8)).toThrow(InvalidParameterError);
-    expect(() => cryptoModule.createAesGcmNonce(20)).toThrow(InvalidParameterError);
+    expect(() => cryptoModule.createAesGcmNonce(8)).toThrow(
+      InvalidParameterError,
+    );
+    expect(() => cryptoModule.createAesGcmNonce(20)).toThrow(
+      InvalidParameterError,
+    );
     const n = cryptoModule.createAesGcmNonce(12);
     expect(n.length).toBe(12);
   });

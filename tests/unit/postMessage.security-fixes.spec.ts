@@ -1,20 +1,20 @@
-import { test, expect, vi, beforeEach } from 'vitest';
+import { test, expect, vi, beforeEach } from "vitest";
 import {
   sendSecurePostMessage,
   createSecurePostMessageListener,
   InvalidParameterError,
-} from '../../src/postMessage';
+} from "../../src/postMessage";
 
 // Mock window.postMessage
 const mockPostMessage = vi.fn();
-Object.defineProperty(window, 'postMessage', {
+Object.defineProperty(window, "postMessage", {
   writable: true,
   value: mockPostMessage,
 });
 
 // Mock addEventListener
 const mockAddEventListener = vi.fn();
-Object.defineProperty(window, 'addEventListener', {
+Object.defineProperty(window, "addEventListener", {
   writable: true,
   value: mockAddEventListener,
 });
@@ -23,15 +23,15 @@ beforeEach(() => {
   vi.clearAllMocks();
 });
 
-test('sendSecurePostMessage fails fast with incompatible sanitize=true + allowTypedArrays=true', () => {
+test("sendSecurePostMessage fails fast with incompatible sanitize=true + allowTypedArrays=true", () => {
   const payload = new Uint8Array([1, 2, 3, 4]);
 
   expect(() =>
     sendSecurePostMessage({
       targetWindow: window,
       payload,
-      targetOrigin: 'https://example.com',
-      wireFormat: 'structured',
+      targetOrigin: "https://example.com",
+      wireFormat: "structured",
       sanitize: true, // default, but explicit for clarity
       allowTypedArrays: true,
     }),
@@ -41,37 +41,37 @@ test('sendSecurePostMessage fails fast with incompatible sanitize=true + allowTy
     sendSecurePostMessage({
       targetWindow: window,
       payload,
-      targetOrigin: 'https://example.com',
-      wireFormat: 'structured',
+      targetOrigin: "https://example.com",
+      wireFormat: "structured",
       sanitize: true,
       allowTypedArrays: true,
     }),
   ).toThrow(/Incompatible options.*sanitize=true.*allowTypedArrays=true/);
 });
 
-test('sendSecurePostMessage works with sanitize=false + allowTypedArrays=true', () => {
+test("sendSecurePostMessage works with sanitize=false + allowTypedArrays=true", () => {
   const payload = new Uint8Array([1, 2, 3, 4]);
 
   expect(() =>
     sendSecurePostMessage({
       targetWindow: window,
       payload,
-      targetOrigin: 'https://example.com',
-      wireFormat: 'structured',
+      targetOrigin: "https://example.com",
+      wireFormat: "structured",
       sanitize: false,
       allowTypedArrays: true,
     }),
   ).not.toThrow();
 
-  expect(mockPostMessage).toHaveBeenCalledWith(payload, 'https://example.com');
+  expect(mockPostMessage).toHaveBeenCalledWith(payload, "https://example.com");
 });
 
-test('listener configuration is immutable after creation (TOCTOU fix)', () => {
+test("listener configuration is immutable after creation (TOCTOU fix)", () => {
   const originalValidator = vi.fn().mockReturnValue(false); // reject all
   const permissiveValidator = vi.fn().mockReturnValue(true); // allow all
 
   const options = {
-    allowedOrigins: ['https://example.com'],
+    allowedOrigins: ["https://example.com"],
     onMessage: vi.fn(),
     validate: originalValidator,
     allowExtraProps: false,
@@ -88,7 +88,7 @@ test('listener configuration is immutable after creation (TOCTOU fix)', () => {
   // Since we can't easily trigger a real postMessage event in this test,
   // we'll verify the configuration is locked by checking that the listener
   // was created with the expected parameters
-  
+
   // The key test is that the listener should be created successfully,
   // proving that the configuration was locked at creation time
   expect(listener).toBeDefined();
@@ -98,7 +98,7 @@ test('listener configuration is immutable after creation (TOCTOU fix)', () => {
   listener.destroy();
 });
 
-test('listener uses locked configuration values at runtime', () => {
+test("listener uses locked configuration values at runtime", () => {
   let actualValidatorCalled = false;
   const lockedValidator = vi.fn((data: unknown) => {
     actualValidatorCalled = true;
@@ -106,7 +106,7 @@ test('listener uses locked configuration values at runtime', () => {
   });
 
   const options = {
-    allowedOrigins: ['https://example.com'],
+    allowedOrigins: ["https://example.com"],
     onMessage: vi.fn(),
     validate: lockedValidator,
     allowExtraProps: false,
@@ -125,15 +125,15 @@ test('listener uses locked configuration values at runtime', () => {
   listener.destroy();
 });
 
-test('sendSecurePostMessage allows sanitize=true with plain objects', () => {
-  const payload = { message: 'test', data: [1, 2, 3] };
+test("sendSecurePostMessage allows sanitize=true with plain objects", () => {
+  const payload = { message: "test", data: [1, 2, 3] };
 
   expect(() =>
     sendSecurePostMessage({
       targetWindow: window,
       payload,
-      targetOrigin: 'https://example.com',
-      wireFormat: 'structured',
+      targetOrigin: "https://example.com",
+      wireFormat: "structured",
       sanitize: true,
       allowTypedArrays: false, // default
     }),

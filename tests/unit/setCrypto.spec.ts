@@ -2,7 +2,8 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { setCrypto } from "../../src/config";
 import { environment } from "../../src/environment";
 import * as stateModule from "../../src/state";
-const { __test_resetCryptoStateForUnitTests, getCryptoState, CryptoState } = (stateModule as any);
+const { __test_resetCryptoStateForUnitTests, getCryptoState, CryptoState } =
+  stateModule as any;
 import { InvalidConfigurationError } from "../../src/errors";
 
 // Minimal fake crypto-like object
@@ -36,7 +37,9 @@ describe("setCrypto allowInProduction gating", () => {
 
   it("throws when called in production without explicit opt-in", () => {
     environment.setExplicitEnv("production");
-    expect(() => setCrypto(fakeCrypto as any, { allowInProduction: true })).toThrow(InvalidConfigurationError);
+    expect(() =>
+      setCrypto(fakeCrypto as any, { allowInProduction: true }),
+    ).toThrow(InvalidConfigurationError);
   });
 
   it("succeeds when global opt-in flag is set", () => {

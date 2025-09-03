@@ -65,19 +65,25 @@ describe("dom.ts uncovered branches", () => {
     });
 
     // trigger a validation failure by passing a non-element to validateElement
-    await expect(async () => v.validateElement("not-an-element" as unknown)).rejects.toThrow();
+    await expect(async () =>
+      v.validateElement("not-an-element" as unknown),
+    ).rejects.toThrow();
 
-  // allow background follow-up IIFE to run (give more time for async follow-up)
-  vi.useFakeTimers();
-  try {
-    await vi.runAllTimersAsync();
-  } finally {
-    vi.useRealTimers();
-  }
+    // allow background follow-up IIFE to run (give more time for async follow-up)
+    vi.useFakeTimers();
+    try {
+      await vi.runAllTimersAsync();
+    } finally {
+      vi.useRealTimers();
+    }
 
     // base validation_failure should be present; follow-up validation_failure_hash should NOT
-    expect(events.some((e: any) => e && e.kind === "validation_failure")).toBeTruthy();
-    expect(events.some((e: any) => e && e.kind === "validation_failure_hash")).toBeFalsy();
+    expect(
+      events.some((e: any) => e && e.kind === "validation_failure"),
+    ).toBeTruthy();
+    expect(
+      events.some((e: any) => e && e.kind === "validation_failure_hash"),
+    ).toBeFalsy();
 
     // restore crypto
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -102,7 +108,7 @@ describe("dom.ts uncovered branches", () => {
     v.invalidateCache();
 
     // wait enough for timeout-based branch to execute
-  await vi.runAllTimersAsync();
+    await vi.runAllTimersAsync();
 
     expect(calls.length).toBeGreaterThan(0);
   });
@@ -212,12 +218,16 @@ describe("dom.ts uncovered branches", () => {
       emitSelectorHash: true,
     });
 
-    await expect(async () => v.validateElement("not-an-element" as unknown)).rejects.toThrow();
+    await expect(async () =>
+      v.validateElement("not-an-element" as unknown),
+    ).rejects.toThrow();
 
     // wait for async follow-up
-  await vi.runAllTimersAsync();
+    await vi.runAllTimersAsync();
 
-    expect(events.some((e: any) => e && e.kind === "validation_failure")).toBeTruthy();
+    expect(
+      events.some((e: any) => e && e.kind === "validation_failure"),
+    ).toBeTruthy();
 
     spy.mockRestore();
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -244,7 +254,9 @@ describe("dom.ts uncovered branches", () => {
       emitSelectorHash: true,
     });
 
-    await expect(async () => v.validateElement("not-an-element" as unknown)).rejects.toThrow();
+    await expect(async () =>
+      v.validateElement("not-an-element" as unknown),
+    ).rejects.toThrow();
 
     // advance timers so background processing runs
     vi.useFakeTimers();
@@ -256,7 +268,9 @@ describe("dom.ts uncovered branches", () => {
     }
 
     // base event was emitted, and inner logging threw but was swallowed
-    expect(events.some((e: any) => e && e.kind === "validation_failure")).toBeTruthy();
+    expect(
+      events.some((e: any) => e && e.kind === "validation_failure"),
+    ).toBeTruthy();
     spy.mockRestore();
   });
 
@@ -273,8 +287,8 @@ describe("dom.ts uncovered branches", () => {
       },
     });
 
-  v.invalidateCache();
-  await vi.runAllTimersAsync();
+    v.invalidateCache();
+    await vi.runAllTimersAsync();
     // no exception should propagate even though secureDevLog threw inside catch
     spy.mockRestore();
   });

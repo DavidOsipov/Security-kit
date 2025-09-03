@@ -1,7 +1,7 @@
 {
   "SET": { "mom": 0.0076, "samples": 5000 },
   "GET": { "mom": 0.0049, "samples": 5000, "hitRate": 100 },
-  "DELETE": { "mom": 0.0020, "samples": 5000, "deletedCount": 5000 },
+  "DELETE": { "mom": 0.002, "samples": 5000, "deletedCount": 5000 },
   "throughput": { "opsPerSec": 195573 },
   "_debug": { "sieveScans": 10, "sieveRotations": 2 }
 }

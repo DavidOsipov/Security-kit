@@ -1,6 +1,9 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { DOMValidator, createDefaultDOMValidator } from "../../src/dom";
-import { InvalidParameterError, InvalidConfigurationError } from "../../src/errors";
+import {
+  InvalidParameterError,
+  InvalidConfigurationError,
+} from "../../src/errors";
 
 describe("DOMValidator", () => {
   beforeEach(() => {
@@ -16,7 +19,9 @@ describe("DOMValidator", () => {
   it("validateSelectorSyntax rejects empty or evil selectors", () => {
     const v = new DOMValidator();
     expect(() => v.validateSelectorSyntax("")).toThrow(InvalidParameterError);
-    expect(() => v.validateSelectorSyntax(" :has(div) ")).toThrow(InvalidParameterError);
+    expect(() => v.validateSelectorSyntax(" :has(div) ")).toThrow(
+      InvalidParameterError,
+    );
     // overly long selector
     const long = "a".repeat(2000);
     expect(() => v.validateSelectorSyntax(long)).toThrow(InvalidParameterError);
