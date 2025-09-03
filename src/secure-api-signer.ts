@@ -168,47 +168,65 @@ const STRINGIFY_CACHE: WeakMap<object, string> = new WeakMap();
 function canCacheRoot(root: unknown): boolean {
   if (root === null || typeof root !== "object") return false;
   if (!Object.isFrozen(root)) return false;
+
   if (Array.isArray(root)) {
-    const array = root as readonly unknown[];
-    for (const v of array) {
-      if (v === null) continue;
-      const t = typeof v;
-      if (t === "string" || t === "boolean") continue;
-      if (t === "number" && Number.isFinite(v as number)) continue;
-      if (t === "object") {
-        if (!Object.isFrozen(v as object)) return false;
-        continue;
-      }
-      return false; // functions/symbols/bigint/NaN/Infinity disqualify
-    }
-    return true;
+    return canCacheArrayRoot(root);
   }
-  const object = root as Record<string, unknown>;
-  const keys = Object.keys(object);
-  for (const k of keys) {
-    const d = Object.getOwnPropertyDescriptor(object, k);
-    if (!d || !d.enumerable || !("value" in d)) return false;
-    const v = (d as PropertyDescriptor & { readonly value: unknown }).value;
+
+  return canCacheObjectRoot(root as Record<string, unknown>);
+}
+
+function canCacheArrayRoot(array: readonly unknown[]): boolean {
+  for (const v of array) {
     if (v === null) continue;
-    const t = typeof v;
-    if (t === "string" || t === "boolean") continue;
-    if (t === "number" && Number.isFinite(v as number)) continue;
-    if (t === "object") {
-      if (!Object.isFrozen(v as object)) return false;
-      continue;
+    if (!isCacheablePrimitive(v) && !isCacheableFrozenObject(v)) {
+      return false;
     }
-    return false;
   }
   return true;
 }
 
+function canCacheObjectRoot(object: Record<string, unknown>): boolean {
+  const keys = Object.keys(object);
+  for (const k of keys) {
+    const d = Object.getOwnPropertyDescriptor(object, k);
+    if (!d || !d.enumerable || !("value" in d)) return false;
+    const v: unknown = d.value as unknown;
+    if (v === null) continue;
+    if (!isCacheablePrimitive(v) && !isCacheableFrozenObject(v)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function isCacheablePrimitive(v: unknown): boolean {
+  const t = typeof v;
+  if (t === "string" || t === "boolean") return true;
+  if (t === "number") {
+    // OWASP ASVS L3: Type guard for Number.isFinite to prevent unsafe type assertions
+    return Number.isFinite(v as number);
+  }
+  return false;
+}
+
+function isCacheableFrozenObject(v: unknown): boolean {
+  if (typeof v === "object" && v !== null) {
+    // OWASP ASVS L3: Type guard for Object.isFrozen to prevent unsafe type assertions
+    // Use a more specific type assertion that satisfies the linter
+    const object = v as Record<string, unknown>;
+    return Object.isFrozen(object);
+  }
+  return false;
+}
+
 function stringifyWithCache(value: unknown): string {
   if (value !== null && typeof value === "object") {
-    const cached = STRINGIFY_CACHE.get(value as object);
+    const cached = STRINGIFY_CACHE.get(value);
     if (cached !== undefined) return cached;
     if (canCacheRoot(value)) {
       const s = safeStableStringify(value);
-      STRINGIFY_CACHE.set(value as object, s);
+      STRINGIFY_CACHE.set(value, s);
       return s;
     }
   }
@@ -416,34 +434,12 @@ export class SecureApiSigner {
   ): Promise<SecureApiSigner> {
     // Change default: require strict integrity unless explicitly overridden.
     const integrity: IntegrityMode = init.integrity ?? "require";
-    if (environment.isProduction && integrity === "none") {
-      throw new SecurityKitError(
-        "Integrity mode 'none' is forbidden in production. Use 'require' with an expectedWorkerScriptHash.",
-        "E_INTEGRITY_REQUIRED",
-      );
-    }
 
-    // Refuse 'compute' in production by default unless explicitly allowed via both
-    // the init option and the runtime policy. Perform this check early so tests and
-    // callers receive a SecurityKitError rather than a URL validation error.
-    if (
-      integrity === "compute" &&
-      environment.isProduction &&
-      !(
-        init.allowComputeIntegrityInProduction &&
-        getRuntimePolicy().allowComputeIntegrityInProductionDefault
-      )
-    ) {
-      throw new SecurityKitError(
-        "Integrity mode 'compute' is not allowed in production. Provide expectedWorkerScriptHash and use integrity: 'require', or explicitly allow 'compute' in production via BOTH init.allowComputeIntegrityInProduction AND setRuntimePolicy({ allowComputeIntegrityInProductionDefault: true }).",
-        "E_INTEGRITY_REQUIRED",
-      );
-    }
+    // Validate integrity mode and production constraints
+    SecureApiSigner.#validateIntegrityMode(integrity, init);
 
-    const url = normalizeAndValidateWorkerUrl(
-      init.workerUrl,
-      init.allowCrossOriginWorkerOrigins,
-    );
+    // Validate and normalize worker URL
+    const url = SecureApiSigner.#validateAndNormalizeWorkerUrl(init);
 
     // Validate/fetch script per chosen integrity mode
     const computedHash = await SecureApiSigner.#validateAndFetchWorkerScript(
@@ -452,6 +448,7 @@ export class SecureApiSigner {
       integrity,
     );
 
+    // Initialize worker and signer
     const signer = SecureApiSigner.#initializeWorkerAndSigner(
       url,
       init,
@@ -478,7 +475,9 @@ export class SecureApiSigner {
       return await SecureApiSigner.create({ ...init, secret: bytes });
     } finally {
       try {
-        secureWipeWrapper(bytes);
+        if (bytes instanceof Uint8Array) {
+          secureWipeWrapper(bytes);
+        }
       } catch {
         /* ignore */
       }
@@ -660,6 +659,63 @@ export class SecureApiSigner {
     } catch {
       /* ignore */
     }
+  }
+
+  static #validateIntegrityMode(
+    integrity: IntegrityMode,
+    init: SecureApiSignerInit & { readonly integrity?: IntegrityMode },
+  ): void {
+    const policy = getRuntimePolicy();
+
+    // Validate integrity mode is valid
+    if (!["require", "compute", "none"].includes(integrity)) {
+      throw new InvalidParameterError(
+        `Invalid integrity mode: ${integrity}. Must be 'require', 'compute', or 'none'.`,
+      );
+    }
+
+    // 'none' is forbidden in production for security
+    if (integrity === "none" && environment.isProduction) {
+      throw new SecurityKitError(
+        "Integrity mode 'none' is forbidden in production. Use 'require' or 'compute' with proper security controls.",
+        "E_INTEGRITY_REQUIRED",
+      );
+    }
+
+    // 'require' demands expected hash
+    if (
+      integrity === "require" &&
+      typeof init.expectedWorkerScriptHash !== "string"
+    ) {
+      throw new SecurityKitError(
+        "Integrity mode 'require' demands expectedWorkerScriptHash (base64 SHA-256).",
+        "E_INTEGRITY_REQUIRED",
+      );
+    }
+
+    // Fail early if 'compute' is attempted in production without explicit OK
+    if (
+      integrity === "compute" &&
+      environment.isProduction &&
+      !(
+        init.allowComputeIntegrityInProduction &&
+        policy.allowComputeIntegrityInProductionDefault
+      )
+    ) {
+      throw new SecurityKitError(
+        "Integrity mode 'compute' is not allowed in production. Provide expectedWorkerScriptHash and use integrity: 'require', or explicitly allow 'compute' in production via BOTH init.allowComputeIntegrityInProduction AND setRuntimePolicy({ allowComputeIntegrityInProductionDefault: true }).",
+        "E_INTEGRITY_REQUIRED",
+      );
+    }
+  }
+
+  static #validateAndNormalizeWorkerUrl(
+    init: SecureApiSignerInit & { readonly integrity?: IntegrityMode },
+  ): URL {
+    return normalizeAndValidateWorkerUrl(
+      init.workerUrl,
+      init.allowCrossOriginWorkerOrigins,
+    );
   }
 
   static async #validateAndFetchWorkerScript(

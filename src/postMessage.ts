@@ -225,20 +225,15 @@ function isArrayBufferViewSafe(value: unknown): value is ArrayBufferView {
 function safeCtorName(value: unknown): string | undefined {
   if (value === null || typeof value !== "object") return undefined;
   try {
-    const proto = Object.getPrototypeOf(value);
-    if (!proto) return undefined;
-    const protoWithConstructor = proto as Record<string, unknown>;
-    const constructor = protoWithConstructor.constructor;
-    if (!constructor || typeof constructor !== "function") {
+    // Object.getPrototypeOf returns `any` in lib typings; assert a safe union to avoid unsafe-any
+    const proto: object | null = Object.getPrototypeOf(value) as object | null;
+    if (!proto || (typeof proto !== "object" && typeof proto !== "function"))
       return undefined;
-    }
-    const ctor = constructor as Function;
-    const namePropertyValue = (ctor as { readonly name?: unknown }).name;
-    const nameProperty =
-      typeof namePropertyValue === "string" ? namePropertyValue : undefined;
-    const maybeName =
-      typeof nameProperty === "string" ? nameProperty : undefined;
-    return typeof maybeName === "string" ? maybeName : undefined;
+    // Guarded access to constructor
+    const hasCtor = (proto as { readonly constructor?: unknown }).constructor;
+    if (typeof hasCtor !== "function") return undefined;
+    const nameValue = (hasCtor as { readonly name?: unknown }).name;
+    return typeof nameValue === "string" ? nameValue : undefined;
   } catch {
     return undefined;
   }
@@ -264,9 +259,9 @@ function validateTransferables(
 
   // Handle circular references
   visited ??= new WeakSet<object>();
-  if (visited.has(payload as object)) return;
+  if (visited.has(payload)) return;
 
-  visited.add(payload as object);
+  visited.add(payload);
 
   // Check for disallowed transferable types
   const ctorName = safeCtorName(payload);
@@ -400,10 +395,10 @@ function toNullProto(
 
   // Use a WeakSet per top-level invocation to detect cycles.
   visited ??= new WeakSet<object>();
-  if (visited.has(object as object)) {
+  if (visited.has(object)) {
     throw new InvalidParameterError("Circular reference detected in payload.");
   }
-  visited.add(object as object);
+  visited.add(object);
 
   if (Array.isArray(object)) {
     // Map children using the same visited set so cycles across array/object are detected.
@@ -413,7 +408,12 @@ function toNullProto(
     return mapped;
   }
 
-  const out: Record<string, unknown> = Object.create(null);
+  // Object.create(null) returns any; cast is safe for fresh object literal use here.
+
+  const out: Record<string, unknown> = Object.create(null) as Record<
+    string,
+    unknown
+  >;
   // iterate string keys only; ignore symbol-keyed properties to avoid
   // invoking exotic symbol-based traps or leaking internals
   for (const key of Object.keys(object as Record<string, unknown>)) {
@@ -436,9 +436,8 @@ function toNullProto(
         value = descValueValue;
       } else {
         // Fallback, but guard in try/catch
-        const objectValueRaw = (object as Record<string, unknown>)[key];
-        const objectValue = objectValueRaw as unknown;
-        value = objectValue as unknown;
+        const oRec = object as Record<string, unknown>;
+        value = oRec[key];
       }
     } catch (error: unknown) {
       // If property access throws, skip it but log best-effort in dev
@@ -520,12 +519,12 @@ function deepFreeze<T>(
 
     const current = stack.pop();
     if (!current || typeof current !== "object") continue;
-    if (seen.has(current as object)) continue;
-    seen.add(current as object);
+    if (seen.has(current)) continue;
+    seen.add(current);
 
     try {
       try {
-        Object.freeze(current as object);
+        Object.freeze(current);
       } catch {
         // ignore freeze errors
       }
@@ -560,20 +559,15 @@ function deepFreeze<T>(
 
 // --- Public API ---
 
-/* eslint-disable-next-line sonarjs/cognitive-complexity -- Multiple wire format validation and sanitization branches; splitting would harm auditability. */
-export function sendSecurePostMessage(options: SecurePostMessageOptions): void {
-  const { targetWindow, payload, targetOrigin } = options;
-  const wireFormat = (options as SecurePostMessageOptions).wireFormat ?? "json";
-  const sanitizeOutgoing =
-    (options as SecurePostMessageOptions).sanitize !== false; // default true
-  if (!targetWindow)
-    throw new InvalidParameterError("targetWindow must be provided.");
-  if (targetOrigin === "*")
-    throw new InvalidParameterError("targetOrigin cannot be a wildcard ('*').");
-  if (!targetOrigin || typeof targetOrigin !== "string")
-    throw new InvalidParameterError("targetOrigin must be a specific string.");
-
-  // Enforce absolute origin and prefer HTTPS (allow localhost for dev)
+/**
+ * Validates target origin according to OWASP ASVS L3 requirements.
+ * Enforces absolute origin, HTTPS preference, and localhost allowance for dev.
+ * Dev allowance includes:
+ *  - IPv4 loopback (127.0.0.0/8)
+ *  - IPv6 loopback (::1)
+ *  - IPv4-mapped IPv6 ::ffff:127.0.0.0/8
+ */
+function validateTargetOrigin(targetOrigin: string): void {
   try {
     const parsed = new URL(targetOrigin);
     // Enforce that an origin string does not include a path/search/hash
@@ -614,106 +608,154 @@ export function sendSecurePostMessage(options: SecurePostMessageOptions): void {
       "targetOrigin must be an absolute origin, e.g. 'https://example.com'.",
     );
   }
+}
+
+/**
+ * Sends a JSON-formatted message with security validation.
+ */
+function sendJsonMessage(
+  targetWindow: Window,
+  payload: unknown,
+  targetOrigin: string,
+  sanitizeOutgoing: boolean,
+): void {
+  // Serialize first to validate JSON-serializability and enforce size limits
+  /* eslint-disable-next-line functional/no-let -- Local serialization variable; scoped to block */
+  let serialized: string;
+  try {
+    const toSend = sanitizeOutgoing ? toNullProto(payload) : payload;
+    serialized = JSON.stringify(toSend);
+  } catch {
+    // JSON.stringify throws TypeError on circular structures
+    throw new InvalidParameterError("Payload must be JSON-serializable.");
+  }
+
+  // Enforce max payload bytes before sending
+  const bytes = SHARED_ENCODER.encode(serialized);
+  if (bytes.length > POSTMESSAGE_MAX_PAYLOAD_BYTES) {
+    throw new InvalidParameterError(
+      `Payload exceeds maximum size of ${POSTMESSAGE_MAX_PAYLOAD_BYTES} bytes.`,
+    );
+  }
+
+  try {
+    targetWindow.postMessage(serialized, targetOrigin);
+  } catch (error: unknown) {
+    if (error instanceof TypeError) {
+      throw new InvalidParameterError("Payload must be JSON-serializable.");
+    }
+    throw error;
+  }
+}
+
+/**
+ * Sends a structured clone message with security validation.
+ */
+
+function sendStructuredMessage(
+  options: SecurePostMessageOptions,
+  targetWindow: Window,
+  payload: unknown,
+  targetOrigin: string,
+  sanitizeOutgoing: boolean,
+): void {
+  // Structured: allow posting non-string data. 'auto' may be downgraded on receive.
+  // By default we sanitize outgoing payloads to null-proto version to avoid prototype pollution.
+  const allowTransferablesOutgoing = options.allowTransferables ?? false;
+  const allowTypedArraysOutgoing = options.allowTypedArrays ?? false;
+
+  // Fail-fast on incompatible options combination
+  if (sanitizeOutgoing && allowTypedArraysOutgoing) {
+    throw new InvalidParameterError(
+      "Incompatible options: sanitize=true is incompatible with allowTypedArrays=true. " +
+        "To send TypedArray/DataView/ArrayBuffer, set sanitize=false and ensure allowTypedArrays=true.",
+    );
+  }
+
+  // Validate transferables before any processing
+  try {
+    validateTransferables(
+      payload,
+      allowTransferablesOutgoing,
+      allowTypedArraysOutgoing,
+    );
+  } catch (error: unknown) {
+    if (error instanceof TransferableNotAllowedError) {
+      throw error; // Re-throw specific transferable errors
+    }
+    throw new InvalidParameterError(
+      "Payload validation failed: " +
+        String((error as Error)?.message ?? String(error)),
+    );
+  }
+
+  if (sanitizeOutgoing) {
+    try {
+      const sanitized = toNullProto(payload);
+      // sanitized is a JSON-safe structure (null-proto or primitives)
+      targetWindow.postMessage(sanitized, targetOrigin);
+      return;
+    } catch (error: unknown) {
+      if (error instanceof TransferableNotAllowedError) {
+        throw error; // Re-throw transferable errors
+      }
+      const errorMessage =
+        error instanceof Error ? error.message : `${String(error)}`;
+      throw new InvalidParameterError(
+        "Structured-clone payload contains unsupported host objects or circular references: " +
+          errorMessage,
+      );
+    }
+  }
+  // If sanitize disabled, attempt to post as-is but transferables were already validated above
+  try {
+    // payload was validated for transferables above; assert safe typing for postMessage
+    targetWindow.postMessage(payload, targetOrigin);
+    return;
+  } catch (error: unknown) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    throw new InvalidParameterError(
+      "Failed to post structured payload: ensure payload is structured-cloneable: " +
+        errorMessage,
+    );
+  }
+}
+
+export function sendSecurePostMessage(options: SecurePostMessageOptions): void {
+  const { targetWindow, payload, targetOrigin } = options;
+  const wireFormat = options.wireFormat ?? "json";
+  const sanitizeOutgoing = options.sanitize !== false; // default true
+  if (!targetWindow)
+    throw new InvalidParameterError("targetWindow must be provided.");
+  if (targetOrigin === "*")
+    throw new InvalidParameterError("targetOrigin cannot be a wildcard ('*').");
+  if (!targetOrigin || typeof targetOrigin !== "string")
+    throw new InvalidParameterError("targetOrigin must be a specific string.");
+
+  // Validate target origin with security checks
+  validateTargetOrigin(targetOrigin);
 
   // Handle wire formats
   if (wireFormat === "json") {
-    // Serialize first to validate JSON-serializability and enforce size limits
-    /* eslint-disable-next-line functional/no-let -- Local serialization variable; scoped to block */
-    let serialized: string;
-    try {
-      const toSend = sanitizeOutgoing ? toNullProto(payload) : payload;
-      serialized = JSON.stringify(toSend);
-    } catch {
-      // JSON.stringify throws TypeError on circular structures
-      throw new InvalidParameterError("Payload must be JSON-serializable.");
-    }
-
-    // Enforce max payload bytes before sending
-    const bytes = SHARED_ENCODER.encode(serialized);
-    if (bytes.length > POSTMESSAGE_MAX_PAYLOAD_BYTES) {
-      throw new InvalidParameterError(
-        `Payload exceeds maximum size of ${POSTMESSAGE_MAX_PAYLOAD_BYTES} bytes.`,
-      );
-    }
-
-    try {
-      targetWindow.postMessage(serialized, targetOrigin);
-    } catch (error: unknown) {
-      if (error instanceof TypeError) {
-        throw new InvalidParameterError("Payload must be JSON-serializable.");
-      }
-      throw error;
-    }
+    sendJsonMessage(targetWindow, payload, targetOrigin, sanitizeOutgoing);
     return;
   }
 
   if (wireFormat === "structured" || wireFormat === "auto") {
-    // Structured: allow posting non-string data. 'auto' may be downgraded on receive.
-    // By default we sanitize outgoing payloads to null-proto version to avoid prototype pollution.
-    const allowTransferablesOutgoing = options.allowTransferables ?? false;
-    const allowTypedArraysOutgoing = options.allowTypedArrays ?? false;
-
-    // Fail-fast on incompatible options combination
-    if (sanitizeOutgoing && allowTypedArraysOutgoing) {
-      throw new InvalidParameterError(
-        "Incompatible options: sanitize=true is incompatible with allowTypedArrays=true. " +
-          "To send TypedArray/DataView/ArrayBuffer, set sanitize=false and ensure allowTypedArrays=true.",
-      );
-    }
-
-    // Validate transferables before any processing
-    try {
-      validateTransferables(
-        payload,
-        allowTransferablesOutgoing,
-        allowTypedArraysOutgoing,
-      );
-    } catch (error: unknown) {
-      if (error instanceof TransferableNotAllowedError) {
-        throw error; // Re-throw specific transferable errors
-      }
-      throw new InvalidParameterError(
-        "Payload validation failed: " +
-          String((error as Error)?.message ?? String(error)),
-      );
-    }
-
-    if (sanitizeOutgoing) {
-      try {
-        const sanitized = toNullProto(payload);
-        // sanitized is a JSON-safe structure (null-proto or primitives)
-        targetWindow.postMessage(sanitized, targetOrigin);
-        return;
-      } catch (error: unknown) {
-        if (error instanceof TransferableNotAllowedError) {
-          throw error; // Re-throw transferable errors
-        }
-        const errorMessage =
-          error instanceof Error ? error.message : `${String(error)}`;
-        throw new InvalidParameterError(
-          "Structured-clone payload contains unsupported host objects or circular references: " +
-            errorMessage,
-        );
-      }
-    }
-    // If sanitize disabled, attempt to post as-is but transferables were already validated above
-    try {
-      // payload was validated for transferables above; assert safe typing for postMessage
-      targetWindow.postMessage(payload, targetOrigin);
-      return;
-    } catch (error: unknown) {
-      const errorMessage =
-        error instanceof Error ? error.message : String(error);
-      throw new InvalidParameterError(
-        "Failed to post structured payload: ensure payload is structured-cloneable: " +
-          errorMessage,
-      );
-    }
+    sendStructuredMessage(
+      options,
+      targetWindow,
+      payload,
+      targetOrigin,
+      sanitizeOutgoing,
+    );
+    return;
   }
 
   throw new InvalidParameterError("Unsupported wireFormat");
 }
 
+/* eslint-disable-next-line sonarjs/cognitive-complexity -- Public API with explicit validation and guards; splitting would obscure invariants */
 export function createSecurePostMessageListener(
   allowedOriginsOrOptions:
     | readonly string[]
@@ -792,8 +834,12 @@ export function createSecurePostMessageListener(
   Object.freeze(finalOptions);
 
   // Extract immutable locals to prevent runtime configuration changes
-  const validatorLocal = finalOptions.validate;
-  const expectedSourceLocal = finalOptions.expectedSource;
+  const validatorLocal:
+    | ((d: unknown) => boolean)
+    | Record<string, SchemaValue>
+    | undefined = finalOptions.validate;
+  const expectedSourceLocal: CreateSecurePostMessageListenerOptions["expectedSource"] =
+    finalOptions.expectedSource;
   const allowExtraPropertiesLocal = finalOptions.allowExtraProps ?? false;
   const freezePayloadLocal = finalOptions.freezePayload !== false;
   const enableDiagnosticsLocal = !!finalOptions.enableDiagnostics;
@@ -885,7 +931,7 @@ export function createSecurePostMessageListener(
     const shouldFreeze = finalOptions.freezePayload !== false; // default true
     if (!shouldFreeze) return;
     if (payload == undefined || typeof payload !== "object") return;
-    const asObject = payload as object;
+    const asObject = payload;
     const cache = getDeepFreezeCache();
     const nodeBudget =
       finalOptions.deepFreezeNodeBudget ?? DEFAULT_DEEP_FREEZE_NODE_BUDGET;
@@ -1159,6 +1205,7 @@ export function createSecurePostMessageListener(
     void computeAndLog();
   }
 
+  /* eslint-disable-next-line sonarjs/cognitive-complexity -- Parsing logic with strict branches kept explicit to enforce security constraints */
   function parseMessageEventData(event: MessageEvent): unknown {
     const wireFormat = wireFormatLocal;
 
@@ -1264,8 +1311,16 @@ export function createSecurePostMessageListener(
       handler as EventListenerOrEventListenerObject,
       { signal: abortController.signal } as AddEventListenerOptions,
     );
-  } catch (e) {
+  } catch (error) {
     // If addEventListener is not available on the selected target, surface a clear error.
+    // OWASP ASVS L3: Log the error for debugging but don't expose sensitive details
+    try {
+      secureDevelopmentLog("error", "postMessage", "addEventListener failed", {
+        error: sanitizeErrorForLogs(error),
+      });
+    } catch {
+      /* best-effort logging */
+    }
     throw new InvalidConfigurationError(
       "Global event target does not support addEventListener",
     );

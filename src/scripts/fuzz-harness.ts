@@ -71,8 +71,10 @@ function makeHostilePayload(
   if (r < 0.8) {
     const o: Record<PropertyKey, unknown> = { nested: {} };
     // deliberate nested mutation to exercise prototype setters in sanitizer
-    // Cast to any for intentional test-only mutation
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    // OWASP ASVS L3: Intentional mutation for security testing - fuzzing requires
+    // creating hostile payloads to test sanitizer robustness against prototype pollution
+
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-explicit-any, functional/immutable-data -- intentional mutation for fuzz testing
     (o as any).nested.deep = { __proto__: { p: index } };
 
     return o;
@@ -86,28 +88,28 @@ function makeHostilePayload(
       const choice = randInt(3);
       if (choice === 0) {
         // deliberate mutation to override toString for fuzzing
-        // Narrow, intentional mutation: override built-in conversion helpers to assert
-        // sanitizer and consumers handle poisoned primitives safely.
-        // eslint-disable-next-line functional/immutable-data -- intentional fuzz harness mutation
+        // OWASP ASVS L3: Intentional mutation for security testing - fuzzing requires
+        // creating hostile payloads to test sanitizer robustness against poisoned primitives
+        // eslint-disable-next-line functional/immutable-data -- intentional fuzz harness mutation for security testing
         o.toString = () => {
           throw new Error("poisoned toString");
         };
       } else if (choice === 1) {
         // deliberate mutation to override valueOf for fuzzing
-        // eslint-disable-next-line functional/immutable-data -- intentional fuzz harness mutation
+        // eslint-disable-next-line functional/immutable-data -- intentional fuzz harness mutation for security testing
         o.valueOf = () => {
           throw new Error("poisoned valueOf");
         };
       } else {
         // deliberate mutation to override Symbol.toPrimitive
-        // eslint-disable-next-line functional/immutable-data -- intentional fuzz payload
+        // eslint-disable-next-line functional/immutable-data -- intentional fuzz harness mutation for security testing
         o[Symbol.toPrimitive] = () => {
           throw new Error("poisoned toPrimitive");
         };
       }
     } else {
       // Narrow intentional mutation for the fallback path when randInt is not provided.
-      // eslint-disable-next-line functional/immutable-data -- intentional fuzz harness mutation
+      // eslint-disable-next-line functional/immutable-data -- intentional fuzz harness mutation for security testing
       o.toString = () => {
         throw new Error("poisoned toString");
       };
@@ -121,8 +123,9 @@ function makeHostilePayload(
     const o: Record<PropertyKey, unknown> = { a: { b: 1 } };
     try {
       // intentionally mutate prototype to test sanitizer hardening
-      // Cast to any for test-only mutation
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      // OWASP ASVS L3: Intentional mutation for security testing - fuzzing requires
+      // creating hostile payloads to test sanitizer robustness against prototype pollution
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-explicit-any, functional/immutable-data -- intentional mutation for fuzz testing
       Object.setPrototypeOf((o as any).a, { poisoned: true });
     } catch (error) {
       console.warn(
@@ -140,9 +143,9 @@ function makeHostilePayload(
     .join(":");
   const object: Record<string, unknown> = {};
   // deliberate long-key insertion for fuzzing
-  // Narrow, intentional mutation to insert a very long property name to test
-  // sanitizer/validator behavior on extreme keys.
-  // eslint-disable-next-line functional/immutable-data -- intentional fuzz harness access
+  // OWASP ASVS L3: Intentional mutation for security testing - fuzzing requires
+  // creating hostile payloads to test sanitizer behavior on extreme inputs
+  // eslint-disable-next-line functional/immutable-data -- intentional fuzz harness mutation for security testing
   object[key] = { huge: index };
 
   return object;

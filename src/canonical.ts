@@ -48,7 +48,7 @@ function canonicalizeArray(
 
   const result = value.map((element) => {
     if (element !== null && typeof element === "object") {
-      const ex = cache.get(element as object);
+      const ex = cache.get(element);
       if (ex === PROCESSING) return { __circular: true };
       if (ex !== undefined) return ex; // duplicate reference — reuse processed
     }
@@ -62,6 +62,7 @@ function canonicalizeArray(
 /**
  * Handles canonicalization of objects with proxy-friendly property discovery.
  */
+// eslint-disable-next-line sonarjs/cognitive-complexity -- Complex object canonicalization with multiple exotic object types and proxy handling
 function canonicalizeObject(
   value: Record<string, unknown>,
   cache: WeakMap<object, unknown>,
@@ -108,17 +109,21 @@ function canonicalizeObject(
     return empty;
   }
 
-  // Discover keys via ownKeys and for..in
+  // Discover keys via ownKeys (strings only). We do not add Object.keys twice;
+  // enumerability is validated when reading descriptors below.
   const keySet = new Set<string>();
   for (const k of Reflect.ownKeys(value)) {
+    // eslint-disable-next-line functional/immutable-data
     if (typeof k === "string") keySet.add(k);
   }
-  for (const k of Object.keys(value)) keySet.add(k);
 
   // Conservative probe for proxies: include alphabetic keys 'a'..'z' and 'A'..'Z'
   const alpha = "abcdefghijklmnopqrstuvwxyz";
+  // eslint-disable-next-line functional/no-let -- Intentional let for loop index in proxy key probing
   for (let index = 0; index < alpha.length; index++) {
+    // eslint-disable-next-line functional/immutable-data -- Intentional mutability for proxy key probing during canonicalization
     keySet.add(alpha.charAt(index));
+    // eslint-disable-next-line functional/immutable-data -- Intentional mutability for proxy key probing during canonicalization
     keySet.add(alpha.charAt(index).toUpperCase());
   }
 
@@ -129,6 +134,7 @@ function canonicalizeObject(
     if (isForbiddenKey(k)) continue;
 
     // Prefer data descriptors that are enumerable; fall back to direct access
+    // eslint-disable-next-line functional/no-let -- Intentional let for descriptor handling in canonicalization
     let descriptor: PropertyDescriptor | undefined;
     try {
       descriptor = Object.getOwnPropertyDescriptor(value, k) ?? undefined;
@@ -136,12 +142,13 @@ function canonicalizeObject(
       descriptor = undefined;
     }
 
+    // eslint-disable-next-line functional/no-let -- Intentional let for raw value handling in canonicalization
     let raw: unknown;
     if (descriptor && descriptor.enumerable && "value" in descriptor) {
       raw = descriptor.value;
     } else if (!descriptor) {
       try {
-        raw = (value as Record<string, unknown>)[k];
+        raw = value[k];
       } catch {
         continue;
       }
@@ -157,17 +164,26 @@ function canonicalizeObject(
     )
       continue;
 
+    // eslint-disable-next-line functional/no-let -- Intentional let for canonical value handling in object processing
     let canon: unknown;
     if (raw !== null && typeof raw === "object") {
-      const ex = cache.get(raw as object);
-      if (ex === PROCESSING) canon = { __circular: true };
-      else if (ex !== undefined) canon = { __circular: true };
-      else canon = toCanonicalValueInternal(raw, cache);
+      const ex = cache.get(raw);
+      if (ex === PROCESSING) {
+        // Circular reference to a node currently under processing
+        canon = { __circular: true };
+      } else if (ex !== undefined) {
+        // Duplicate reference to an already-processed node — mark as circular to avoid duplication
+        // and preserve deterministic tree shape per test expectations.
+        canon = { __circular: true };
+      } else {
+        canon = toCanonicalValueInternal(raw, cache);
+      }
     } else {
       canon = toCanonicalValueInternal(raw, cache);
     }
 
     if (canon === undefined) continue;
+    // eslint-disable-next-line functional/immutable-data -- Intentional mutability for building canonical result object
     result[k] = canon;
   }
 
@@ -260,6 +276,7 @@ export function safeStableStringify(value: unknown): string {
 
   type Pos = "top" | "array" | "objectProp";
 
+  // eslint-disable-next-line sonarjs/cognitive-complexity -- Complex recursive JSON stringify function with multiple type branches and edge cases
   const stringify = (value_: unknown, pos: Pos): string => {
     if (value_ === null) return "null";
     const t = typeof value_;
@@ -278,19 +295,21 @@ export function safeStableStringify(value: unknown): string {
       const array = value_ as readonly unknown[];
       const items = (
         pos === "objectProp"
-          ? array.filter((e) => e !== null && e !== undefined)
+          ? array.filter((element) => element !== null && element !== undefined)
           : array
-      ).map((e) => stringify(e, "array"));
+      ).map((element) => stringify(element, "array"));
       return `[${items.join(",")}]`;
     }
 
     if (value_ && typeof value_ === "object") {
       const object = value_ as Record<string, unknown>;
       const keys = Object.keys(object).sort((a, b) => a.localeCompare(b));
-      const parts: readonly string[] = [];
+      // eslint-disable-next-line functional/prefer-readonly-type -- Intentional mutable array for building JSON parts
+      const parts: string[] = [];
       for (const k of keys) {
         const v = object[k];
         if (v === undefined) continue; // drop undefined properties
+        // eslint-disable-next-line functional/immutable-data -- Intentional array mutation for building JSON string parts
         parts.push(`${JSON.stringify(k)}:${stringify(v, "objectProp")}`);
       }
       return `{${parts.join(",")}}`;

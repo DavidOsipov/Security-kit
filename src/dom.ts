@@ -161,7 +161,7 @@ function promiseWithTimeout<T>(
       },
       (error) => {
         clearTimeout(t);
-        reject(error);
+        reject(error instanceof Error ? error : new Error(String(error)));
       },
     );
   });
@@ -187,9 +187,25 @@ async function sha256Hex(input: string, timeoutMs = 1500): Promise<string> {
   // Tests may set __test_importOverride to a function that receives a module
   // specifier and returns a Promise resolving to a module-like object.
   // This is only used for testing and is intentionally opt-in.
-
+  // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
   const importer: (spec: string) => Promise<any> =
-    (sha256Hex as any).__test_importOverride ?? ((s: string) => import(s));
+    (sha256Hex as any).__test_importOverride ??
+    ((s: string) => {
+      // Security: Restrict dynamic imports to a strict allowlist using a switch
+      // to avoid variable import() calls. ASVS V3.7.5.
+      switch (s) {
+        case "node:crypto":
+          return import("node:crypto");
+        case "fast-sha256":
+          return import("fast-sha256");
+        case "hash-wasm":
+          return import("hash-wasm");
+        default:
+          throw new Error(
+            `Security violation: unauthorized module import '${s}'`,
+          );
+      }
+    });
 
   // Helper strategies: try multiple implementations in order and return the first successful result.
   async function tryWebCrypto(): Promise<string | undefined> {
@@ -197,6 +213,7 @@ async function sha256Hex(input: string, timeoutMs = 1500): Promise<string> {
     let u8: Uint8Array | undefined;
     try {
       const g = globalThis as unknown as { crypto?: unknown };
+
       if (g.crypto && typeof (g.crypto as any).subtle === "object") {
         type SubtleLike = {
           digest(
@@ -204,6 +221,7 @@ async function sha256Hex(input: string, timeoutMs = 1500): Promise<string> {
             data: ArrayBuffer | ArrayBufferView,
           ): Promise<ArrayBuffer>;
         };
+
         const subtle = (g.crypto as any).subtle as SubtleLike;
         // create an explicit encoded buffer so we can attempt to wipe it afterwards
         data = enc.encode(input);
@@ -580,11 +598,27 @@ export class DOMValidator {
    */
   async #tryUpgradeCache(): Promise<void> {
     try {
-      // Allow tests to override dynamic imports deterministically.
-
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
       const importer: (spec: string) => Promise<any> =
+        // OWASP ASVS L3: Dynamic imports are security-critical. We validate module
+        // specifiers against a strict whitelist and use timeout protection to prevent
+        // DoS attacks. The 's' parameter is validated before use.
+
         (DOMValidator as any).__test_importOverride ??
-        ((s: string) => import(s));
+        ((s: string) => {
+          // Security: Validate module specifier against strict whitelist and avoid variable import().
+          switch (s) {
+            case "lru-cache":
+              return import("lru-cache");
+            case "css-what":
+              return import("css-what");
+            default:
+              throw new Error(
+                `Security violation: unauthorized module import '${s}'`,
+              );
+          }
+        });
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
       const module_ = await promiseWithTimeout(
         importer("lru-cache"),
         1200,
@@ -748,10 +782,27 @@ export class DOMValidator {
     void (async () => {
       try {
         // Allow tests to override dynamic imports deterministically.
-
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
         const importer: (spec: string) => Promise<any> =
+          // OWASP ASVS L3: Dynamic imports are security-critical. We validate module
+          // specifiers against a strict whitelist and use timeout protection to prevent
+          // DoS attacks. The 's' parameter is validated before use.
+
           (DOMValidator as any).__test_importOverride ??
-          ((s: string) => import(s));
+          /* eslint-disable no-unsanitized/method */
+          ((s: string) => {
+            // Security: Validate module specifier against strict whitelist
+            const allowedModules = new Set(["lru-cache", "css-what"]);
+            if (!allowedModules.has(s)) {
+              throw new Error(
+                `Security violation: unauthorized module import '${s}'`,
+              );
+            }
+            // OWASP ASVS L3: Dynamic imports are validated against strict whitelist before execution
+            return import(s);
+          });
+        /* eslint-enable no-unsanitized/method */
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
         const module_ = await promiseWithTimeout(
           importer("css-what"),
           800,
@@ -759,6 +810,7 @@ export class DOMValidator {
         );
         // Narrow runtime shape: we expect an exported parser function named
         // `parse` or the default export. Treat as unknown and validate before use.
+
         const maybeParser: unknown =
           (module_ as any).parse ?? (module_ as any).default ?? module_;
         if (typeof maybeParser === "function") {

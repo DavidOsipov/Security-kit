@@ -3,6 +3,8 @@
 // to run tests against the package. This file is intended for dev/test usage
 // and is guarded at runtime by the same dev-guards used elsewhere in the repo.
 
+/* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-return -- This file provides test-only re-exports of internal APIs that require flexible typing to access guarded internals. The use of 'any' is necessary for runtime compatibility checks and fallback access patterns in test environments, where strict typing would prevent the dynamic module introspection required for test helpers. These patterns are guarded by runtime checks (assertTestAllowed) and only active in non-production environments, minimizing security risk while enabling comprehensive testing of internal behaviors. */
+
 import { environment } from "./environment";
 import { InvalidConfigurationError } from "./errors";
 import * as postMessageModule from "./postMessage";

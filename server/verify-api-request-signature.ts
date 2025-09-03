@@ -242,9 +242,20 @@ function validateVerifyInput(input: VerifyExtendedInput): void {
   if (!input || typeof input !== "object") {
     throw new InvalidParameterError("Invalid input object");
   }
+  validateSecret(input.secret);
+  validateNonce(input.nonce);
+  validateTimestamp(input.timestamp);
+  validatePayload(input.payload);
+  validateSignature(input.signatureBase64);
+  if (input.method !== undefined) validateMethod(input.method);
+  if (input.path !== undefined) validatePath(input.path);
+  if (input.bodyHash !== undefined) validateBodyHash(input.bodyHash);
+  if (input.kid !== undefined) validateKid(input.kid);
+}
 
-  // Secret quick type check (full length validation occurs after normalization)
-  const { secret } = input;
+function validateSecret(
+  secret: ArrayBuffer | Uint8Array | string | undefined,
+): void {
   if (!secret) {
     throw new InvalidParameterError("Missing secret");
   }
@@ -257,7 +268,9 @@ function validateVerifyInput(input: VerifyExtendedInput): void {
       throw new InvalidParameterError("Invalid secret buffer length");
     }
   } else if (ArrayBuffer.isView(secret)) {
-    if (secret.length === 0 || secret.length > MAX_SECRET_BYTES) {
+    // Enforce by byteLength across all ArrayBufferViews (TypedArray/DataView)
+    const len = (secret as ArrayBufferView).byteLength;
+    if (len < MIN_SECRET_BYTES || len > MAX_SECRET_BYTES) {
       throw new InvalidParameterError("Invalid secret array length");
     }
   } else {
@@ -265,9 +278,10 @@ function validateVerifyInput(input: VerifyExtendedInput): void {
       "Secret must be string, ArrayBuffer, or Uint8Array",
     );
   }
+}
 
-  // Nonce validation (config-driven): consult centralized handshake policy
-  if (typeof input.nonce !== "string" || input.nonce.length === 0) {
+function validateNonce(nonce: unknown): void {
+  if (typeof nonce !== "string" || nonce.length === 0) {
     throw new InvalidParameterError("nonce must be a non-empty string");
   }
   try {
@@ -282,21 +296,15 @@ function validateVerifyInput(input: VerifyExtendedInput): void {
         ? cfg.allowedNonceFormats
         : ["base64", "base64url"];
 
-    if (input.nonce.length > maxLen) {
+    if (nonce.length > maxLen) {
       throw new InvalidParameterError("nonce too long");
     }
 
-    const isAllowed = (() => {
-      if (
-        (allowedFormats.includes("base64") ||
-          allowedFormats.includes("base64url")) &&
-        isLikelyBase64(input.nonce)
-      )
-        return true;
-      if (allowedFormats.includes("hex") && /^[0-9a-f]+$/i.test(input.nonce))
-        return true;
-      return false;
-    })();
+    const isAllowed =
+      ((allowedFormats.includes("base64") ||
+        allowedFormats.includes("base64url")) &&
+        isLikelyBase64(nonce)) ||
+      (allowedFormats.includes("hex") && /^[0-9a-f]+$/i.test(nonce));
 
     if (!isAllowed) {
       throw new InvalidParameterError("nonce is not in an allowed format");
@@ -305,100 +313,89 @@ function validateVerifyInput(input: VerifyExtendedInput): void {
     if (err instanceof InvalidParameterError) throw err;
     throw new InvalidParameterError("Invalid nonce");
   }
+}
 
-  // Timestamp validation
-  if (typeof input.timestamp !== "number") {
+function validateTimestamp(timestamp: unknown): void {
+  if (typeof timestamp !== "number") {
     throw new InvalidParameterError("Invalid timestamp");
   }
-  if (!Number.isFinite(input.timestamp) || input.timestamp <= 0) {
+  if (!Number.isFinite(timestamp) || timestamp <= 0) {
     throw new InvalidParameterError("timestamp out of reasonable range");
   }
+}
 
-  // Payload size limits (prevent DoS with huge payloads)
+function validatePayload(payload: unknown): void {
   try {
-    if (typeof input.payload === "string") {
+    if (typeof payload === "string") {
       const max = 10 * 1024 * 1024; // 10 MB
-      if (input.payload.length > max) {
+      if (payload.length > max) {
         throw new InvalidParameterError("payload too large");
       }
-    } else if (input.payload !== undefined && input.payload !== null) {
-      const s = safeStableStringify(input.payload);
+    } else if (payload !== undefined && payload !== null) {
+      const s = safeStableStringify(payload);
       const max = 10 * 1024 * 1024; // 10 MB
       if (s.length > max) {
         throw new InvalidParameterError("payload too large");
       }
     }
   } catch (err) {
-    // Re-throw validation errors
     if (err instanceof InvalidParameterError) throw err;
     throw new InvalidParameterError("Invalid payload");
   }
+}
 
-  // Signature validation (accept base64 or base64url)
-  if (
-    typeof input.signatureBase64 !== "string" ||
-    input.signatureBase64.length === 0
-  ) {
+function validateSignature(signatureBase64: unknown): void {
+  if (typeof signatureBase64 !== "string" || signatureBase64.length === 0) {
     throw new InvalidParameterError(
       "signatureBase64 must be a non-empty string",
     );
   }
-  if (input.signatureBase64.length > MAX_SIGNATURE_LENGTH) {
+  if (signatureBase64.length > MAX_SIGNATURE_LENGTH) {
     throw new InvalidParameterError("Signature too long");
   }
-  if (!isLikelyBase64(input.signatureBase64)) {
+  if (!isLikelyBase64(signatureBase64)) {
     throw new InvalidParameterError(
       "signatureBase64 must be base64 or base64url",
     );
   }
+}
 
-  // Optional fields validation (allowlist approach)
-  if (input.method !== undefined) {
-    if (
-      typeof input.method !== "string" ||
-      input.method.length > MAX_METHOD_LENGTH
-    ) {
-      throw new InvalidParameterError("Invalid method");
-    }
-    if (!METHOD_RE.test(input.method.toUpperCase())) {
-      throw new InvalidParameterError("method must be a valid HTTP method");
-    }
+function validateMethod(method: unknown): void {
+  if (typeof method !== "string" || method.length > MAX_METHOD_LENGTH) {
+    throw new InvalidParameterError("Invalid method");
   }
-
-  if (input.path !== undefined) {
-    if (typeof input.path !== "string" || input.path.length > MAX_PATH_LENGTH) {
-      throw new InvalidParameterError("Invalid path");
-    }
-    if (!input.path.startsWith("/")) {
-      throw new InvalidParameterError("path must start with '/'");
-    }
-    if (input.path.includes("..") || input.path.includes("//")) {
-      throw new InvalidParameterError(
-        "path traversal patterns are not allowed",
-      );
-    }
+  if (!METHOD_RE.test(method.toUpperCase())) {
+    throw new InvalidParameterError("method must be a valid HTTP method");
   }
+}
 
-  if (input.bodyHash !== undefined) {
-    if (typeof input.bodyHash !== "string" || input.bodyHash.length > 256) {
-      throw new InvalidParameterError("Invalid bodyHash");
-    }
-    if (input.bodyHash.length > 0 && !isLikelyBase64(input.bodyHash)) {
-      throw new InvalidParameterError("bodyHash must be base64 or base64url");
-    }
+function validatePath(path: unknown): void {
+  if (typeof path !== "string" || path.length > MAX_PATH_LENGTH) {
+    throw new InvalidParameterError("Invalid path");
   }
+  if (!path.startsWith("/")) {
+    throw new InvalidParameterError("path must start with '/'");
+  }
+  if (path.includes("..") || path.includes("//")) {
+    throw new InvalidParameterError("path traversal patterns are not allowed");
+  }
+}
 
-  if (input.kid !== undefined) {
-    if (
-      typeof input.kid !== "string" ||
-      input.kid.length === 0 ||
-      input.kid.length > 128
-    ) {
-      throw new InvalidParameterError("Invalid kid");
-    }
-    if (!KID_RE.test(input.kid)) {
-      throw new InvalidParameterError("kid contains invalid characters");
-    }
+function validateBodyHash(bodyHash: unknown): void {
+  if (typeof bodyHash !== "string" || bodyHash.length > 256) {
+    throw new InvalidParameterError("Invalid bodyHash");
+  }
+  if (bodyHash.length > 0 && !isLikelyBase64(bodyHash)) {
+    throw new InvalidParameterError("bodyHash must be base64 or base64url");
+  }
+}
+
+function validateKid(kid: unknown): void {
+  if (typeof kid !== "string" || kid.length === 0 || kid.length > 128) {
+    throw new InvalidParameterError("Invalid kid");
+  }
+  if (!KID_RE.test(kid)) {
+    throw new InvalidParameterError("kid contains invalid characters");
   }
 }
 
@@ -451,7 +448,7 @@ async function computeHmacSha256(
       );
       const signature = await subtle.sign("HMAC", key, msgCopy);
       return new Uint8Array(signature);
-    // eslint-disable-next-line sonarjs/no-useless-catch -- Intentional catch: avoids an upstream plugin crash on empty catch/finally AST shapes while preserving behavior
+      // eslint-disable-next-line sonarjs/no-useless-catch
     } catch (err) {
       throw err;
     } finally {
@@ -596,6 +593,7 @@ export { verifyApiRequestSignature as verifyApiRequestSignatureExtended };
  * Safe wrapper that returns boolean without throwing typed errors.
  * Use this when you do not want verification failure reasons to leak to callers.
  */
+/* eslint-disable security-node/detect-unhandled-async-errors */
 export async function verifyApiRequestSignatureSafe(
   input: VerifyExtendedInput,
   nonceStore: INonceStore,
@@ -604,9 +602,11 @@ export async function verifyApiRequestSignatureSafe(
   try {
     return await verifyApiRequestSignature(input, nonceStore, options);
   } catch {
+    // Intentionally ignore errors in safe wrapper - return false on any failure
     return false;
   }
 }
+/* eslint-enable security-node/detect-unhandled-async-errors */
 
 /**
  * Production-friendly wrapper that retrieves the secret material via a key provider based on kid.

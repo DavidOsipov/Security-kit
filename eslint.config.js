@@ -320,6 +320,15 @@ export default [
       "no-restricted-globals": "off",
     },
   },
+  // Allow the legacy `dev-logger.ts` filename; enforce full name elsewhere.
+  {
+    files: ["src/dev-logger.ts"],
+    rules: {
+      // The codebase historically used 'dev-logger.ts'; allow this single
+      // exception rather than renaming the file to avoid churn across tests.
+      "unicorn/prevent-abbreviations": "off",
+    },
+  },
   // Library-wide overrides: allow legitimate getRandomValues usage and
   // relax object-injection checks for internal implementations.
   {
