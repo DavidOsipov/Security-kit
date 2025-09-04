@@ -59,37 +59,59 @@ describe("url module", () => {
 
   describe("normalizeOrigin", () => {
     it("normalizes origins correctly", () => {
-      expect(normalizeOrigin("https://example.com")).toBe("https://example.com");
-      expect(normalizeOrigin("https://example.com:443")).toBe("https://example.com");
-      expect(normalizeOrigin("http://example.com:80")).toBe("http://example.com");
-      expect(normalizeOrigin("https://example.com:8080")).toBe("https://example.com:8080");
+      expect(normalizeOrigin("https://example.com")).toBe(
+        "https://example.com",
+      );
+      expect(normalizeOrigin("https://example.com:443")).toBe(
+        "https://example.com",
+      );
+      expect(normalizeOrigin("http://example.com:80")).toBe(
+        "http://example.com",
+      );
+      expect(normalizeOrigin("https://example.com:8080")).toBe(
+        "https://example.com:8080",
+      );
     });
 
     it("rejects invalid origins", () => {
       expect(() => normalizeOrigin("")).toThrow(InvalidParameterError);
       expect(() => normalizeOrigin("not-a-url")).toThrow(InvalidParameterError);
-      expect(() => normalizeOrigin("https://user:pass@example.com")).toThrow(InvalidParameterError);
+      expect(() => normalizeOrigin("https://user:pass@example.com")).toThrow(
+        InvalidParameterError,
+      );
     });
   });
 
   describe("strictDecodeURIComponentOrThrow", () => {
     it("decodes valid URI components", () => {
-      expect(strictDecodeURIComponentOrThrow("hello%20world")).toBe("hello world");
-      expect(strictDecodeURIComponentOrThrow("test%2Bvalue")).toBe("test+value");
+      expect(strictDecodeURIComponentOrThrow("hello%20world")).toBe(
+        "hello world",
+      );
+      expect(strictDecodeURIComponentOrThrow("test%2Bvalue")).toBe(
+        "test+value",
+      );
     });
 
     it("throws on malformed input", () => {
-      expect(() => strictDecodeURIComponentOrThrow("%E0%A4%A")).toThrow(InvalidParameterError);
+      expect(() => strictDecodeURIComponentOrThrow("%E0%A4%A")).toThrow(
+        InvalidParameterError,
+      );
     });
 
     it("throws on control characters", () => {
-      expect(() => strictDecodeURIComponentOrThrow("%00")).toThrow(InvalidParameterError);
-      expect(() => strictDecodeURIComponentOrThrow("%1F")).toThrow(InvalidParameterError);
+      expect(() => strictDecodeURIComponentOrThrow("%00")).toThrow(
+        InvalidParameterError,
+      );
+      expect(() => strictDecodeURIComponentOrThrow("%1F")).toThrow(
+        InvalidParameterError,
+      );
     });
 
     it("throws on overly long input", () => {
       const longInput = "%20".repeat(2000);
-      expect(() => strictDecodeURIComponentOrThrow(longInput)).toThrow(InvalidParameterError);
+      expect(() => strictDecodeURIComponentOrThrow(longInput)).toThrow(
+        InvalidParameterError,
+      );
     });
   });
 
@@ -101,8 +123,12 @@ describe("url module", () => {
     });
 
     it("throws on control characters", () => {
-      expect(() => encodeComponentRFC3986("test\x00")).toThrow(InvalidParameterError);
-      expect(() => encodeComponentRFC3986("test\x1F")).toThrow(InvalidParameterError);
+      expect(() => encodeComponentRFC3986("test\x00")).toThrow(
+        InvalidParameterError,
+      );
+      expect(() => encodeComponentRFC3986("test\x1F")).toThrow(
+        InvalidParameterError,
+      );
     });
   });
 
@@ -127,22 +153,32 @@ describe("url module", () => {
     });
 
     it("throws without IDNA library", () => {
-      expect(() => encodeHostLabel("example", {} as any)).toThrow(InvalidParameterError);
+      expect(() => encodeHostLabel("example", {} as any)).toThrow(
+        InvalidParameterError,
+      );
     });
 
     it("throws with invalid IDNA library", () => {
-      expect(() => encodeHostLabel("example", { toASCII: null } as any)).toThrow(InvalidParameterError);
+      expect(() =>
+        encodeHostLabel("example", { toASCII: null } as any),
+      ).toThrow(InvalidParameterError);
     });
   });
 
   describe("security hardening - credential rejection", () => {
     it("rejects URLs with embedded credentials in createSecureURL", () => {
-      expect(() => createSecureURL("https://user:pass@example.com")).toThrow(InvalidParameterError);
-      expect(() => createSecureURL("https://user@example.com")).toThrow(InvalidParameterError);
+      expect(() => createSecureURL("https://user:pass@example.com")).toThrow(
+        InvalidParameterError,
+      );
+      expect(() => createSecureURL("https://user@example.com")).toThrow(
+        InvalidParameterError,
+      );
     });
 
     it("rejects URLs with embedded credentials in updateURLParams", () => {
-      expect(() => updateURLParams("https://user:pass@example.com", {})).toThrow(InvalidParameterError);
+      expect(() =>
+        updateURLParams("https://user:pass@example.com", {}),
+      ).toThrow(InvalidParameterError);
     });
 
     it("rejects URLs with embedded credentials in validateURL", () => {
@@ -154,7 +190,9 @@ describe("url module", () => {
     });
 
     it("rejects URLs with embedded credentials in parseURLParams", () => {
-      expect(() => parseURLParams("https://user:pass@example.com")).toThrow(InvalidParameterError);
+      expect(() => parseURLParams("https://user:pass@example.com")).toThrow(
+        InvalidParameterError,
+      );
     });
   });
 
@@ -169,49 +207,85 @@ describe("url module", () => {
     });
 
     it("prevents path traversal in path segments", () => {
-      expect(() => createSecureURL("https://example.com", [".."])).toThrow(InvalidParameterError);
-      expect(() => createSecureURL("https://example.com", ["."])).toThrow(InvalidParameterError);
-      expect(() => createSecureURL("https://example.com", ["path/../../../etc"])).toThrow(InvalidParameterError);
+      expect(() => createSecureURL("https://example.com", [".."])).toThrow(
+        InvalidParameterError,
+      );
+      expect(() => createSecureURL("https://example.com", ["."])).toThrow(
+        InvalidParameterError,
+      );
+      expect(() =>
+        createSecureURL("https://example.com", ["path/../../../etc"]),
+      ).toThrow(InvalidParameterError);
     });
 
     it("validates path segment length limits", () => {
       const longSegment = "a".repeat(2000);
-      expect(() => createSecureURL("https://example.com", [longSegment])).toThrow(InvalidParameterError);
+      expect(() =>
+        createSecureURL("https://example.com", [longSegment]),
+      ).toThrow(InvalidParameterError);
     });
 
     it("rejects empty path segments", () => {
-      expect(() => createSecureURL("https://example.com", [""])).toThrow(InvalidParameterError);
+      expect(() => createSecureURL("https://example.com", [""])).toThrow(
+        InvalidParameterError,
+      );
     });
 
     it("prevents prototype pollution in query parameters", () => {
       const maliciousParams = {
-        "__proto__": "polluted",
-        "constructor": "bad",
-        "safe": "value"
+        __proto__: "polluted",
+        constructor: "bad",
+        safe: "value",
       };
 
-      expect(() => createSecureURL("https://example.com", [], maliciousParams)).toThrow(InvalidParameterError);
+      expect(() =>
+        createSecureURL("https://example.com", [], maliciousParams),
+      ).toThrow(InvalidParameterError);
     });
 
     it("validates fragment safety", () => {
-      expect(() => createSecureURL("https://example.com", [], {}, "safe-fragment")).not.toThrow();
-      expect(() => createSecureURL("https://example.com", [], {}, "bad\x00fragment")).toThrow(InvalidParameterError);
+      expect(() =>
+        createSecureURL("https://example.com", [], {}, "safe-fragment"),
+      ).not.toThrow();
+      expect(() =>
+        createSecureURL("https://example.com", [], {}, "bad\x00fragment"),
+      ).toThrow(InvalidParameterError);
     });
   });
 
   describe("scheme policy enforcement", () => {
     it("enforces HTTPS requirement", () => {
-      expect(() => createSecureURL("http://example.com", [], {}, undefined, { requireHTTPS: true })).toThrow(InvalidParameterError);
-      expect(createSecureURL("https://example.com", [], {}, undefined, { requireHTTPS: true })).toBe("https://example.com/");
+      expect(() =>
+        createSecureURL("http://example.com", [], {}, undefined, {
+          requireHTTPS: true,
+        }),
+      ).toThrow(InvalidParameterError);
+      expect(
+        createSecureURL("https://example.com", [], {}, undefined, {
+          requireHTTPS: true,
+        }),
+      ).toBe("https://example.com/");
     });
 
     it("validates allowed schemes intersection", () => {
-      expect(() => createSecureURL("ftp://example.com", [], {}, undefined, { allowedSchemes: ["https:"] })).toThrow(InvalidParameterError);
-      expect(createSecureURL("https://example.com", [], {}, undefined, { allowedSchemes: ["https:"] })).toBe("https://example.com/");
+      expect(() =>
+        createSecureURL("ftp://example.com", [], {}, undefined, {
+          allowedSchemes: ["https:"],
+        }),
+      ).toThrow(InvalidParameterError);
+      expect(
+        createSecureURL("https://example.com", [], {}, undefined, {
+          allowedSchemes: ["https:"],
+        }),
+      ).toBe("https://example.com/");
     });
 
     it("handles empty allowedSchemes as deny-all", () => {
-      expect(() => createSecureURL("https://example.com", [], {}, undefined, { allowedSchemes: [] })).toThrow(InvalidParameterError);
+      expect(() =>
+        createSecureURL("https://example.com", [], {}, undefined, {
+          allowedSchemes: [],
+        }),
+      ).toThrow(InvalidParameterError);
     });
   });
 
@@ -219,12 +293,18 @@ describe("url module", () => {
     it("filters unsafe query parameter keys", () => {
       const params = {
         "safe-param": "value",
-        "__proto__": "unsafe",
-        "constructor": "unsafe",
-        "prototype": "unsafe"
+        __proto__: "unsafe",
+        constructor: "unsafe",
+        prototype: "unsafe",
       };
 
-      const result = createSecureURL("https://example.com", [], params, undefined, { onUnsafeKey: "skip" });
+      const result = createSecureURL(
+        "https://example.com",
+        [],
+        params,
+        undefined,
+        { onUnsafeKey: "skip" },
+      );
       expect(result).toContain("safe-param=value");
       expect(result).not.toContain("__proto__");
       expect(result).not.toContain("constructor");
@@ -237,10 +317,12 @@ describe("url module", () => {
         "valid_key-123": "value",
         "invalid key": "value",
         "": "empty",
-        [longKey]: "too-long"
+        [longKey]: "too-long",
       };
 
-      expect(() => createSecureURL("https://example.com", [], params)).toThrow(InvalidParameterError);
+      expect(() => createSecureURL("https://example.com", [], params)).toThrow(
+        InvalidParameterError,
+      );
     });
   });
 
@@ -248,7 +330,9 @@ describe("url module", () => {
     it("provides safe error messages in production", () => {
       // Test that error messages don't leak internal details
       expect(() => createSecureURL("not-a-url")).toThrow(InvalidParameterError);
-      expect(() => createSecureURL("https://user:pass@example.com")).toThrow(InvalidParameterError);
+      expect(() => createSecureURL("https://user:pass@example.com")).toThrow(
+        InvalidParameterError,
+      );
     });
 
     it("handles malformed URLs gracefully", () => {
@@ -263,21 +347,37 @@ describe("url module", () => {
   describe("boundary testing", () => {
     it("handles edge cases in URL construction", () => {
       // Empty query params
-      expect(createSecureURL("https://example.com", [], {})).toBe("https://example.com/");
+      expect(createSecureURL("https://example.com", [], {})).toBe(
+        "https://example.com/",
+      );
 
       // Undefined values in params
-      expect(createSecureURL("https://example.com", [], { a: undefined })).toBe("https://example.com/?a=");
+      expect(createSecureURL("https://example.com", [], { a: undefined })).toBe(
+        "https://example.com/?a=",
+      );
 
       // Null values in params
-      expect(createSecureURL("https://example.com", [], { a: null })).toBe("https://example.com/?a=");
+      expect(createSecureURL("https://example.com", [], { a: null })).toBe(
+        "https://example.com/?a=",
+      );
 
       // Mixed types in params
-      expect(createSecureURL("https://example.com", [], { num: 123, str: "test", bool: true })).toContain("num=123");
+      expect(
+        createSecureURL("https://example.com", [], {
+          num: 123,
+          str: "test",
+          bool: true,
+        }),
+      ).toContain("num=123");
     });
 
     it("validates URL component size limits", () => {
       const longPath = "a".repeat(1000);
-      expect(() => createSecureURL("https://example.com", [longPath], {}, undefined, { maxLength: 500 })).toThrow(InvalidParameterError);
+      expect(() =>
+        createSecureURL("https://example.com", [longPath], {}, undefined, {
+          maxLength: 500,
+        }),
+      ).toThrow(InvalidParameterError);
     });
   });
 });

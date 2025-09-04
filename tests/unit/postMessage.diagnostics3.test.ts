@@ -13,8 +13,7 @@ describe("postMessage diagnostics - refill and transient crypto failures", () =>
 
   it("refills diagnostic budget after time window", async () => {
     vi.resetModules();
-    // Use real timers for this complex async test
-    vi.useRealTimers();
+    // Use fake timers for deterministic timing control
 
     const state = await import("../../src/state");
     const fakeSubtle = {
@@ -32,7 +31,10 @@ describe("postMessage diagnostics - refill and transient crypto failures", () =>
     );
 
     const utils = await import("../../src/utils");
-    const secureDevLogSpy = vi.spyOn(utils, "secureDevLog");
+    // Spy on console.warn (used by _devConsole for 'warn' level) to capture logged context
+    const consoleWarnSpy = vi
+      .spyOn(console, "warn")
+      .mockImplementation(() => {});
 
     const postMessage = await import("../../src/postMessage");
 
@@ -53,31 +55,68 @@ describe("postMessage diagnostics - refill and transient crypto failures", () =>
         source: window,
       });
       window.dispatchEvent(ev);
-      // Small delay to allow async operations
-      await new Promise((resolve) => setTimeout(resolve, 10));
+      // Advance fake timers to allow any scheduled timeouts and microtasks
+      vi.advanceTimersByTime(10);
+      await Promise.resolve();
     }
 
     // Wait for background tasks to finish
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    vi.advanceTimersByTime(100);
+    await Promise.resolve();
 
-    const calls1 = secureDevLogSpy.mock.calls.filter((c) => {
+    // helper: advance timers and flush microtasks until spy has at least minCalls
+    function parseContextFromLogArg(arg: unknown): any | undefined {
+      if (typeof arg !== "string") return undefined;
+      const idx = arg.indexOf("context=");
+      if (idx === -1) return undefined;
+      const json = arg.slice(idx + "context=".length);
       try {
-        const [, comp, msg, ctx] = c as any;
-        return (
-          msg === "Message dropped due to failed validation" &&
-          ctx &&
-          (ctx as any).fingerprint
-        );
+        return JSON.parse(json);
       } catch {
-        return false;
+        return undefined;
       }
-    });
+    }
 
-    expect(calls1.length).toBeGreaterThan(0);
-    expect(calls1.length).toBeLessThanOrEqual(DEFAULT_DIAGNOSTIC_BUDGET);
+    async function waitForConsoleWarnCalls(minCalls: number, maxIter = 50) {
+      for (let i = 0; i < maxIter; i++) {
+        const calls = (consoleWarnSpy.mock.calls as Array<any[]>).filter(
+          (c) => {
+            const arg0 = c[0];
+            if (typeof arg0 !== "string") return false;
+            if (
+              !arg0.includes("(postMessage)") ||
+              !arg0.includes("Message dropped due to failed validation")
+            )
+              return false;
+            const ctx = parseContextFromLogArg(arg0);
+            return !!(ctx && typeof ctx.fingerprint === "string");
+          },
+        );
+        if (calls.length >= minCalls) return calls;
+        vi.advanceTimersByTime(20);
+        await Promise.resolve();
+      }
+      return (consoleWarnSpy.mock.calls as Array<any[]>).filter((c) => {
+        const arg0 = c[0];
+        if (typeof arg0 !== "string") return false;
+        if (
+          !arg0.includes("(postMessage)") ||
+          !arg0.includes("Message dropped due to failed validation")
+        )
+          return false;
+        const ctx = parseContextFromLogArg(arg0);
+        return !!(ctx && typeof ctx.fingerprint === "string");
+      });
+    }
 
-    // advance time beyond refill window using real time
-    await new Promise((resolve) => setTimeout(resolve, 65000));
+    const captured1 = await waitForConsoleWarnCalls(1);
+
+    expect(captured1.length).toBeGreaterThan(0);
+    expect(captured1.length).toBeLessThanOrEqual(DEFAULT_DIAGNOSTIC_BUDGET);
+
+    // advance time beyond refill window deterministically
+    vi.advanceTimersByTime(65000);
+    await Promise.resolve();
 
     // send one more message which should be fingerprinted after refill
     const ev2 = new MessageEvent("message", {
@@ -86,36 +125,19 @@ describe("postMessage diagnostics - refill and transient crypto failures", () =>
       source: window,
     });
     window.dispatchEvent(ev2);
-    // Wait for async operations
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    // wait for the post-refill fingerprinted call(s)
+    const captured2 = await waitForConsoleWarnCalls(captured1.length + 1);
 
-    const calls2 = secureDevLogSpy.mock.calls.filter((c) => {
-      try {
-        const [, comp, msg, ctx] = c as any;
-        return (
-          msg === "Message dropped due to failed validation" &&
-          ctx &&
-          (ctx as any).fingerprint
-        );
-      } catch {
-        return false;
-      }
-    });
-
-    expect(calls2.length).toBeGreaterThan(calls1.length);
+    expect(captured2.length).toBeGreaterThan(captured1.length);
 
     listener.destroy();
-
-    // Restore fake timers for other tests
-    vi.useFakeTimers();
+    consoleWarnSpy.mockRestore();
   }, 120000); // 2 minute timeout
 
-  it.skip("transient ensureCrypto failure then recovery allows later fingerprinting", async () => {
-    // This test has timing issues with async crypto operations
-    // The logic is correct but the test framework has trouble with the async flow
-    // TODO: Re-enable when async testing infrastructure is improved
+  it("transient ensureCrypto failure then recovery allows later fingerprinting", async () => {
+    // Use fake timers for deterministic control
     vi.resetModules();
-    // Reset any global test state
+    // Ensure test APIs are allowed so we can call internals if needed
     (globalThis as any).__SECURITY_KIT_ALLOW_TEST_APIS = true;
 
     const state = await import("../../src/state");
@@ -131,6 +153,7 @@ describe("postMessage diagnostics - refill and transient crypto failures", () =>
       subtle: fakeSubtle,
     } as any;
 
+    // First call fails, second call succeeds deterministically
     vi.spyOn(state, "ensureCrypto").mockImplementation(async () => {
       calls++;
       if (calls === 1) {
@@ -140,7 +163,9 @@ describe("postMessage diagnostics - refill and transient crypto failures", () =>
     });
 
     const utils = await import("../../src/utils");
-    const secureDevLogSpy = vi.spyOn(utils, "secureDevLog");
+    const consoleWarnSpy = vi
+      .spyOn(console, "warn")
+      .mockImplementation(() => {});
 
     const postMessage = await import("../../src/postMessage");
 
@@ -154,8 +179,8 @@ describe("postMessage diagnostics - refill and transient crypto failures", () =>
 
     const bad = { a: "no" };
 
-    // Clear any previous calls
-    secureDevLogSpy.mockClear();
+    // Clear any previous captured logs
+    consoleWarnSpy.mockClear();
 
     // first message will trigger ensureCrypto rejection and no fingerprint
     const ev1 = new MessageEvent("message", {
@@ -165,27 +190,38 @@ describe("postMessage diagnostics - refill and transient crypto failures", () =>
     });
     window.dispatchEvent(ev1);
 
-    // Wait for async operations to complete
-    await new Promise((resolve) => setTimeout(resolve, 500));
+    // Allow any pending microtasks to run (hand-crafted promise)
+    await Promise.resolve();
+    vi.advanceTimersByTime(50);
+    await Promise.resolve();
 
-    const callsAfter1 = secureDevLogSpy.mock.calls.filter((c) => {
-      try {
-        const [, comp, msg, ctx] = c as any;
-        return (
-          msg === "Message dropped due to failed validation" &&
-          ctx &&
-          (ctx as any).fingerprint
-        );
-      } catch {
-        return false;
-      }
-    });
+    const callsAfter1 = (consoleWarnSpy.mock.calls as Array<any[]>).filter(
+      (c) => {
+        const arg0 = c[0];
+        if (typeof arg0 !== "string") return false;
+        if (
+          !arg0.includes("(postMessage)") ||
+          !arg0.includes("Message dropped due to failed validation")
+        )
+          return false;
+        const ctx = (() => {
+          const idx = arg0.indexOf("context=");
+          if (idx === -1) return undefined;
+          try {
+            return JSON.parse(arg0.slice(idx + "context=".length));
+          } catch {
+            return undefined;
+          }
+        })();
+        return !!(ctx && typeof ctx.fingerprint === "string");
+      },
+    );
 
     // no fingerprint yet - ensureCrypto failed
     expect(callsAfter1.length).toBe(0);
 
-    // Clear spy for second test
-    secureDevLogSpy.mockClear();
+    // Clear captured logs for second message
+    consoleWarnSpy.mockClear();
 
     // second message should succeed (ensureCrypto returns crypto) and produce fingerprint
     const ev2 = new MessageEvent("message", {
@@ -195,24 +231,64 @@ describe("postMessage diagnostics - refill and transient crypto failures", () =>
     });
     window.dispatchEvent(ev2);
 
-    // Wait for async operations to complete
-    await new Promise((resolve) => setTimeout(resolve, 500));
+    // Allow microtasks and timers to settle
+    await Promise.resolve();
+    vi.advanceTimersByTime(50);
+    await Promise.resolve();
 
-    const callsAfter2 = secureDevLogSpy.mock.calls.filter((c) => {
-      try {
-        const [, comp, msg, ctx] = c as any;
-        return (
-          msg === "Message dropped due to failed validation" &&
-          ctx &&
-          (ctx as any).fingerprint
+    // wait for the fingerprinted call to appear deterministically
+    async function waitForConsoleWarnCallsLocal(
+      minCalls: number,
+      maxIter = 50,
+    ) {
+      for (let i = 0; i < maxIter; i++) {
+        const calls = (consoleWarnSpy.mock.calls as Array<any[]>).filter(
+          (c) => {
+            const arg0 = c[0];
+            if (typeof arg0 !== "string") return false;
+            if (
+              !arg0.includes("(postMessage)") ||
+              !arg0.includes("Message dropped due to failed validation")
+            )
+              return false;
+            const idx = arg0.indexOf("context=");
+            if (idx === -1) return false;
+            try {
+              const ctx = JSON.parse(arg0.slice(idx + "context=".length));
+              return !!(ctx && typeof ctx.fingerprint === "string");
+            } catch {
+              return false;
+            }
+          },
         );
-      } catch {
-        return false;
+        if (calls.length >= minCalls) return calls;
+        vi.advanceTimersByTime(20);
+        await Promise.resolve();
       }
-    });
+      return (consoleWarnSpy.mock.calls as Array<any[]>).filter((c) => {
+        const arg0 = c[0];
+        if (typeof arg0 !== "string") return false;
+        if (
+          !arg0.includes("(postMessage)") ||
+          !arg0.includes("Message dropped due to failed validation")
+        )
+          return false;
+        const idx = arg0.indexOf("context=");
+        if (idx === -1) return false;
+        try {
+          const ctx = JSON.parse(arg0.slice(idx + "context=".length));
+          return !!(ctx && typeof ctx.fingerprint === "string");
+        } catch {
+          return false;
+        }
+      });
+    }
+
+    const callsAfter2 = await waitForConsoleWarnCallsLocal(1);
 
     expect(callsAfter2.length).toBeGreaterThan(0);
 
     listener.destroy();
+    // timers restored in afterEach
   });
 });

@@ -433,9 +433,13 @@ export const __test_resetCryptoStateForUnitTests: undefined | (() => void) =
           _cryptoPromise = undefined;
           _cryptoState = CryptoState.Unconfigured;
           _cryptoInitGeneration = 0;
-          try {
-            environment.clearCache();
-          } catch {}
+          // NOTE: Do not clear the environment's explicit override here.
+          // Some tests set environment.setExplicitEnv("production") before
+          // resetting crypto state to verify production-only behavior. Clearing
+          // the environment cache here would silently drop that explicit
+          // override (since clearCache resets it), causing tests to run under a
+          // different environment than intended. Callers who need to clear the
+          // environment cache should do so explicitly in their tests.
         };
       })()
     : undefined;
@@ -453,9 +457,7 @@ export function __resetCryptoStateForTests(): void {
   _cryptoPromise = undefined;
   _cryptoState = CryptoState.Unconfigured;
   _cryptoInitGeneration = 0;
-  try {
-    environment.clearCache();
-  } catch {}
+  // Preserve any explicit environment overrides set by tests.
 }
 
 /* eslint-disable-next-line unicorn/prevent-abbreviations -- stable public test helper name; descriptive alias exported below */

@@ -20,6 +20,8 @@ import {
   MAX_RAW_INPUT_LENGTH,
   MAX_REDACT_DEPTH,
   MAX_LOG_STRING,
+  MAX_ITEMS_PER_ARRAY,
+  MAX_KEYS_PER_OBJECT,
   InvalidParameterError,
   IllegalStateError,
 } from "../../src/utils";
@@ -73,7 +75,7 @@ describe("utils - uncovered branches", () => {
       });
     });
 
-    it("handles malformed JWT patterns", () => {
+    it("handles malformed JWT patterns (fail-closed)", () => {
       const malformed = [
         "token=eyJxxxxx", // incomplete
         "token=xxxxx.yyyyy.zzzzz", // not base64url
@@ -83,7 +85,8 @@ describe("utils - uncovered branches", () => {
 
       malformed.forEach((msg) => {
         const result = sanitizeLogMessage(msg);
-        expect(result).toBe(msg); // Should not be redacted
+        // Fail-closed: even malformed token-looking data should be redacted
+        expect(result).toContain("[REDACTED]");
       });
     });
 
@@ -114,7 +117,8 @@ describe("utils - uncovered branches", () => {
       const message = "password=secret and authorization: Bearer token";
       const result = sanitizeLogMessage(message);
       expect(result).toContain("password=[REDACTED]");
-      expect(result).toContain("authorization=[REDACTED]");
+      // Canonical Authorization casing is used by sanitizer
+      expect(result).toContain("Authorization=[REDACTED]");
     });
 
     it("handles very long tokens/values", () => {
@@ -163,7 +167,9 @@ describe("utils - uncovered branches", () => {
     it("handles objects and arrays", () => {
       expect(sanitizeComponentName({})).toBe("unsafe-component-name");
       expect(sanitizeComponentName([])).toBe("unsafe-component-name");
-      expect(sanitizeComponentName({ toString: () => "safe" })).toBe("unsafe-component-name");
+      expect(sanitizeComponentName({ toString: () => "safe" })).toBe(
+        "unsafe-component-name",
+      );
     });
 
     it("handles strings with special regex characters", () => {
@@ -191,9 +197,15 @@ describe("utils - uncovered branches", () => {
     });
 
     it("handles strings with unicode characters", () => {
-      expect(sanitizeComponentName("component_测试")).toBe("unsafe-component-name");
-      expect(sanitizeComponentName("component-ñ")).toBe("unsafe-component-name");
-      expect(sanitizeComponentName("component_🚀")).toBe("unsafe-component-name");
+      expect(sanitizeComponentName("component_测试")).toBe(
+        "unsafe-component-name",
+      );
+      expect(sanitizeComponentName("component-ñ")).toBe(
+        "unsafe-component-name",
+      );
+      expect(sanitizeComponentName("component_🚀")).toBe(
+        "unsafe-component-name",
+      );
     });
 
     it("handles strings at length boundaries", () => {
@@ -205,9 +217,15 @@ describe("utils - uncovered branches", () => {
     });
 
     it("handles strings with control characters", () => {
-      expect(sanitizeComponentName("component\x00name")).toBe("unsafe-component-name");
-      expect(sanitizeComponentName("component\nname")).toBe("unsafe-component-name");
-      expect(sanitizeComponentName("component\tname")).toBe("unsafe-component-name");
+      expect(sanitizeComponentName("component\x00name")).toBe(
+        "unsafe-component-name",
+      );
+      expect(sanitizeComponentName("component\nname")).toBe(
+        "unsafe-component-name",
+      );
+      expect(sanitizeComponentName("component\tname")).toBe(
+        "unsafe-component-name",
+      );
     });
 
     it("handles strings starting or ending with special characters", () => {
@@ -249,7 +267,9 @@ describe("utils - uncovered branches", () => {
 
       // Mock toString to not return SharedArrayBuffer
       const originalToString = Object.prototype.toString;
-      Object.prototype.toString = vi.fn().mockReturnValue("[object ArrayBuffer]");
+      Object.prototype.toString = vi
+        .fn()
+        .mockReturnValue("[object ArrayBuffer]");
 
       expect(isSharedArrayBufferView(mockView)).toBe(false);
 
@@ -263,17 +283,19 @@ describe("utils - uncovered branches", () => {
 
       // Mock SharedArrayBuffer to throw on instanceof
       const originalSAB = globalThis.SharedArrayBuffer;
-      Object.defineProperty(globalThis, 'SharedArrayBuffer', {
-        get: () => { throw new Error("instanceof error"); },
-        configurable: true
+      Object.defineProperty(globalThis, "SharedArrayBuffer", {
+        get: () => {
+          throw new Error("instanceof error");
+        },
+        configurable: true,
       });
 
       try {
         expect(isSharedArrayBufferView(mockView)).toBe(false);
       } finally {
-        Object.defineProperty(globalThis, 'SharedArrayBuffer', {
+        Object.defineProperty(globalThis, "SharedArrayBuffer", {
           value: originalSAB,
-          configurable: true
+          configurable: true,
         });
       }
     });
@@ -294,7 +316,7 @@ describe("utils - uncovered branches", () => {
       const mockBuffer = {};
       Object.defineProperty(mockBuffer, Symbol.toStringTag, {
         value: "SharedArrayBuffer",
-        enumerable: false
+        enumerable: false,
       });
 
       const mockView = new Uint8Array(10);
@@ -392,7 +414,9 @@ describe("utils - uncovered branches", () => {
     it("handles context serialization errors", () => {
       const badContext = {};
       Object.defineProperty(badContext, "badProp", {
-        get: () => { throw new Error("getter error"); }
+        get: () => {
+          throw new Error("getter error");
+        },
       });
 
       _devConsole("info", "message", badContext);
@@ -418,10 +442,18 @@ describe("utils - uncovered branches", () => {
 
   describe("registerTelemetry edge cases", () => {
     it("handles non-function hooks", () => {
-      expect(() => registerTelemetry("not a function" as any)).toThrow(InvalidParameterError);
-      expect(() => registerTelemetry(123 as any)).toThrow(InvalidParameterError);
-      expect(() => registerTelemetry(null as any)).toThrow(InvalidParameterError);
-      expect(() => registerTelemetry(undefined as any)).toThrow(InvalidParameterError);
+      expect(() => registerTelemetry("not a function" as any)).toThrow(
+        InvalidParameterError,
+      );
+      expect(() => registerTelemetry(123 as any)).toThrow(
+        InvalidParameterError,
+      );
+      expect(() => registerTelemetry(null as any)).toThrow(
+        InvalidParameterError,
+      );
+      expect(() => registerTelemetry(undefined as any)).toThrow(
+        InvalidParameterError,
+      );
     });
 
     it("handles unregister callback being called multiple times", () => {
@@ -489,21 +521,33 @@ describe("utils - uncovered branches", () => {
 
   describe("validateNumericParam edge cases", () => {
     it("handles NaN", () => {
-      expect(() => validateNumericParam(NaN, "test", 0, 10)).toThrow(InvalidParameterError);
+      expect(() => validateNumericParam(NaN, "test", 0, 10)).toThrow(
+        InvalidParameterError,
+      );
     });
 
     it("handles Infinity", () => {
-      expect(() => validateNumericParam(Infinity, "test", 0, 10)).toThrow(InvalidParameterError);
-      expect(() => validateNumericParam(-Infinity, "test", 0, 10)).toThrow(InvalidParameterError);
+      expect(() => validateNumericParam(Infinity, "test", 0, 10)).toThrow(
+        InvalidParameterError,
+      );
+      expect(() => validateNumericParam(-Infinity, "test", 0, 10)).toThrow(
+        InvalidParameterError,
+      );
     });
 
     it("handles floating point edge cases", () => {
-      expect(() => validateNumericParam(5.0000000001, "test", 0, 10)).toThrow(InvalidParameterError);
-      expect(() => validateNumericParam(4.9999999999, "test", 0, 10)).toThrow(InvalidParameterError);
+      expect(() => validateNumericParam(5.0000000001, "test", 0, 10)).toThrow(
+        InvalidParameterError,
+      );
+      expect(() => validateNumericParam(4.9999999999, "test", 0, 10)).toThrow(
+        InvalidParameterError,
+      );
     });
 
     it("handles very large numbers", () => {
-      expect(() => validateNumericParam(Number.MAX_SAFE_INTEGER + 1, "test", 0, 10)).toThrow(InvalidParameterError);
+      expect(() =>
+        validateNumericParam(Number.MAX_SAFE_INTEGER + 1, "test", 0, 10),
+      ).toThrow(InvalidParameterError);
     });
 
     it("handles negative zero", () => {
@@ -517,8 +561,12 @@ describe("utils - uncovered branches", () => {
     });
 
     it("handles Infinity", () => {
-      expect(() => validateProbability(Infinity)).toThrow(InvalidParameterError);
-      expect(() => validateProbability(-Infinity)).toThrow(InvalidParameterError);
+      expect(() => validateProbability(Infinity)).toThrow(
+        InvalidParameterError,
+      );
+      expect(() => validateProbability(-Infinity)).toThrow(
+        InvalidParameterError,
+      );
     });
 
     it("handles very small decimals", () => {
@@ -529,8 +577,12 @@ describe("utils - uncovered branches", () => {
     it("handles boundary values", () => {
       validateProbability(0); // Should not throw
       validateProbability(1); // Should not throw
-      expect(() => validateProbability(-Number.EPSILON)).toThrow(InvalidParameterError);
-      expect(() => validateProbability(1 + Number.EPSILON)).toThrow(InvalidParameterError);
+      expect(() => validateProbability(-Number.EPSILON)).toThrow(
+        InvalidParameterError,
+      );
+      expect(() => validateProbability(1 + Number.EPSILON)).toThrow(
+        InvalidParameterError,
+      );
     });
   });
 
@@ -563,18 +615,20 @@ describe("utils - uncovered branches", () => {
       const arr = new BigUint64Array([1n, 2n, 3n]);
       // Mock BigUint64Array to throw on instanceof
       const originalBigUint64Array = globalThis.BigUint64Array;
-      Object.defineProperty(globalThis, 'BigUint64Array', {
-        get: () => { throw new Error("BigInt error"); },
-        configurable: true
+      Object.defineProperty(globalThis, "BigUint64Array", {
+        get: () => {
+          throw new Error("BigInt error");
+        },
+        configurable: true,
       });
 
       try {
         const result = secureWipe(arr);
         expect(result).toBe(true); // Should fall back
       } finally {
-        Object.defineProperty(globalThis, 'BigUint64Array', {
+        Object.defineProperty(globalThis, "BigUint64Array", {
           value: originalBigUint64Array,
-          configurable: true
+          configurable: true,
         });
       }
     });
@@ -592,8 +646,10 @@ describe("utils - uncovered branches", () => {
 
     it("handles buffer property access failures", () => {
       const arr = new Uint8Array([1, 2, 3]);
-      Object.defineProperty(arr, 'buffer', {
-        get: () => { throw new Error("buffer access error"); }
+      Object.defineProperty(arr, "buffer", {
+        get: () => {
+          throw new Error("buffer access error");
+        },
       });
 
       const result = secureWipe(arr);
@@ -677,7 +733,9 @@ describe("utils - uncovered branches", () => {
       const overLimit = "a".repeat(maxLength + 1);
 
       expect(() => secureCompare(atLimit, atLimit)).not.toThrow();
-      expect(() => secureCompare(overLimit, "a")).toThrow(InvalidParameterError);
+      expect(() => secureCompare(overLimit, "a")).toThrow(
+        InvalidParameterError,
+      );
     });
 
     it("handles empty strings", () => {
@@ -706,8 +764,9 @@ describe("utils - uncovered branches", () => {
       ensureCryptoSpy.mockRejectedValue(new Error("crypto setup error"));
 
       try {
-        await expect(secureCompareAsync("a", "b", { requireCrypto: true }))
-          .rejects.toThrow();
+        await expect(
+          secureCompareAsync("a", "b", { requireCrypto: true }),
+        ).rejects.toThrow();
       } finally {
         ensureCryptoSpy.mockRestore();
       }
@@ -716,7 +775,9 @@ describe("utils - uncovered branches", () => {
     it("handles subtle.digest failures", async () => {
       const originalDigest = globalThis.crypto?.subtle?.digest;
       if (globalThis.crypto?.subtle) {
-        globalThis.crypto.subtle.digest = vi.fn().mockRejectedValue(new Error("digest error"));
+        globalThis.crypto.subtle.digest = vi
+          .fn()
+          .mockRejectedValue(new Error("digest error"));
       }
 
       try {
@@ -783,9 +844,9 @@ describe("utils - uncovered branches", () => {
 
     it("handles symbol property enumeration failures", () => {
       const obj = {};
-      Object.defineProperty(obj, 'nonEnum', {
-        value: 'test',
-        enumerable: false
+      Object.defineProperty(obj, "nonEnum", {
+        value: "test",
+        enumerable: false,
       });
 
       const result = _redact(obj);
@@ -818,7 +879,10 @@ describe("utils - uncovered branches", () => {
     });
 
     it("handles breadth limits for arrays", () => {
-      const largeArray = Array.from({ length: MAX_ITEMS_PER_ARRAY + 10 }, (_, i) => i);
+      const largeArray = Array.from(
+        { length: MAX_ITEMS_PER_ARRAY + 10 },
+        (_, i) => i,
+      );
       const result = _redact(largeArray) as any[];
 
       expect(result.length).toBeGreaterThan(MAX_ITEMS_PER_ARRAY);

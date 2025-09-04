@@ -1736,23 +1736,38 @@ export const __test_internals:
         // runtime guard for test-only API usage
         // use require to avoid static circular imports in some bundlers
         try {
-          // Prefer CommonJS require when available (test runners often support it).
-          // Fall back to throwing a helpful error if require is not available.
-          // We purposely avoid dynamic import here because this factory is synchronous.
-          // Tests should run in an environment that supports require or set the
-          // SECURITY_KIT_ALLOW_TEST_APIS flag.
+          // Enforce explicit opt-in in production at runtime.
+          const isProduction = (() => {
+            try {
+              return environment.isProduction;
+            } catch {
+              return false;
+            }
+          })();
+          const environmentAllow =
+            typeof process !== "undefined" &&
+            (process as unknown as { env?: Record<string, string | undefined> })
+              ?.env?.["SECURITY_KIT_ALLOW_TEST_APIS"] === "true";
+          const globalAllow = !!(
+            globalThis as unknown as Record<string, unknown>
+          )["__SECURITY_KIT_ALLOW_TEST_APIS"];
+          if (isProduction && !(environmentAllow || globalAllow)) {
+            throw new Error(
+              "Test-only APIs are disabled in production unless explicitly allowed.",
+            );
+          }
 
-          try {
-            const globalRecord = globalThis as unknown as Record<
-              string,
-              unknown
-            >;
-            const request = globalRecord["require"];
-            if (typeof request !== "function") {
+          const globalRecord = globalThis as unknown as Record<string, unknown>;
+          const request = globalRecord["require"];
+          if (typeof request !== "function") {
+            // Without CommonJS require, only allow exposure when an explicit flag is set.
+            if (!(environmentAllow || globalAllow)) {
               throw new Error(
-                "Cannot load test internals: require() not available. Ensure your test environment supports CommonJS require or enable SECURITY_KIT_ALLOW_TEST_APIS.",
+                "Cannot load test internals: require() not available and no explicit allow flag set.",
               );
             }
+            // Explicitly allowed via flags: proceed without calling development guard.
+          } else {
             /* eslint-disable-next-line @typescript-eslint/no-unsafe-call -- Runtime guard ensures request is a function; test environment only */
             const developmentGuards = (request as Function)(
               "./development-guards",
@@ -1760,8 +1775,6 @@ export const __test_internals:
               readonly assertTestApiAllowed: () => void;
             };
             developmentGuards.assertTestApiAllowed();
-          } catch {
-            // Ignore require errors in test environment setup
           }
 
           const testExports = {
@@ -1779,7 +1792,7 @@ export const __test_internals:
           };
           return testExports;
         } catch (error: unknown) {
-          // If test internals cannot be exposed, return undefined to avoid exposing internals in prod builds.
+          // If test internals cannot be exposed, return undefined to avoid exposing internals.
           try {
             secureDevelopmentLog(
               "warn",

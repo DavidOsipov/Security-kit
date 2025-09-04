@@ -432,6 +432,56 @@ export class SecureApiSigner {
   public static async create(
     init: SecureApiSignerInit & { readonly integrity?: IntegrityMode },
   ): Promise<SecureApiSigner> {
+    // Validate basic parameters first
+    if (
+      init.integrity !== undefined &&
+      !["require", "compute", "none"].includes(init.integrity)
+    ) {
+      throw new InvalidParameterError(
+        `Invalid integrity mode: ${init.integrity}. Must be 'require', 'compute', or 'none'.`,
+      );
+    }
+
+    if (init.integrity === undefined) {
+      throw new InvalidParameterError(
+        'integrity mode cannot be undefined. Use "require", "compute", or "none".',
+      );
+    }
+
+    // Validate configuration parameters
+    if (
+      init.maxPendingRequests !== undefined &&
+      (typeof init.maxPendingRequests !== "number" ||
+        init.maxPendingRequests < 1 ||
+        !Number.isInteger(init.maxPendingRequests))
+    ) {
+      throw new InvalidParameterError(
+        "maxPendingRequests must be a positive integer.",
+      );
+    }
+
+    if (
+      init.requestTimeoutMs !== undefined &&
+      (typeof init.requestTimeoutMs !== "number" ||
+        init.requestTimeoutMs <= 0 ||
+        !Number.isInteger(init.requestTimeoutMs))
+    ) {
+      throw new InvalidParameterError(
+        "requestTimeoutMs must be a positive integer.",
+      );
+    }
+
+    if (
+      init.destroyAckTimeoutMs !== undefined &&
+      (typeof init.destroyAckTimeoutMs !== "number" ||
+        init.destroyAckTimeoutMs < 0 ||
+        !Number.isInteger(init.destroyAckTimeoutMs))
+    ) {
+      throw new InvalidParameterError(
+        "destroyAckTimeoutMs must be a non-negative integer.",
+      );
+    }
+
     // Change default: require strict integrity unless explicitly overridden.
     const integrity: IntegrityMode = init.integrity ?? "require";
 

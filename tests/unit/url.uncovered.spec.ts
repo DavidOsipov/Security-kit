@@ -15,13 +15,13 @@ describe("url.ts uncovered branches - comprehensive coverage", () => {
       expect(() =>
         createSecureURL("http://example.com", [], {}, undefined, {
           requireHTTPS: true,
-        })
+        }),
       ).toThrow(InvalidParameterError);
     });
 
     it("updateURLParams throws when requireHTTPS=true but scheme is not https", () => {
       expect(() =>
-        updateURLParams("http://example.com", {}, { requireHTTPS: true })
+        updateURLParams("http://example.com", {}, { requireHTTPS: true }),
       ).toThrow(InvalidParameterError);
     });
 
@@ -33,9 +33,13 @@ describe("url.ts uncovered branches - comprehensive coverage", () => {
     });
 
     it("updateURLParams allows https when requireHTTPS=true", () => {
-      const result = updateURLParams("https://example.com", {}, {
-        requireHTTPS: true,
-      });
+      const result = updateURLParams(
+        "https://example.com",
+        {},
+        {
+          requireHTTPS: true,
+        },
+      );
       expect(result).toBe("https://example.com/");
     });
   });
@@ -45,7 +49,7 @@ describe("url.ts uncovered branches - comprehensive coverage", () => {
       expect(() =>
         createSecureURL("ftp://example.com", [], {}, undefined, {
           allowedSchemes: ["https:"],
-        })
+        }),
       ).toThrow(InvalidParameterError);
     });
 
@@ -70,13 +74,13 @@ describe("url.ts uncovered branches - comprehensive coverage", () => {
   describe("credential rejection across all APIs", () => {
     it("normalizeOrigin rejects URLs with username", () => {
       expect(() => normalizeOrigin("https://user@example.com")).toThrow(
-        InvalidParameterError
+        InvalidParameterError,
       );
     });
 
     it("normalizeOrigin rejects URLs with password", () => {
       expect(() => normalizeOrigin("https://user:pass@example.com")).toThrow(
-        InvalidParameterError
+        InvalidParameterError,
       );
     });
 
@@ -100,18 +104,23 @@ describe("url.ts uncovered branches - comprehensive coverage", () => {
   describe("fragment control character rejection", () => {
     it("createSecureURL rejects fragment with null character", () => {
       expect(() =>
-        createSecureURL("https://example.com", [], {}, "fragment\x00")
+        createSecureURL("https://example.com", [], {}, "fragment\x00"),
       ).toThrow(InvalidParameterError);
     });
 
     it("createSecureURL rejects fragment with control character", () => {
       expect(() =>
-        createSecureURL("https://example.com", [], {}, "fragment\x1F")
+        createSecureURL("https://example.com", [], {}, "fragment\x1F"),
       ).toThrow(InvalidParameterError);
     });
 
     it("createSecureURL allows safe fragment", () => {
-      const result = createSecureURL("https://example.com", [], {}, "safe-fragment");
+      const result = createSecureURL(
+        "https://example.com",
+        [],
+        {},
+        "safe-fragment",
+      );
       expect(result).toBe("https://example.com/#safe-fragment");
     });
   });
@@ -132,9 +141,13 @@ describe("url.ts uncovered branches - comprehensive coverage", () => {
         ["key1", "newvalue1"],
         ["key2", undefined],
       ]);
-      const result = updateURLParams("https://example.com?key1=old&key2=old", updates, {
-        removeUndefined: true,
-      });
+      const result = updateURLParams(
+        "https://example.com?key1=old&key2=old",
+        updates,
+        {
+          removeUndefined: true,
+        },
+      );
       expect(result).toContain("key1=newvalue1");
       expect(result).not.toContain("key2=");
     });
@@ -145,29 +158,37 @@ describe("url.ts uncovered branches - comprehensive coverage", () => {
         ["__proto__", "dangerous"],
       ]);
       expect(() => createSecureURL("https://example.com", [], params)).toThrow(
-        InvalidParameterError
+        InvalidParameterError,
       );
     });
   });
 
   describe("removeUndefined behavior in updateURLParams", () => {
     it("removes undefined values when removeUndefined=true", () => {
-      const result = updateURLParams("https://example.com?a=1&b=2&c=3", {
-        a: undefined,
-        b: "new",
-        c: undefined,
-      }, { removeUndefined: true });
+      const result = updateURLParams(
+        "https://example.com?a=1&b=2&c=3",
+        {
+          a: undefined,
+          b: "new",
+          c: undefined,
+        },
+        { removeUndefined: true },
+      );
       expect(result).not.toContain("a=");
       expect(result).toContain("b=new");
       expect(result).not.toContain("c=");
     });
 
     it("keeps undefined values as empty when removeUndefined=false", () => {
-      const result = updateURLParams("https://example.com?a=1&b=2&c=3", {
-        a: undefined,
-        b: "new",
-        c: undefined,
-      }, { removeUndefined: false });
+      const result = updateURLParams(
+        "https://example.com?a=1&b=2&c=3",
+        {
+          a: undefined,
+          b: "new",
+          c: undefined,
+        },
+        { removeUndefined: false },
+      );
       expect(result).toContain("a=");
       expect(result).toContain("b=new");
       expect(result).toContain("c=");
@@ -234,7 +255,9 @@ describe("url.ts uncovered branches - comprehensive coverage", () => {
     });
 
     it("parseURLParams filters unsafe keys", () => {
-      const result = parseURLParams("https://example.com?safe=value&__proto__=dangerous");
+      const result = parseURLParams(
+        "https://example.com?safe=value&__proto__=dangerous",
+      );
       expect(result.safe).toBe("value");
       expect(result.__proto__).toBeUndefined();
     });
@@ -278,25 +301,25 @@ describe("url.ts uncovered branches - comprehensive coverage", () => {
   describe("path segment validation", () => {
     it("createSecureURL rejects path segments with separators", () => {
       expect(() =>
-        createSecureURL("https://example.com", ["path/../../../etc"])
+        createSecureURL("https://example.com", ["path/../../../etc"]),
       ).toThrow(InvalidParameterError);
     });
 
     it("createSecureURL rejects path segments with backslashes", () => {
       expect(() =>
-        createSecureURL("https://example.com", ["path\\windows"])
+        createSecureURL("https://example.com", ["path\\windows"]),
       ).toThrow(InvalidParameterError);
     });
 
     it("createSecureURL rejects single dot path segment", () => {
       expect(() => createSecureURL("https://example.com", ["."])).toThrow(
-        InvalidParameterError
+        InvalidParameterError,
       );
     });
 
     it("createSecureURL rejects double dot path segment", () => {
       expect(() => createSecureURL("https://example.com", [".."])).toThrow(
-        InvalidParameterError
+        InvalidParameterError,
       );
     });
   });
@@ -304,17 +327,27 @@ describe("url.ts uncovered branches - comprehensive coverage", () => {
   describe("URL length validation", () => {
     it("createSecureURL enforces maxLength", () => {
       expect(() =>
-        createSecureURL("https://example.com", ["a".repeat(1000)], {}, undefined, {
-          maxLength: 100,
-        })
+        createSecureURL(
+          "https://example.com",
+          ["a".repeat(1000)],
+          {},
+          undefined,
+          {
+            maxLength: 100,
+          },
+        ),
       ).toThrow(InvalidParameterError);
     });
 
     it("updateURLParams enforces maxLength", () => {
       expect(() =>
-        updateURLParams("https://example.com", { long: "a".repeat(1000) }, {
-          maxLength: 100,
-        })
+        updateURLParams(
+          "https://example.com",
+          { long: "a".repeat(1000) },
+          {
+            maxLength: 100,
+          },
+        ),
       ).toThrow(InvalidParameterError);
     });
   });

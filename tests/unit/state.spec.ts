@@ -124,7 +124,9 @@ describe("state.ts - crypto lifecycle and test helpers", () => {
 
     it("validates allowInProduction parameter type", () => {
       const fake = makeFakeCrypto();
-      expect(() => _setCrypto(fake, { allowInProduction: "true" as any })).toThrow();
+      expect(() =>
+        _setCrypto(fake, { allowInProduction: "true" as any }),
+      ).toThrow();
     });
 
     it("handles null and undefined crypto gracefully", () => {
@@ -168,7 +170,9 @@ describe("state.ts - crypto lifecycle and test helpers", () => {
       __resetCryptoStateForTests();
       // Test that the validation logic exists
       const fake = makeFakeCrypto();
-      expect(() => _setCrypto(fake, { allowInProduction: false })).not.toThrow();
+      expect(() =>
+        _setCrypto(fake, { allowInProduction: false }),
+      ).not.toThrow();
     });
   });
 

@@ -48,10 +48,10 @@ describe("state.ts - uncovered branches", () => {
     process.env.NODE_ENV = originalNodeEnv;
     // Restore crypto only if it was originally defined
     if (originalGlobalCrypto !== undefined) {
-      Object.defineProperty(globalThis, 'crypto', {
+      Object.defineProperty(globalThis, "crypto", {
         value: originalGlobalCrypto,
         writable: true,
-        configurable: true
+        configurable: true,
       });
     } else {
       delete (globalThis as any).crypto;
@@ -63,7 +63,9 @@ describe("state.ts - uncovered branches", () => {
   describe("detectNodeCrypto error handling", () => {
     it("handles dynamic import failures", async () => {
       const originalImport = (globalThis as any).import;
-      (globalThis as any).import = vi.fn().mockRejectedValue(new Error("Import failed"));
+      (globalThis as any).import = vi
+        .fn()
+        .mockRejectedValue(new Error("Import failed"));
 
       try {
         const crypto = await ensureCrypto();
@@ -92,7 +94,7 @@ describe("state.ts - uncovered branches", () => {
     it("handles invalid Node crypto interface", async () => {
       const originalImport = (globalThis as any).import;
       (globalThis as any).import = vi.fn().mockResolvedValue({
-        webcrypto: { invalid: "interface" }
+        webcrypto: { invalid: "interface" },
       });
 
       try {
@@ -109,7 +111,7 @@ describe("state.ts - uncovered branches", () => {
       delete (fakeCrypto as any).subtle;
 
       (globalThis as any).import = vi.fn().mockResolvedValue({
-        webcrypto: fakeCrypto
+        webcrypto: fakeCrypto,
       });
 
       try {
@@ -137,10 +139,10 @@ describe("state.ts - uncovered branches", () => {
     it("handles crypto initialization failure recovery", async () => {
       // First fail by setting invalid crypto
       const originalCrypto = (globalThis as any).crypto;
-      Object.defineProperty(globalThis, 'crypto', {
+      Object.defineProperty(globalThis, "crypto", {
         value: undefined,
         writable: true,
-        configurable: true
+        configurable: true,
       });
 
       try {
@@ -150,10 +152,10 @@ describe("state.ts - uncovered branches", () => {
       }
 
       // Then succeed
-      Object.defineProperty(globalThis, 'crypto', {
+      Object.defineProperty(globalThis, "crypto", {
         value: makeFakeCrypto(),
         writable: true,
-        configurable: true
+        configurable: true,
       });
       const crypto = await ensureCrypto();
       expect(crypto).toBeDefined();
@@ -178,57 +180,57 @@ describe("state.ts - uncovered branches", () => {
   describe("ensureCryptoSync edge cases", () => {
     it("handles missing global crypto", () => {
       const originalCrypto = (globalThis as any).crypto;
-      Object.defineProperty(globalThis, 'crypto', {
+      Object.defineProperty(globalThis, "crypto", {
         value: undefined,
         writable: true,
-        configurable: true
+        configurable: true,
       });
 
       try {
         expect(() => ensureCryptoSync()).toThrow(CryptoUnavailableError);
       } finally {
-        Object.defineProperty(globalThis, 'crypto', {
+        Object.defineProperty(globalThis, "crypto", {
           value: originalCrypto,
           writable: true,
-          configurable: true
+          configurable: true,
         });
       }
     });
 
     it("handles invalid global crypto interface", () => {
       const originalCrypto = (globalThis as any).crypto;
-      Object.defineProperty(globalThis, 'crypto', {
+      Object.defineProperty(globalThis, "crypto", {
         value: { invalid: "interface" },
         writable: true,
-        configurable: true
+        configurable: true,
       });
 
       try {
         expect(() => ensureCryptoSync()).toThrow(CryptoUnavailableError);
       } finally {
-        Object.defineProperty(globalThis, 'crypto', {
+        Object.defineProperty(globalThis, "crypto", {
           value: originalCrypto,
           writable: true,
-          configurable: true
+          configurable: true,
         });
       }
     });
 
     it("handles crypto with missing getRandomValues", () => {
       const originalCrypto = (globalThis as any).crypto;
-      Object.defineProperty(globalThis, 'crypto', {
+      Object.defineProperty(globalThis, "crypto", {
         value: { subtle: {} },
         writable: true,
-        configurable: true
+        configurable: true,
       });
 
       try {
         expect(() => ensureCryptoSync()).toThrow(CryptoUnavailableError);
       } finally {
-        Object.defineProperty(globalThis, 'crypto', {
+        Object.defineProperty(globalThis, "crypto", {
           value: originalCrypto,
           writable: true,
-          configurable: true
+          configurable: true,
         });
       }
     });
@@ -237,21 +239,25 @@ describe("state.ts - uncovered branches", () => {
   describe("setCrypto validation edge cases", () => {
     it("rejects crypto with non-function getRandomValues", () => {
       const invalidCrypto = {
-        getRandomValues: "not a function"
+        getRandomValues: "not a function",
       };
 
-      expect(() => setCrypto(invalidCrypto as any)).toThrow(InvalidParameterError);
+      expect(() => setCrypto(invalidCrypto as any)).toThrow(
+        InvalidParameterError,
+      );
     });
 
     it("rejects crypto with throwing getRandomValues", async () => {
       const invalidCrypto = {
-        getRandomValues: () => { throw new Error("test"); }
+        getRandomValues: () => {
+          throw new Error("test");
+        },
       };
 
       // The validation only checks if getRandomValues is a function, not if it throws
       // So this should actually succeed during setCrypto validation
       expect(() => setCrypto(invalidCrypto as any)).not.toThrow();
-      
+
       // But it should throw when we actually try to use it
       await expect(secureRandomBytes(16)).rejects.toThrow();
     });
@@ -259,8 +265,12 @@ describe("state.ts - uncovered branches", () => {
     it("handles allowInProduction type validation", () => {
       const fakeCrypto = makeFakeCrypto();
 
-      expect(() => setCrypto(fakeCrypto, { allowInProduction: "true" as any })).toThrow(InvalidParameterError);
-      expect(() => setCrypto(fakeCrypto, { allowInProduction: null as any })).toThrow(InvalidParameterError);
+      expect(() =>
+        setCrypto(fakeCrypto, { allowInProduction: "true" as any }),
+      ).toThrow(InvalidParameterError);
+      expect(() =>
+        setCrypto(fakeCrypto, { allowInProduction: null as any }),
+      ).toThrow(InvalidParameterError);
     });
   });
 
@@ -280,14 +290,18 @@ describe("state.ts - uncovered branches", () => {
       delete process.env.SECURITY_KIT_ALLOW_SET_CRYPTO_IN_PROD;
       delete (globalThis as any).__SECURITY_KIT_ALLOW_SET_CRYPTO_IN_PROD;
 
-      expect(() => setCrypto(fakeCrypto, { allowInProduction: true })).toThrow(InvalidConfigurationError);
+      expect(() => setCrypto(fakeCrypto, { allowInProduction: true })).toThrow(
+        InvalidConfigurationError,
+      );
     });
 
     it("accepts environment variable opt-in", () => {
       const fakeCrypto = makeFakeCrypto();
       process.env.SECURITY_KIT_ALLOW_SET_CRYPTO_IN_PROD = "true";
 
-      expect(() => setCrypto(fakeCrypto, { allowInProduction: true })).not.toThrow();
+      expect(() =>
+        setCrypto(fakeCrypto, { allowInProduction: true }),
+      ).not.toThrow();
 
       // Clean up
       delete process.env.SECURITY_KIT_ALLOW_SET_CRYPTO_IN_PROD;
@@ -297,7 +311,9 @@ describe("state.ts - uncovered branches", () => {
       const fakeCrypto = makeFakeCrypto();
       (globalThis as any).__SECURITY_KIT_ALLOW_SET_CRYPTO_IN_PROD = true;
 
-      expect(() => setCrypto(fakeCrypto, { allowInProduction: true })).not.toThrow();
+      expect(() =>
+        setCrypto(fakeCrypto, { allowInProduction: true }),
+      ).not.toThrow();
 
       // Clean up
       delete (globalThis as any).__SECURITY_KIT_ALLOW_SET_CRYPTO_IN_PROD;
@@ -307,7 +323,9 @@ describe("state.ts - uncovered branches", () => {
       const fakeCrypto = makeFakeCrypto();
       process.env.SECURITY_KIT_ALLOW_SET_CRYPTO_IN_PROD = "false";
 
-      expect(() => setCrypto(fakeCrypto, { allowInProduction: true })).toThrow(InvalidConfigurationError);
+      expect(() => setCrypto(fakeCrypto, { allowInProduction: true })).toThrow(
+        InvalidConfigurationError,
+      );
 
       // Clean up
       delete process.env.SECURITY_KIT_ALLOW_SET_CRYPTO_IN_PROD;
@@ -318,24 +336,24 @@ describe("state.ts - uncovered branches", () => {
     it("throws when sealing during configuration", async () => {
       // Start configuration by calling ensureCrypto but don't await it
       const promise = ensureCrypto();
-      
+
       // Force the state to be Configuring by manipulating internal state
       // This is a bit of a hack for testing, but necessary to test this edge case
       const stateModule = await import("../../src/state");
       const testUtils = (stateModule as any).getInternalTestUtils?.();
       if (testUtils) {
         // Wait a tiny bit to ensure the promise has started
-        await new Promise(resolve => setTimeout(resolve, 1));
-        
+        await new Promise((resolve) => setTimeout(resolve, 1));
+
         // If we're still in Configuring state, seal should throw
-        if (testUtils._getCryptoStateForTest() === 'configuring') {
+        if (testUtils._getCryptoStateForTest() === "configuring") {
           expect(() => sealSecurityKit()).toThrow(InvalidConfigurationError);
         } else {
           // If we're not in Configuring state, this test is not applicable
           expect(true).toBe(true); // Skip this test case
         }
       }
-      
+
       // Wait for configuration to complete
       await promise;
     });
@@ -357,15 +375,21 @@ describe("state.ts - uncovered branches", () => {
 
   describe("secureRandomBytes validation", () => {
     it("rejects negative length", async () => {
-      await expect(secureRandomBytes(-1)).rejects.toThrow(InvalidParameterError);
+      await expect(secureRandomBytes(-1)).rejects.toThrow(
+        InvalidParameterError,
+      );
     });
 
     it("rejects non-integer length", async () => {
-      await expect(secureRandomBytes(3.14)).rejects.toThrow(InvalidParameterError);
+      await expect(secureRandomBytes(3.14)).rejects.toThrow(
+        InvalidParameterError,
+      );
     });
 
     it("rejects length exceeding limit", async () => {
-      await expect(secureRandomBytes(65537)).rejects.toThrow(InvalidParameterError);
+      await expect(secureRandomBytes(65537)).rejects.toThrow(
+        InvalidParameterError,
+      );
     });
 
     it("accepts boundary values", async () => {
@@ -380,7 +404,7 @@ describe("state.ts - uncovered branches", () => {
       // This test is difficult to make work reliably because Node.js always has crypto available
       // through the node:crypto module. The isCryptoAvailable function will always return true
       // in a Node.js environment. Let's adjust the test to reflect this reality.
-      
+
       // In a real browser environment with no crypto, this would return false
       // But in Node.js, crypto is always available through the node:crypto module
       const available = await isCryptoAvailable();
@@ -397,13 +421,14 @@ describe("state.ts - uncovered branches", () => {
     it("rejects __resetCryptoStateForTests outside test environment", async () => {
       // Import the function directly to test it
       const stateModule = await import("../../src/state");
-      const __resetCryptoStateForTests = (stateModule as any).__resetCryptoStateForTests;
-      
+      const __resetCryptoStateForTests = (stateModule as any)
+        .__resetCryptoStateForTests;
+
       const originalNodeEnv = process.env.NODE_ENV;
       process.env.NODE_ENV = "production";
 
       try {
-        if (typeof __resetCryptoStateForTests === 'function') {
+        if (typeof __resetCryptoStateForTests === "function") {
           expect(() => __resetCryptoStateForTests()).toThrow();
         } else {
           // Function might not exist in production builds
@@ -489,7 +514,7 @@ describe("state.ts - uncovered branches", () => {
             setCrypto(undefined);
             const fakeCrypto = makeFakeCrypto();
             setCrypto(fakeCrypto);
-          })
+          }),
         );
       }
 
@@ -502,21 +527,23 @@ describe("state.ts - uncovered branches", () => {
     it("handles ensureCrypto promise rejection", async () => {
       // This test is trying to test error handling in ensureCrypto
       // But ensureCrypto doesn't exist on globalThis, so let's test a different scenario
-      
+
       // Instead, let's test that ensureCrypto handles internal errors gracefully
       // by mocking the crypto detection to always fail
       const originalImport = (globalThis as any).import;
       const originalCrypto = (globalThis as any).crypto;
-      
+
       // Remove global crypto and mock import to fail
-      Object.defineProperty(globalThis, 'crypto', {
+      Object.defineProperty(globalThis, "crypto", {
         value: undefined,
         writable: true,
-        configurable: true
+        configurable: true,
       });
-      
-      (globalThis as any).import = vi.fn().mockRejectedValue(new Error("Import failed"));
-      
+
+      (globalThis as any).import = vi
+        .fn()
+        .mockRejectedValue(new Error("Import failed"));
+
       try {
         // This should not throw, but should fall back gracefully
         const crypto = await ensureCrypto();
@@ -526,10 +553,10 @@ describe("state.ts - uncovered branches", () => {
         expect(error).toBeInstanceOf(Error);
       } finally {
         (globalThis as any).import = originalImport;
-        Object.defineProperty(globalThis, 'crypto', {
+        Object.defineProperty(globalThis, "crypto", {
           value: originalCrypto,
           writable: true,
-          configurable: true
+          configurable: true,
         });
       }
     });

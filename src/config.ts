@@ -537,10 +537,14 @@ let _secureLruProfiles: SecureLRUProfileConfig = {
 /* eslint-enable functional/no-let */
 
 export function getSecureLRUProfiles(): SecureLRUProfileConfig {
-  return {
+  // Return a frozen shallow copy and a frozen profiles array to prevent mutation by callers
+  const frozenProfiles = Object.freeze([
+    ..._secureLruProfiles.profiles,
+  ] as readonly SecureLRUCacheProfile[]);
+  return Object.freeze({
     defaultProfile: _secureLruProfiles.defaultProfile,
-    profiles: _secureLruProfiles.profiles.slice(),
-  };
+    profiles: frozenProfiles,
+  });
 }
 
 export function setSecureLRUProfiles(
@@ -551,9 +555,21 @@ export function setSecureLRUProfiles(
       "Configuration is sealed and cannot be changed.",
     );
   }
+  // Merge semantics: when caller provides profiles, merge by name with existing
+  // built-ins instead of replacing the entire set. This avoids surprising
+  // global state loss across unrelated calls and improves test isolation.
+  const existingProfiles = new Map(
+    _secureLruProfiles.profiles.map((p) => [p.name, p] as const),
+  );
+  const mergedProfiles = cfg.profiles
+    ? cfg.profiles.reduce((accumulator, p) => {
+        return new Map([...accumulator, [p.name, p]]);
+      }, existingProfiles)
+    : existingProfiles;
+  const mergedProfilesArray = Array.from(mergedProfiles.values());
   const next: SecureLRUProfileConfig = {
     defaultProfile: cfg.defaultProfile ?? _secureLruProfiles.defaultProfile,
-    profiles: cfg.profiles ?? _secureLruProfiles.profiles,
+    profiles: Object.freeze(mergedProfilesArray),
   } as SecureLRUProfileConfig;
 
   // Validate names

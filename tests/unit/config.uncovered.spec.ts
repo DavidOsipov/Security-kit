@@ -17,7 +17,10 @@ import {
 } from "../../src/config";
 import { environment } from "../../src/environment";
 import { __test_resetCryptoStateForUnitTests } from "../../src/state";
-import { InvalidConfigurationError, InvalidParameterError } from "../../src/errors";
+import {
+  InvalidConfigurationError,
+  InvalidParameterError,
+} from "../../src/errors";
 
 const savedEnv = environment.isProduction;
 
@@ -99,7 +102,7 @@ describe("config - uncovered branches", () => {
       expect(() => {
         setLoggingConfig({
           allowUnsafeKeyNamesInDev: false,
-          includeUnsafeKeyHashesInDev: false
+          includeUnsafeKeyHashesInDev: false,
         });
       }).not.toThrow();
     });
@@ -139,7 +142,7 @@ describe("config - uncovered branches", () => {
       expect(() => {
         setSecureLRUProfiles({
           defaultProfile: "non-existent-profile",
-          profiles: []
+          profiles: [],
         });
       }).toThrow(InvalidParameterError);
     });
@@ -152,14 +155,14 @@ describe("config - uncovered branches", () => {
           options: {
             maxEntries: 100,
             defaultTtlMs: 60000,
-          }
-        }
+          },
+        },
       ];
 
       expect(() => {
         setSecureLRUProfiles({
           defaultProfile: "test-profile",
-          profiles: customProfiles
+          profiles: customProfiles,
         });
       }).not.toThrow();
     });
@@ -191,7 +194,7 @@ describe("config - uncovered branches", () => {
         config.profiles.push({
           name: "test",
           description: "test",
-          options: {}
+          options: {},
         });
       }).toThrow();
     });
@@ -288,7 +291,7 @@ describe("config - uncovered branches", () => {
       expect(() => {
         setRuntimePolicy({
           allowBlobUrls: true,
-          unknownKey: "value" as any
+          unknownKey: "value" as any,
         });
       }).not.toThrow();
 

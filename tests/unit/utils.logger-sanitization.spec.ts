@@ -47,7 +47,8 @@ describe("utils logger sanitization", () => {
         const { sanitizeLogMessage } = await import("../../src/utils");
         const message = "Request with authorization=Bearer xyz789";
         const result = sanitizeLogMessage(message);
-        expect(result).toBe("Request with authorization=[REDACTED]");
+        // Canonicalize to 'Authorization' for consistency across logs
+        expect(result).toBe("Request with Authorization=[REDACTED]");
       })();
     });
 
@@ -239,8 +240,8 @@ describe("utils logger sanitization", () => {
         expect(eventDetail.message).not.toContain("abc123");
 
         // Cleanup
-        delete global.document;
-        delete global.CustomEvent;
+        Reflect.deleteProperty(global as any, "document");
+        Reflect.deleteProperty(global as any, "CustomEvent");
       })();
     });
   });

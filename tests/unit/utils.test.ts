@@ -570,14 +570,20 @@ describe("utils module", () => {
     it("logs in development mode", () => {
       secureDevLog("info", "test-component", "test message", { key: "value" });
 
-      expect(mockDispatch).toHaveBeenCalledWith(
+      expect(mockDispatch).toHaveBeenCalled();
+      const evt = mockDispatch.mock.calls[0][0];
+      expect(evt).toEqual(
         expect.objectContaining({
           type: "security-kit:log",
-          detail: expect.objectContaining({
-            level: "INFO",
-            component: "test-component",
-            message: "test message",
-          }),
+        }),
+      );
+      // Detail payload invariants
+      const detail = (evt as any).detail;
+      expect(detail).toEqual(
+        expect.objectContaining({
+          level: "INFO",
+          component: "test-component",
+          message: "test message",
         }),
       );
     });

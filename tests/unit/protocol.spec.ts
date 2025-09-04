@@ -156,8 +156,13 @@ describe("protocol", () => {
       expect(secureInitMessage.workerOptions?.maxConcurrentSigning).toBe(3);
       expect(secureInitMessage.workerOptions?.maxCanonicalLength).toBe(8192);
       expect(secureInitMessage.workerOptions?.rateLimitBurst).toBe(10);
-      expect(secureInitMessage.workerOptions?.handshakeMaxNonceLength).toBe(256);
-      expect(secureInitMessage.workerOptions?.allowedNonceFormats).toEqual(["base64url", "hex"]);
+      expect(secureInitMessage.workerOptions?.handshakeMaxNonceLength).toBe(
+        256,
+      );
+      expect(secureInitMessage.workerOptions?.allowedNonceFormats).toEqual([
+        "base64url",
+        "hex",
+      ]);
     });
 
     it("validates error responses for all security failure modes", () => {
@@ -236,7 +241,8 @@ describe("protocol", () => {
       // Verify each message has expected structure
       testMessages.forEach((msg, index) => {
         expect(typeof msg).toBe("object");
-        if (index < 9) { // First 9 entries have defined, non-undefined type
+        if (index < 9) {
+          // First 9 entries have defined, non-undefined type
           expect(msg.type).toBeDefined();
           expect(msg.type).not.toBeUndefined();
         }
@@ -313,7 +319,8 @@ describe("protocol", () => {
   describe("OWASP ASVS L3 compliance validation", () => {
     it("validates input validation and sanitization in protocol types", () => {
       // Test that protocol types enforce proper input validation
-      const validCanonical = "GET /api/secure HTTP/1.1\nhost:example.com\nx-date:20231201";
+      const validCanonical =
+        "GET /api/secure HTTP/1.1\nhost:example.com\nx-date:20231201";
 
       const signRequest: SignRequest = {
         type: "sign",

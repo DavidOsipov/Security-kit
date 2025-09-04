@@ -121,10 +121,15 @@ describe("environment utils - uncovered branches", () => {
     it("handles error in location access", () => {
       delete process.env.NODE_ENV;
       // Mock location getter to throw
-      const originalLocation = Object.getOwnPropertyDescriptor(globalThis, 'location');
-      Object.defineProperty(globalThis, 'location', {
-        get: () => { throw new Error("Access denied"); },
-        configurable: true
+      const originalLocation = Object.getOwnPropertyDescriptor(
+        globalThis,
+        "location",
+      );
+      Object.defineProperty(globalThis, "location", {
+        get: () => {
+          throw new Error("Access denied");
+        },
+        configurable: true,
       });
 
       try {
@@ -132,7 +137,7 @@ describe("environment utils - uncovered branches", () => {
         expect(environment.isDevelopment).toBe(false);
       } finally {
         if (originalLocation) {
-          Object.defineProperty(globalThis, 'location', originalLocation);
+          Object.defineProperty(globalThis, "location", originalLocation);
         } else {
           delete (globalThis as any).location;
         }
@@ -251,7 +256,9 @@ describe("environment utils - uncovered branches", () => {
       for (const { hostname, expected } of testCases) {
         (globalThis as any).location = { hostname };
         environment.clearCache();
-        expect(environment.isDevelopment, `hostname: ${hostname}`).toBe(expected);
+        expect(environment.isDevelopment, `hostname: ${hostname}`).toBe(
+          expected,
+        );
       }
     });
 

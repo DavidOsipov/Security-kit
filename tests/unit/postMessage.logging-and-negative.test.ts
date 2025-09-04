@@ -40,18 +40,40 @@ test("secureDevLog emits security-kit:log events for origin-format warnings and 
   const events: any[] = [];
   if (
     typeof document === "undefined" ||
-    typeof document.addEventListener !== "function"
+    typeof (document as any).addEventListener !== "function"
   ) {
-    // If document isn't available, create a minimal event target to receive dispatched events.
-    // This should be unusual in the test harness; keep as fallback.
+    // Provide a minimal EventTarget polyfill so dispatchEvent notifies listeners.
+    const listeners = new Map<string, Set<Function>>();
+    const docPoly: any = {
+      addEventListener: (type: string, cb: Function) => {
+        let set = listeners.get(type);
+        if (!set) {
+          set = new Set();
+          listeners.set(type, set);
+        }
+        set.add(cb);
+      },
+      removeEventListener: (type: string, cb: Function) => {
+        listeners.get(type)?.delete(cb);
+      },
+      dispatchEvent: (ev: any) => {
+        const type = ev?.type ?? ev;
+        const cbs = listeners.get(type);
+        if (cbs) {
+          for (const cb of Array.from(cbs)) {
+            try {
+              cb(ev);
+            } catch {
+              /* ignore */
+            }
+          }
+        }
+        return true;
+      },
+    };
     // eslint-disable-next-line @typescript-eslint/ban-ts-comment
     // @ts-ignore
-    global.document = {
-      addEventListener: (name: string, cb: any) => {
-        /* noop */
-      },
-      dispatchEvent: () => true,
-    };
+    global.document = docPoly;
   }
   document.addEventListener("security-kit:log", (ev: any) => {
     try {

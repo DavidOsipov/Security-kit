@@ -495,8 +495,9 @@ describe("signing-worker", () => {
     };
     const signEvent1 = new MockMessageEvent(signMessage1);
     const msgListener4 = getMessageListener();
+    let firstDone: Promise<void> | undefined;
     if (msgListener4) {
-      void msgListener4(signMessage1, { event: signEvent1 });
+      firstDone = msgListener4(signMessage1, { event: signEvent1 });
     }
 
     // Second request should be rejected due to concurrency limit
@@ -516,6 +517,11 @@ describe("signing-worker", () => {
       requestId: 2,
       reason: "worker-overloaded",
     });
+
+    // Ensure the first long-running sign completes to avoid leaking across tests
+    if (firstDone) {
+      await firstDone;
+    }
   });
 
   it("handles shutdown gracefully", async () => {

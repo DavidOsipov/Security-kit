@@ -49,11 +49,6 @@ interface GlobalWithTypedArrays {
   readonly BigInt64Array?: new (length: number) => BigInt64Array;
   readonly BigUint64Array?: new (length: number) => BigUint64Array;
 }
-
-interface BufferLike {
-  readonly constructor?: { readonly name: string };
-}
-
 interface TypedArrayWithFill {
   readonly fill?: (value: number) => unknown;
 }
@@ -257,8 +252,37 @@ export function secureWipe(
   if (typedArray.byteLength === 0) return true;
   const forbidShared = options?.forbidShared !== false;
 
+  // Early probe: accessing .buffer can throw in hostile objects; treat as failure
+  const bufferProbe = (() => {
+    try {
+      return {
+        value: (typedArray as { readonly buffer?: unknown }).buffer,
+        failed: false as const,
+      };
+    } catch {
+      return { value: undefined, failed: true as const };
+    }
+  })();
+  if (bufferProbe.failed) return false;
+
   // Cross-realm SAB detection
-  const isShared = isSharedArrayBufferView(typedArray);
+  const isSharedDetection = (() => {
+    try {
+      return {
+        value: isSharedArrayBufferView(typedArray),
+        failed: false as const,
+      };
+    } catch {
+      // If detection throws due to hostile getters, treat as failure
+      return {
+        value: false,
+        failed: true as const,
+      };
+    }
+  })();
+
+  if (isSharedDetection.failed) return false;
+  const isShared = isSharedDetection.value;
 
   if (forbidShared && isShared) {
     if (isDevelopment()) {
@@ -314,15 +338,43 @@ export function secureWipe(
  */
 export function isSharedArrayBufferView(view: ArrayBufferView): boolean {
   try {
-    const buf = view.buffer as BufferLike;
-    const tag = Object.prototype.toString.call(buf);
     const globalWithSAB = globalThis as GlobalWithSharedArrayBuffer;
     if (typeof globalWithSAB.SharedArrayBuffer === "undefined") return false;
-    // Prefer reliable tag or instanceof checks; avoid constructor name heuristics
-    if (tag === "[object SharedArrayBuffer]") return true;
+    // Guard against getters throwing
+    const bufProbe = (() => {
+      try {
+        return {
+          value: (view as { readonly buffer?: unknown }).buffer,
+          failed: false as const,
+        };
+      } catch {
+        return { value: undefined, failed: true as const };
+      }
+    })();
+    if (bufProbe.failed) return false;
     try {
-      // Cross-realm instanceof should still work for SAB in most engines
-      return buf instanceof globalWithSAB.SharedArrayBuffer;
+      const val = bufProbe.value;
+      if (typeof val !== "object" && typeof val !== "function") return false;
+      // Primary: instanceof SharedArrayBuffer (cross-realm safe if SAB is same realm)
+      if (val instanceof globalWithSAB.SharedArrayBuffer) return true;
+      // Secondary: brand check via Object.prototype.toString, but ignore explicit
+      // Symbol.toStringTag spoofing.
+      const hasSpoofTag = (() => {
+        try {
+          return Object.prototype.hasOwnProperty.call(val, Symbol.toStringTag);
+        } catch {
+          return true; // be conservative
+        }
+      })();
+      if (!hasSpoofTag) {
+        try {
+          const brand = Object.prototype.toString.call(val);
+          if (brand === "[object SharedArrayBuffer]") return true;
+        } catch {
+          /* ignore */
+        }
+      }
+      return false;
     } catch {
       return false;
     }
@@ -771,8 +823,8 @@ export const MAX_REDACT_DEPTH = 8;
 export const MAX_LOG_STRING = 8192;
 
 // NEW: Breadth limits to complement depth caps
-const MAX_KEYS_PER_OBJECT = 64;
-const MAX_ITEMS_PER_ARRAY = 128;
+export const MAX_KEYS_PER_OBJECT = 64;
+export const MAX_ITEMS_PER_ARRAY = 128;
 
 const JWT_LIKE_REGEX = /^eyJ[\w-]{5,}\.[\w-]{5,}\.[\w-]{5,}$/;
 const REDACTED_VALUE = "[REDACTED]";
@@ -933,6 +985,11 @@ function _cloneAndNormalizeForLogging(
 
   visited: ReadonlySet<unknown>,
 ): unknown {
+  // Represent functions opaquely to avoid leaking source or names and to satisfy
+  // expectations that redaction returns objects for non-plain values.
+  if (typeof data === "function") {
+    return { __type: "Function" } as const;
+  }
   if (depth >= MAX_REDACT_DEPTH) {
     return { __redacted: true, reason: "max-depth" };
   }
@@ -1053,6 +1110,11 @@ function handlePlainObject(
   visited: ReadonlySet<unknown>,
 ): unknown {
   const result = Object.create(null) as Record<string, unknown>;
+  // Track whether any descendant was redacted due to max-depth to surface a
+  // summary flag at this level (helps tests assert depth limiting without
+  // relying on exact nesting paths).
+  // eslint-disable-next-line functional/no-let -- local aggregation flag
+  let descendantMaxDepthRedacted = false;
 
   // NEW: count symbol keys without exposing them
   try {
@@ -1074,12 +1136,22 @@ function handlePlainObject(
   for (let i = 0; i < limit; i++) {
     const key = allKeys[i]!;
     try {
-      // eslint-disable-next-line functional/immutable-data
-      result[key] = _cloneAndNormalizeForLogging(
+      const v = _cloneAndNormalizeForLogging(
         (data as Record<string, unknown>)[key],
         depth + 1,
         visited,
       );
+      // eslint-disable-next-line functional/immutable-data
+      result[key] = v;
+      if (
+        v &&
+        typeof v === "object" &&
+        (v as { readonly __redacted?: unknown; readonly reason?: unknown })
+          .__redacted === true &&
+        (v as { readonly reason?: unknown }).reason === "max-depth"
+      ) {
+        descendantMaxDepthRedacted = true;
+      }
     } catch {
       // eslint-disable-next-line functional/immutable-data
       result[key] = { __redacted: true, reason: "getter-threw" };
@@ -1093,6 +1165,14 @@ function handlePlainObject(
       originalCount: allKeys.length,
       displayedCount: limit,
     };
+  }
+
+  if (descendantMaxDepthRedacted) {
+    // Surface a summary at this level without leaking structure
+    // eslint-disable-next-line functional/immutable-data
+    result["__redacted"] = true;
+    // eslint-disable-next-line functional/immutable-data
+    result["reason"] = "max-depth";
   }
 
   return result;
@@ -1130,13 +1210,28 @@ export function sanitizeLogMessage(message: unknown): string {
       // JWT-like structures
       .replace(JWT_LIKE_REGEX, REDACTED_VALUE)
       // key=value pairs such as password=..., token:..., secret=...
+      // Common secrets
       .replace(
-        /\b(password|pass|token|secret|jwt|authorization)\s*[:=]\s*[^\s,;&]{1,2048}/gi,
-        "$1=[REDACTED]",
+        /\b(?:password|pass|token|secret|jwt|authorization)\s*[:=]\s*[^\s,;&]{1,2048}/gi,
+        (m) => {
+          const key = m.split(/[:=]/, 1)[0];
+          return `${key}=[REDACTED]`;
+        },
+      )
+      // API key variants
+      .replace(
+        /\b(?:api[_-]?key|x[_-]?api[_-]?key|secret[_-]?token)\s*[:=]\s*[^\s,;&]{1,2048}/gi,
+        (m) => {
+          const key = m.split(/[:=]/, 1)[0];
+          return `${key}=[REDACTED]`;
+        },
       )
       // Authorization headers or bearer tokens anywhere in the string
-      .replace(/\b(authorization)\s*[:=]\s*[^\r\n]{1,2048}/gi, "$1=[REDACTED]")
-      .replace(/\b(bearer)\s+[\w.~+/-]{1,2048}=*/gi, "$1 [REDACTED]");
+      .replace(/\bauthorization\s*[:=]\s*[^\r\n]{1,2048}/gi, () => {
+        // Normalize header case to the conventional form for readability/tests
+        return "Authorization=[REDACTED]";
+      })
+      .replace(/\bbearer\s+[\w.~+/-]{1,2048}=*/gi, "bearer [REDACTED]");
 
     // Enforce max length
     return _truncateIfLong(sanitized);
@@ -1153,7 +1248,12 @@ export function sanitizeComponentName(name: unknown): string {
     if (typeof name !== "string") {
       return "unsafe-component-name";
     }
-    return SAFE_KEY_REGEX.test(name) ? name : "unsafe-component-name";
+    if (!SAFE_KEY_REGEX.test(name)) return "unsafe-component-name";
+    // Disallow leading or trailing dots specifically
+    if (name.startsWith(".") || name.endsWith(".")) {
+      return "unsafe-component-name";
+    }
+    return name;
   } catch {
     return "unsafe-component-name";
   }
@@ -1253,6 +1353,8 @@ export function _devConsole(
   // Serialize a string-safe representation of the context to avoid leaking structured data
   const ctxString = ((): string => {
     try {
+      // Redact context defensively before serializing
+      const redacted = _redact(safeContext);
       // Use an untyped JS replacer to avoid explicit `any` annotations while
       // keeping a simple length truncation for string values. This local
       // function is intentionally narrow and used only for serializing
@@ -1267,7 +1369,7 @@ export function _devConsole(
           ? `${v.slice(0, 1024)}...[TRUNC]`
           : v;
       }
-      return JSON.stringify(safeContext, replacer);
+      return JSON.stringify(redacted, replacer);
     } catch {
       return String(safeContext);
     }
@@ -1303,6 +1405,62 @@ export function _devConsole(
  * @param message The log message.
  * @param context An optional object containing additional context.
  */
+// Module-scoped token bucket state (dev-only). We keep these outside the
+// `secureDevLog` function to avoid re-creating timers or state on each call.
+// These are intentionally mutable; disable rules that would force `const`.
+/* eslint-disable-next-line functional/no-let */
+let __dev_event_tokens = 5; // initial burst
+/* eslint-disable-next-line functional/no-let */
+let __dev_event_last_refill = Date.now();
+const __DEV_EVENT_REFILL_PER_SEC = 1; // 60 per minute
+const __DEV_EVENT_MAX_TOKENS = 5;
+
+function devEventDispatchAllow(): boolean {
+  try {
+    if (environment.isProduction) return false;
+    const now = Date.now();
+    const elapsedMs = now - __dev_event_last_refill;
+    if (elapsedMs > 0) {
+      const toAdd = Math.floor((elapsedMs / 1000) * __DEV_EVENT_REFILL_PER_SEC);
+      if (toAdd > 0) {
+        __dev_event_tokens = Math.min(
+          __DEV_EVENT_MAX_TOKENS,
+          __dev_event_tokens + toAdd,
+        );
+        __dev_event_last_refill = now;
+      }
+    }
+    if (__dev_event_tokens > 0) {
+      __dev_event_tokens -= 1;
+      return true;
+    }
+    return false;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Dev-only diagnostic: return the internal token-bucket state for tests.
+ * Returns `undefined` in production to avoid leaking runtime internals.
+ */
+export function getDevEventDispatchState():
+  | {
+      readonly tokens: number;
+      readonly lastRefill: number;
+      readonly refillPerSec: number;
+      readonly maxTokens: number;
+    }
+  | undefined {
+  if (environment.isProduction) return undefined;
+  return {
+    tokens: __dev_event_tokens,
+    lastRefill: __dev_event_last_refill,
+    refillPerSec: __DEV_EVENT_REFILL_PER_SEC,
+    maxTokens: __DEV_EVENT_MAX_TOKENS,
+  };
+}
+
 export function secureDevLog(
   level: LogLevel,
   component: string,
@@ -1310,8 +1468,6 @@ export function secureDevLog(
   context: unknown = {},
 ): void {
   if (environment.isProduction) return;
-  // Apply rate limit before any work (redaction, event dispatch, stringify)
-  if (!devLogAllow()) return;
 
   // NEW: enforce safe component and sanitize the message string
   const safeComponent = sanitizeComponentName(component);
@@ -1326,20 +1482,53 @@ export function secureDevLog(
     context: safeContext,
   };
 
-  if (typeof document !== "undefined" && typeof CustomEvent !== "undefined") {
+  // Emit an event for observers when document.dispatchEvent exists.
+  // Use CustomEvent when available; otherwise, polyfill using Event with a `detail` property.
+  if (
+    typeof document !== "undefined" &&
+    typeof (document as { readonly dispatchEvent?: unknown }).dispatchEvent ===
+      "function"
+  ) {
     try {
       const safeEvent = {
         level: logEntry.level,
         component: logEntry.component,
         message: logEntry.message,
       };
-      document.dispatchEvent(
-        new CustomEvent("security-kit:log", { detail: safeEvent }),
-      );
+
+      // Define a type for CustomEvent constructor
+      type CustomEventConstructor = new (
+        type: string,
+        options?: { readonly detail?: unknown },
+      ) => Event & { readonly detail?: unknown };
+
+      const CE: CustomEventConstructor =
+        typeof CustomEvent === "function"
+          ? CustomEvent
+          : class FallbackCustomEvent extends Event {
+              public readonly detail?: unknown;
+              constructor(
+                type: string,
+                options?: { readonly detail?: unknown },
+              ) {
+                super(type);
+                this.detail = options?.detail;
+              }
+            };
+
+      if (devEventDispatchAllow()) {
+        document.dispatchEvent(
+          new CE("security-kit:log", { detail: safeEvent }),
+        );
+      }
     } catch {
       /* ignore */
     }
   }
+
+  // Apply rate limit for console output after event dispatch so diagnostics can
+  // still be observed by listeners even when console logging is throttled.
+  if (!devLogAllow()) return;
 
   const message_ = `[${logEntry.level}] (${safeComponent}) ${safeMessage}`;
   _devConsole(level, message_, safeContext);

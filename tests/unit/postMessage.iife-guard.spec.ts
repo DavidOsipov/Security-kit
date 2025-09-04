@@ -6,7 +6,7 @@ import { expect, test } from "vitest";
 // undefined; we assert that the exported __test_internals is undefined in
 // that case. This exercises the error-handling around the require() path.
 
-test.skip("IIFE returns undefined when require is unavailable or throws", async () => {
+test("IIFE returns undefined when require is unavailable or throws", async () => {
   // Preserve original require if present
   const origReq = (globalThis as any).require;
   try {
