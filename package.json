@@ -154,7 +154,7 @@
     "isomorphic-dompurify": "^2.26.0",
     "js-sieve": "^0.0.4",
     "jsdom": "^26.1.0",
-    "knip": "^5.63.0",
+    "knip": "^5.63.1",
     "lint-staged": "^16.1.6",
     "lru-cache": "^11.1.0",
     "mnemonist": "^0.40.3",
