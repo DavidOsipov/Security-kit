@@ -511,3 +511,10 @@ export function __test_setCachedCrypto(crypto: Crypto | undefined): void {
     }
   }
 }
+
+// Test helper to set crypto state for testing edge cases
+export function __test_setCryptoState(state: CryptoState): void {
+  if (process.env["NODE_ENV"] === "test") {
+    _cryptoState = state;
+  }
+}

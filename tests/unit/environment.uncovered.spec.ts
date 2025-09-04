@@ -318,5 +318,69 @@ describe("environment utils - uncovered branches", () => {
         expect(environment.isDevelopment, `NODE_ENV: ${env}`).toBe(expected);
       }
     });
+
+    it("ensures NODE_ENV path cache is set correctly", () => {
+      // Test that the cache.set line for NODE_ENV is executed
+      process.env.NODE_ENV = "development";
+      environment.clearCache();
+
+      // First call should execute NODE_ENV logic and set cache
+      expect(environment.isDevelopment).toBe(true);
+
+      // Second call should use cache
+      expect(environment.isDevelopment).toBe(true);
+    });
+  });
+
+  describe("exported isDevelopment function", () => {
+    it("returns the same value as environment.isDevelopment", async () => {
+      // Test the exported function
+      const { isDevelopment: exportedIsDevelopment } = await import(
+        "../../src/environment"
+      );
+
+      // Test with different scenarios
+      process.env.NODE_ENV = "development";
+      environment.clearCache();
+      expect(exportedIsDevelopment()).toBe(environment.isDevelopment);
+
+      process.env.NODE_ENV = "production";
+      environment.clearCache();
+      expect(exportedIsDevelopment()).toBe(environment.isDevelopment);
+
+      delete process.env.NODE_ENV;
+      (globalThis as any).location = { hostname: "localhost" };
+      environment.clearCache();
+      expect(exportedIsDevelopment()).toBe(environment.isDevelopment);
+    });
+  });
+
+  describe("isPrivate172 function return statement coverage", () => {
+    it("ensures return statement is executed for valid 172 range", () => {
+      delete process.env.NODE_ENV;
+      // Test cases that should hit the return statement on line 32
+      const valid172Hosts = ["172.16.0.0", "172.20.0.0", "172.31.255.255"];
+
+      for (const host of valid172Hosts) {
+        (globalThis as any).location = { hostname: host };
+        environment.clearCache();
+        expect(environment.isDevelopment).toBe(true);
+      }
+    });
+
+    it("ensures return statement is executed for invalid 172 range", () => {
+      delete process.env.NODE_ENV;
+      // Test cases that should hit the return statement but return false
+      const invalid172Hosts = [
+        "172.15.255.255", // below 16
+        "172.32.0.0", // above 31
+      ];
+
+      for (const host of invalid172Hosts) {
+        (globalThis as any).location = { hostname: host };
+        environment.clearCache();
+        expect(environment.isDevelopment).toBe(false);
+      }
+    });
   });
 });

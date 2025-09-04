@@ -2,6 +2,23 @@
 
 This guide helps developers integrate SecureLRU cache into their applications for secure, high-performance caching with OWASP ASVS L3 compliance.
 
+## Secure startup (must-do)
+
+To prevent configuration tampering by early-running modules, set your desired configuration and seal the kit as the first code that runs in your app’s entry point.
+
+```ts
+// main.ts (entry point)
+import { setAppEnvironment, sealSecurityKit } from "@david-osipov/security-kit";
+setAppEnvironment("production");
+// Optionally set other config here...
+
+// Seal immediately to block later mutation by untrusted code
+sealSecurityKit();
+
+// Only then import the rest of your app
+import("./app");
+```
+
 ## Quick Start
 
 ```javascript
@@ -11,20 +28,43 @@ import { SecureLRUCache } from "@david-osipov/security-kit";
 const cache = new SecureLRUCache({
   maxEntries: 1000,
   maxBytes: 10 * 1024 * 1024, // 10MB
-  ttlMs: 60000, // 1 minute
+  defaultTtlMs: 60000, // 1 minute
 });
 
-// Set values (automatically copied for immutability)
-await cache.set("user:123", { name: "Alice", role: "admin" });
+// Set values (Uint8Array only; copied for immutability)
+const userBytes = new TextEncoder().encode(
+  JSON.stringify({ name: "Alice", role: "admin" }),
+);
+cache.set("user:123", userBytes);
 
 // Get values (returns copies for security)
-const user = await cache.get("user:123");
+const user = cache.get("user:123");
 
 // Update existing entries
-await cache.set("user:123", { ...user, lastLogin: Date.now() });
+cache.set(
+  "user:123",
+  new TextEncoder().encode(JSON.stringify({ lastLogin: Date.now() })),
+);
 
 // Delete when needed
-await cache.delete("user:123");
+cache.delete("user:123");
+```
+
+Note: SecureLRUCache stores and returns Uint8Array values by design. For objects, serialize to bytes (e.g., JSON + TextEncoder) and deserialize on read.
+
+## Least privilege: Read-only capability for plugins
+
+When passing cache access to less-trusted modules, hand them a read-only capability that exposes only non-mutating methods.
+
+```ts
+import { SecureLRUCache, asReadOnlyCache } from "@david-osipov/security-kit";
+
+const cache = new SecureLRUCache<string, Uint8Array>({
+  /* secure options */
+});
+const pluginCache = asReadOnlyCache(cache); // read-only: get/has/peek/getStats
+
+initializeUntrustedPlugin({ cache: pluginCache });
 ```
 
 ## Performance Characteristics
@@ -77,6 +117,10 @@ const cache = new SecureLRUCache({
 });
 ```
 
+### Future: W-TinyLFU and S3-FIFO
+
+SecureLRU is designed to evolve. Upcoming versions may add adaptive, admission-aware policies like W-TinyLFU and S3-FIFO. The existing `recencyMode` option is forward-compatible with additional strategies, and `getDebugStats()` provides hooks for per-policy diagnostics.
+
 ## Configuration Options
 
 ### Basic Configuration
@@ -86,7 +130,7 @@ const cache = new SecureLRUCache({
   maxEntries: 1000, // Maximum number of cache entries
   maxBytes: 10 * 1024 * 1024, // Maximum total memory usage
   maxEntryBytes: 64 * 1024, // Maximum size per entry
-  ttlMs: 300000, // Time-to-live in milliseconds (5 minutes)
+  defaultTtlMs: 300000, // Time-to-live in milliseconds (5 minutes)
   recencyMode: "sieve", // Eviction algorithm
 });
 ```
@@ -105,7 +149,7 @@ const cache = new SecureLRUCache({
 
   // TTL and cleanup
   ttlResolutionMs: 500, // TTL check granularity
-  ttlAutoPurge: true, // Automatic expired entry cleanup
+  ttlAutopurge: true, // Automatic expired entry cleanup
 });
 ```
 
@@ -117,11 +161,13 @@ const cache = new SecureLRUCache({
   copyOnSet: true, // Copy values when storing (prevents external mutation)
   copyOnGet: true, // Copy values when retrieving (prevents cache pollution)
 
-  // Secure wiping
-  secureWipe: true, // Zero memory after deletion
+  // Secure wiping (choose strategy and limits)
+  wipeStrategy: "defer", // or "sync" for secrets-heavy workloads
 
   // Privacy controls
-  onEvict: undefined, // Disable eviction callbacks to prevent data leaks
+  onEvict: undefined, // Prefer key mapper or keep disabled to prevent leaks
+  evictCallbackExposeUrl: false,
+  onEvictKeyMapper: (url) => "[redacted]",
 });
 ```
 
@@ -133,21 +179,22 @@ const cache = new SecureLRUCache({
 const apiCache = new SecureLRUCache({
   maxEntries: 5000,
   maxBytes: 50 * 1024 * 1024, // 50MB
-  ttlMs: 900000, // 15 minutes
+  defaultTtlMs: 900000, // 15 minutes
   recencyMode: "second-chance", // Read-heavy optimization
 });
 
 // Cache API responses
 async function fetchUserData(userId) {
   const cacheKey = `user:${userId}`;
-  let userData = await apiCache.get(cacheKey);
+  let userData = apiCache.get(cacheKey);
 
   if (!userData) {
-    userData = await api.getUser(userId);
-    await apiCache.set(cacheKey, userData);
+    const data = await api.getUser(userId);
+    userData = new TextEncoder().encode(JSON.stringify(data));
+    apiCache.set(cacheKey, userData);
   }
 
-  return userData;
+  return JSON.parse(new TextDecoder().decode(userData));
 }
 ```
 
@@ -157,17 +204,17 @@ async function fetchUserData(userId) {
 const sessionCache = new SecureLRUCache({
   maxEntries: 10000,
   maxBytes: 100 * 1024 * 1024, // 100MB
-  ttlMs: 1800000, // 30 minutes
+  defaultTtlMs: 1800000, // 30 minutes
   recencyMode: "sieve", // Balanced read/write
-  secureWipe: true, // Important for session data
+  wipeStrategy: "sync", // Important for session data
 });
 
 // Store session data securely
 async function storeSession(sessionId, sessionData) {
-  await sessionCache.set(sessionId, {
-    ...sessionData,
-    lastAccess: Date.now(),
-  });
+  const bytes = new TextEncoder().encode(
+    JSON.stringify({ ...sessionData, lastAccess: Date.now() }),
+  );
+  sessionCache.set(sessionId, bytes);
 }
 ```
 
@@ -177,21 +224,22 @@ async function storeSession(sessionId, sessionData) {
 const computeCache = new SecureLRUCache({
   maxEntries: 1000,
   maxBytes: 20 * 1024 * 1024, // 20MB
-  ttlMs: 3600000, // 1 hour
+  defaultTtlMs: 3600000, // 1 hour
   recencyMode: "segmented", // Predictable for resource planning
   promoteOnGet: "never", // Don't promote cached computations
 });
 
 // Cache expensive computations
 async function getProcessedData(inputHash) {
-  let result = await computeCache.get(inputHash);
+  let result = computeCache.get(inputHash);
 
   if (!result) {
-    result = await expensiveComputation(inputHash);
-    await computeCache.set(inputHash, result);
+    const out = await expensiveComputation(inputHash);
+    result = new TextEncoder().encode(JSON.stringify(out));
+    computeCache.set(inputHash, result);
   }
 
-  return result;
+  return JSON.parse(new TextDecoder().decode(result));
 }
 ```
 
@@ -225,8 +273,8 @@ async function getProcessedData(inputHash) {
 ```javascript
 const stats = cache.getStats();
 console.log("Cache stats:", {
-  entries: stats.entries,
-  bytes: stats.bytes,
+  entries: stats.size,
+  bytes: stats.totalBytes,
   hitRate: stats.hits / (stats.hits + stats.misses),
 });
 ```
@@ -246,7 +294,7 @@ console.log("Algorithm performance:", {
 
 ```javascript
 const wipeStats = cache.getWipeQueueStats();
-if (wipeStats.pending > 1000) {
+if (wipeStats.entries > 1000) {
   console.warn("High wipe queue backlog:", wipeStats);
   await cache.flushWipes(); // Manual flush if needed
 }

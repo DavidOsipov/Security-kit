@@ -93,7 +93,12 @@ export type CacheOptions = {
   readonly deferredWipeAutoThreshold?: number;
   /** Auto bytes threshold for switching to timeout scheduler. Defaults to 256KB. */
   readonly deferredWipeAutoBytesThreshold?: number;
-  /** Recency mode for cache eviction policy. Defaults to "lru". */
+  /**
+   * Recency mode for cache eviction policy. Defaults to "lru".
+   *
+   * Future-proof: Additional strategies like "wtiny-lfu" or "s3-fifo" may be added in a minor
+   * release. Code should not hardcode exhaustive checks on this union outside of this module.
+   */
   readonly recencyMode?: "lru" | "segmented" | "second-chance" | "sieve";
   /** Scan limit for segmented eviction. Defaults to 8. */
   readonly segmentedEvictScan?: number;
@@ -1645,4 +1650,40 @@ export class VerifiedByteCache {
   } {
     return this.singletonInstance.getWipeQueueStats();
   }
+
+  /**
+   * Returns a least-privilege, read-only facade to the singleton cache.
+   * This exposes only non-mutating operations (get/has/peek/getStats) and binds methods
+   * to avoid exposing a privileged `this` to untrusted code. Use this to pass cache
+   * capabilities to plugins or untrusted modules.
+   */
+  public static asReadOnly(): ReadOnlyCache<string, Uint8Array> {
+    return asReadOnlyCache(this.singletonInstance);
+  }
+}
+
+/**
+ * A read-only view for passing to less-trusted modules (object-capability model).
+ * Exposes only non-mutating operations and returns typed copies according to cache config.
+ */
+export type ReadOnlyCache<K extends string, V extends Uint8Array> = {
+  readonly get: (url: K) => V | undefined;
+  readonly has: (url: K) => boolean;
+  readonly peek: (url: K) => V | undefined;
+  readonly getStats: () => CacheStats;
+};
+
+/**
+ * Safe facade exposing only non-mutating operations. Methods are bound so 'this'
+ * is not the cache instance, preventing access to private members through call/apply tricks.
+ */
+export function asReadOnlyCache<K extends string, V extends Uint8Array>(
+  cache: SecureLRUCache<K, V>,
+): ReadOnlyCache<K, V> {
+  return {
+    get: cache.get.bind(cache),
+    has: cache.has.bind(cache),
+    peek: cache.peek.bind(cache),
+    getStats: cache.getStats.bind(cache),
+  } as const;
 }

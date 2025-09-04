@@ -64,17 +64,28 @@ export const environment = (() => {
       }
 
       // Default to false (production)
-      const location = (globalThis as { readonly location?: Location })
-        .location;
+      // eslint-disable-next-line functional/no-let -- try-catch requires mutable variable
+      let location: Location | undefined;
+      try {
+        location = (globalThis as { readonly location?: Location }).location;
+      } catch {
+        // If accessing location throws (e.g., due to CSP or other restrictions), treat as production
+        return false;
+      }
       if (!location) {
         return false;
       }
       if (!Object.hasOwn(location as object, "hostname")) {
         return false;
       }
-      const rawHost = (location as unknown as Record<string, unknown>)[
-        "hostname"
-      ];
+      // eslint-disable-next-line functional/no-let -- try-catch requires mutable variable
+      let rawHost: unknown;
+      try {
+        rawHost = (location as unknown as Record<string, unknown>)["hostname"];
+      } catch {
+        // If accessing hostname throws (e.g., due to CSP or other restrictions), treat as production
+        return false;
+      }
       if (typeof rawHost !== "string") {
         return false;
       }

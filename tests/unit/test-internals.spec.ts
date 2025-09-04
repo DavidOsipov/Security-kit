@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 
-import * as testInternals from "../../src/test-internals";
+import * as testInternals from "../helpers/test-internals";
 import { environment } from "../../src/environment";
 import { InvalidConfigurationError } from "../../src/errors";
 

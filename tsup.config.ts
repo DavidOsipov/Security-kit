@@ -32,6 +32,19 @@ export default defineConfig([
       return { js: ".js" };
     },
   },
+  // Test internals (for testing purposes)
+  {
+    entry: ["tests/helpers/test-internals.ts"],
+    format: ["esm", "cjs"],
+    dts: true,
+    sourcemap: true,
+    outDir: "dist",
+    outExtension({ format }) {
+      if (format === "cjs") return { js: ".cjs" };
+      if (format === "esm") return { js: ".mjs" };
+      return { js: ".js" };
+    },
+  },
   // Worker module (for browser environments)
   {
     entry: ["src/worker/signing-worker.ts"],

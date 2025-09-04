@@ -78,6 +78,8 @@ export { safeStableStringify, toCanonicalValue } from "./canonical";
 export {
   SecureLRUCache,
   VerifiedByteCache,
+  asReadOnlyCache,
+  type ReadOnlyCache,
   type CacheOptions,
   type SetOptions,
   type CacheStats,

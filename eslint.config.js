@@ -22,6 +22,7 @@ export default [
     ignores: [
       "dist/**/*",
       "node_modules/**/*",
+      "coverage/**/*",
       "**/*.min.js",
       "tests/**/*",
       "tests/**",

@@ -56,6 +56,10 @@ const MAX_PATH_LENGTH = 2048;
 const MAX_METHOD_LENGTH = 20;
 const MIN_SECRET_BYTES = 32; // L3 security posture requires >= 32 bytes
 const MAX_SECRET_BYTES = 4096;
+// Bound the canonical message size to mitigate DoS via oversized inputs
+// This limit covers the framed canonical string: `${ts}.${nonce}.${method}.${path}.${bodyHash}.${payload}.${kid}`
+// Adjust carefully if legitimate use cases require larger messages.
+const MAX_CANONICAL_BYTES = 64 * 1024; // 64 KiB
 
 /**
  * Interface for nonce storage backends.
@@ -561,6 +565,13 @@ export async function verifyApiRequestSignature(
   ];
   const canonical = canonicalParts.join(".");
   const messageBytes = SHARED_ENCODER.encode(canonical);
+
+  // DoS hardening: bail out early on excessive canonical size
+  if (messageBytes.byteLength > MAX_CANONICAL_BYTES) {
+    throw new InvalidParameterError(
+      `Canonical message too large (${messageBytes.byteLength} bytes)` as const,
+    );
+  }
 
   // Compute HMAC and compare in constant time (bytes) BEFORE touching the nonce store
   const mac = await computeHmacSha256(keyBytes, messageBytes);
