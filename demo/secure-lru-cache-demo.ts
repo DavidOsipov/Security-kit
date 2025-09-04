@@ -1,5 +1,5 @@
-// SPDX-License-Identifier: MIT
-// SPDX-FileCopyrightText: © 2025 David Osipov
+// SPDX-License-Identifier: LGPL-3.0-or-later
+// SPDX-FileCopyrightText: © 2025 David Osipov <personal@david-osipov.vision>
 /**
  * Demo showcasing SecureLRUCache as a standalone caching solution
  * This demo can be run independently of the secure API signing features

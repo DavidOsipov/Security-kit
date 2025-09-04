@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: LGPL-3.0-or-later
+// SPDX-FileCopyrightText: © 2025 David Osipov <personal@david-osipov.vision>
 // Production-grade Redis-backed INonceStore implementation
 // Requires a Redis client compatible with node-redis v4 (or ioredis with minimal changes)
 // This module is optional and tree-shakable; import only if you use Redis in production.

@@ -1,5 +1,5 @@
-// SPDX-License-Identifier: MIT
-// SPDX-FileCopyrightText: © 2025 David Osipov
+// SPDX-License-Identifier: LGPL-3.0-or-later
+// SPDX-FileCopyrightText: © 2025 David Osipov <personal@david-osipov.vision>
 /**
  * Tests for token bucket refill logic with fractional accumulation.
  * Tests the integer arithmetic implementation in refillTokens function.

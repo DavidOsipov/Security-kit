@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: LGPL-3.0-or-later
+// SPDX-FileCopyrightText: © 2025 David Osipov <personal@david-osipov.vision>
 import { describe, it, expect } from "vitest";
 import { SecureLRUCache } from "../../src/secure-lru-cache";
 import { resolveSecureLRUOptions } from "../../src/config";

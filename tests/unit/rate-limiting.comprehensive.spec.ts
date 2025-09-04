@@ -1,5 +1,5 @@
-// SPDX-License-Identifier: MIT
-// SPDX-FileCopyrightText: © 2025 David Osipov
+// SPDX-License-Identifier: LGPL-3.0-or-later
+// SPDX-FileCopyrightText: © 2025 David Osipov <personal@david-osipov.vision>
 /**
  * Comprehensive tests for rate limiting functionality in SecureApiSigner and worker.
  * Tests the token bucket algorithm, concurrency controls, and error handling.

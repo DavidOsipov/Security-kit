@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: LGPL-3.0-or-later
+// SPDX-FileCopyrightText: © 2025 David Osipov <personal@david-osipov.vision>
 // Re-export a small, guarded surface of test-only helpers for consumers who need
 // to run tests against the package. This file is intended for dev/test usage
 // and is guarded at runtime by the same dev-guards used elsewhere in the repo.

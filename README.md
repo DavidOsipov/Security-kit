@@ -453,7 +453,7 @@ Contributions are welcome! Please read the **[Security Constitution](./Security%
 - **ISNI:** [0000 0005 1802 960X](https://isni.org/isni/000000051802960X)
 - **ORCID:** [0009-0005-2713-9242](https://orcid.org/0009-0005-2713-9242)
 - **Contact:** <personal@david-osipov.vision>
-- **License:** MIT License (SPDX-License-Identifier: MIT)
+- **License:** GNU Lesser General Public License v3.0 or later (SPDX-License-Identifier: LGPL-3.0-or-later)
 
 ## Acknowledgments
 

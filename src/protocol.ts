@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: LGPL-3.0-or-later
+// SPDX-FileCopyrightText: © 2025 David Osipov <personal@david-osipov.vision>
 // Shared protocol types between the main thread signer and the worker.
 
 /** Init message sent from main thread to worker (transfer ArrayBuffer) */

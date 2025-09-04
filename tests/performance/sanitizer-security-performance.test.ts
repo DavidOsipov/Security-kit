@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: LGPL-3.0-or-later
+// SPDX-FileCopyrightText: © 2025 David Osipov <personal@david-osipov.vision>
 import { describe, test, expect } from "vitest";
 import DOMPurify from "isomorphic-dompurify";
 import { Sanitizer, STRICT_HTML_POLICY_CONFIG } from "../../src/sanitizer";

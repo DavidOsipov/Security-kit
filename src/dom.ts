@@ -1,6 +1,6 @@
 // --- File: src/dom.ts ---
 //
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: LGPL-3.0-or-later
 // SPDX-FileCopyrightText: © 2025 David Osipov <personal@david-osipov.vision>
 //
 // Hardened DOM validation utilities — tightened types, sanitized logging,

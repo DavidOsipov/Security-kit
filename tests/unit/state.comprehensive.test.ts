@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: LGPL-3.0-or-later
+// SPDX-FileCopyrightText: © 2025 David Osipov <personal@david-osipov.vision>
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import * as state from "../../src/state";
 import { setCrypto, sealSecurityKit } from "../../src/config";

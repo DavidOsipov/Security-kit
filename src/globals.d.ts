@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: LGPL-3.0-or-later
+// SPDX-FileCopyrightText: © 2025 David Osipov <personal@david-osipov.vision>
+
 /**
  * A build-time flag for dead code elimination of test-only exports.
  * Consumers of this library should configure their bundler (e.g., Vite, webpack)

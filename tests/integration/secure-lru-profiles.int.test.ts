@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: LGPL-3.0-or-later
+// SPDX-FileCopyrightText: © 2025 David Osipov <personal@david-osipov.vision>
 // Integration tests for SecureLRUCache profiles and semantics
 
 import { describe, it, expect, beforeEach, vi } from "vitest";
