@@ -216,9 +216,16 @@ export function loadPostMessageInternals(opts?: {
   // the test runner. Use a moderately generous default so normal sync code
   // completes; tests that intentionally exercise long async operations should
   // use other mechanisms.
+  // Use a generous timeout for initial module evaluation so tests that
+  // intentionally pass a tiny runner timeout (to exercise timeout behavior)
+  // don't cause the module load itself to time out. Runner helpers below
+  // will use the smaller, test-provided timeout.
+  const VM_MODULE_EVAL_TIMEOUT_MS = 10_000;
   const VM_RUNNER_TIMEOUT_MS =
     typeof opts?.timeoutMs === "number" ? opts.timeoutMs : 4000;
-  const fn = script.runInContext(vmContext, { timeout: VM_RUNNER_TIMEOUT_MS });
+  const fn = script.runInContext(vmContext, {
+    timeout: VM_MODULE_EVAL_TIMEOUT_MS,
+  });
   const exported = fn(
     fakeModule.exports,
     requireRoot,

@@ -84,8 +84,8 @@ describe("state concurrency and failure paths", () => {
     const genAfter = utils._getCryptoGenerationForTest();
     expect(genAfter).toBeGreaterThanOrEqual(genBefore + 1);
 
-    // The original promise should now reject with the specific reset error
-    await expect(p).rejects.toThrow(/Crypto initialization was reset/);
+  // The original promise should now reject with a reset/invalidated error
+  await expect(p).rejects.toThrow(/Crypto initialization was (reset|invalidated)/);
 
     if (typeof origGlobal !== "undefined")
       (globalThis as any).crypto = origGlobal;

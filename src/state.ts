@@ -425,12 +425,10 @@ export async function isCryptoAvailable(): Promise<boolean> {
 export const __test_resetCryptoStateForUnitTests: undefined | (() => void) =
   typeof __TEST__ !== "undefined" && __TEST__
     ? (() => {
-        // runtime guard to prevent accidental execution in production
-        // import lazily to avoid cycles at module load time
-        // Use dynamic import for ES modules
-        return async () => {
-          const _developmentGuards = await import("./development-guards");
-          _developmentGuards.assertTestApiAllowed();
+        // Synchronous test-only reset helper. Avoids async imports to ensure
+        // tests can reliably reset module state within beforeEach/afterEach
+        // without race conditions. Intentionally limited to test builds.
+        return () => {
           _cachedCrypto = undefined;
           _cryptoPromise = undefined;
           _cryptoState = CryptoState.Unconfigured;

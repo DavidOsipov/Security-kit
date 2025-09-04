@@ -4,7 +4,9 @@ import loadPostMessageInternals from "../helpers/vmPostMessageHelper";
 // RULE-ID: controlled-realm-testing
 // Use the project's VM helper and __runInVmJson to assert cross-realm behavior.
 
-test("safeCtorName inside VM returns correct constructor name and length", () => {
+test(
+  "safeCtorName inside VM returns correct constructor name and length",
+  () => {
   const pm = loadPostMessageInternals();
   const parsed = pm.__runInVmJson(`
     const arr = new Uint8Array([1,2,3]);
@@ -13,4 +15,6 @@ test("safeCtorName inside VM returns correct constructor name and length", () =>
     return { ctor, len: arr.length };
   `);
   expect(parsed).toEqual({ ctor: "Uint8Array", len: 3 });
-});
+  },
+  30_000,
+);

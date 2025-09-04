@@ -197,6 +197,8 @@ function _checkForDangerousKeys(
           base: baseReference,
           dangerous,
         });
+        if (onUnsafeKey === "warn" || onUnsafeKey === "skip") continue; // Allow processing to continue for warn and skip modes
+        // This should never be reached, but kept for safety
         throw new InvalidParameterError(message);
       }
     }
@@ -214,6 +216,8 @@ function _checkForDangerousKeys(
         secureDevelopmentLog("warn", componentName, message, {
           base: baseReference,
         });
+        if (onUnsafeKey === "warn" || onUnsafeKey === "skip") continue; // Allow processing to continue for warn and skip modes
+        // This should never be reached, but kept for safety
         throw new InvalidParameterError(message);
       }
       continue;
@@ -225,6 +229,8 @@ function _checkForDangerousKeys(
         base: baseReference,
         dangerous,
       });
+      if (onUnsafeKey === "warn" || onUnsafeKey === "skip") continue; // Allow processing to continue for warn and skip modes
+      // This should never be reached, but kept for safety
       throw new InvalidParameterError(message);
     }
   }

@@ -23,6 +23,9 @@ export default defineConfig({
         "coverage/**",
         "demo/**",
         "scripts/**",
+        // Exclude non-runtime/type-only and harness files from coverage
+        "src/protocol.ts",
+        "src/scripts/**",
         "tools/**",
         "tmp-*/**",
         ".husky/**",
@@ -44,8 +47,9 @@ export default defineConfig({
     },
   },
   define: {
-    __TEST__: false,
+    __TEST__: true,
     "process.env.NODE_ENV": JSON.stringify("test"),
     "process.env.SECURITY_KIT_ALLOW_TEST_APIS": JSON.stringify("true"),
+    "globalThis.__SECURITY_KIT_ALLOW_TEST_APIS": true,
   },
 });

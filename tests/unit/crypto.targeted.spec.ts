@@ -30,21 +30,32 @@ describe("crypto - targeted branches", () => {
 
   beforeEach(async () => {
     vi.resetModules();
+    // Import state fresh and reset it completely
     state = await import("../../src/state");
-    if ((state as any).__test_resetCryptoStateForUnitTests)
-      (state as any).__test_resetCryptoStateForUnitTests();
+    (state as any).__resetCryptoStateForTests();
     cryptoModule = undefined;
   });
 
   afterEach(async () => {
-    if (state && (state as any).__test_resetCryptoStateForUnitTests)
-      (state as any).__test_resetCryptoStateForUnitTests();
+    try {
+      if (state) {
+        (state as any).__resetCryptoStateForTests();
+      }
+    } catch (error) {
+      // Ignore reset errors
+    }
   });
 
   it("generateSecureUUID uses crypto.randomUUID when present", async () => {
+    // Force a fresh module graph to avoid stale cached imports
+    vi.resetModules();
+    // Re-import state from the fresh graph and configure fake crypto with randomUUID
+    const freshState = await import("../../src/state");
     const fake = makeFakeCrypto({ withRandomUUID: true });
-    (state as any)._setCrypto(fake);
+    (freshState as any)._setCrypto(fake);
+    // Import crypto module from the same fresh graph
     cryptoModule = await import("../../src/crypto");
+
     const id = await cryptoModule.generateSecureUUID();
     expect(id).toBe("11111111-2222-3333-4444-555555555555");
   });

@@ -1,3 +1,6 @@
+// Set test API allow flag before any modules load
+(globalThis as any).__SECURITY_KIT_ALLOW_TEST_APIS = true;
+
 import { setupDOMPurify } from "./domPurify";
 
 // Initialize a shared JSDOM + DOMPurify instance for tests.

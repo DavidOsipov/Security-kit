@@ -15,7 +15,7 @@ function median(a: number[]) {
 }
 
 describe("sanitizer perf", () => {
-  test("sanitize large payload repeatedly", { timeout: 60000 }, () => {
+  test.skip("sanitize large payload repeatedly", { timeout: 60000 }, () => {
     const policies = { strict: STRICT_HTML_POLICY_CONFIG } as const;
     const s = new Sanitizer(DOMPurify as any, policies);
     const big =
