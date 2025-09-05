@@ -65,12 +65,16 @@ Preventing regressions:
     - [Secure URL Construction](#secure-url-construction)
     - [Secure `postMessage` Handling](#secure-postmessage-handling)
     - [Redacted Development Logging](#redacted-development-logging)
+    - [Secure LRU Cache](#secure-lru-cache)
+    - [Secure API Signing with Worker Integrity](#secure-api-signing-with-worker-integrity)
   - [The Constitutions \& Methodology](#the-constitutions--methodology)
   - [Advanced Topics](#advanced-topics)
-    - [Sealing the Kit for Maximum Security](#sealing-the-kit-for-maximum-security)
+    - [Secure Startup Pattern \& Sealing the Kit](#secure-startup-pattern--sealing-the-kit)
+    - [Worker Integrity Controls and CSP](#worker-integrity-controls-and-csp)
+      - [Blob Workers and Content Security Policy (CSP)](#blob-workers-and-content-security-policy-csp)
+      - [Integrity Modes Matrix (summary)](#integrity-modes-matrix-summary)
     - [Bundler Configuration (Vite)](#bundler-configuration-vite)
     - [Optional Dependencies \& Bundle Size](#optional-dependencies--bundle-size)
-    - [Content Security Policy (CSP) and Blob Workers](#content-security-policy-csp-and-blob-workers)
     - [Production Error Reporting](#production-error-reporting)
     - [Sanitization \& DOM Utilities](#sanitization--dom-utilities)
   - [Testing](#testing)
@@ -82,7 +86,7 @@ Preventing regressions:
 
 ## Core Philosophy
 
-This library is built on a set of non-negotiable principles, codified in the included **[Security Constitution](./docs/Security%20Consitution.md)**.
+This library is built on a set of non-negotiable principles, codified in the included **[Security Constitution](./docs/Constitutions.md)**.
 
 - 🛡️ **Secure by Default:** The default state of every function is the most secure state. Insecure actions are forbidden.
 - 🏰 **Defense in Depth:** Multiple, independent security controls are layered to protect against failure in any single component.
@@ -139,11 +143,15 @@ main();
   - `secureWipe`: Best-effort memory wiping for sensitive buffers.
   - Hardened environment detection (`isDevelopment`, `isProduction`).
   - Rate-limited production error reporter.
+- **Secure Startup & Sealing:**
+  - A secure startup pattern that freezes the kit's configuration after initialization (`sealSecurityKit`), preventing runtime tampering and privilege escalation.
+- **Worker Integrity Controls:**
+  - Hardened `SecureApiSigner` with strict integrity modes (`require`, `compute`) to mitigate TOCTOU attacks on web workers.
+  - Configurable runtime policies for Blob worker usage and security trade-offs.
 - **Security-Hardened LRU Cache:**
-  - High-performance, memory-safe cache for sensitive byte arrays.
+  - High-performance, memory-safe cache for sensitive byte arrays with advanced eviction policies (LRU, Segmented LRU, SIEVE).
   - Built-in protections against TOCTOU attacks, memory exhaustion, and data leakage.
   - Automatic buffer zeroization and defensive copying.
-  - TTL-based expiration with monotonic clock support.
 - **URL & URI Hardening:**
   - Safely build and modify URLs without string interpolation vulnerabilities.
   - Robust validation and parsing of URL strings and their parameters.
@@ -246,7 +254,7 @@ const sensitiveData = {
 
 // In development, this logs the object with '[REDACTED]' values for token and password.
 // In production, this is a no-op.
-secureDevlog("info", "AuthComponent", "User logged in", sensitiveData);
+secureDevLog("info", "AuthComponent", "User logged in", sensitiveData);
 ```
 
 ### Secure LRU Cache
@@ -296,43 +304,76 @@ console.log(
 );
 ```
 
-**Security Features:**
+### Secure API Signing with Worker Integrity
 
-- **TOCTOU Protection:** Ensures cached bytes are identical to originally validated content
-- **Memory Safety:** Automatic zeroization of evicted byte arrays to minimize data lifetime
-- **DoS Prevention:** Strict capacity limits prevent memory exhaustion attacks
-- **Side-Channel Resistance:** Rejects SharedArrayBuffer views by default
-- **Defensive Copying:** Prevents mutation of cached data through shared references
-- **Input Validation:** Type-safe APIs with comprehensive parameter validation
+Use `SecureApiSigner` to perform HMAC signing in a separate thread, with strict integrity checks to prevent loading a compromised worker script.
+
+```typescript
+import { SecureApiSigner } from "@david-osipov/security-kit";
+
+// In your build process, compute the hash of your worker script:
+// shasum -a 256 -b signing-worker.js | cut -d' ' -f1 | xxd -r -p | base64
+const WORKER_HASH = "<base64-sha256-of-your-worker-script>";
+
+const signer = await SecureApiSigner.create({
+  workerUrl: new URL("/assets/signing-worker.js", location.href),
+  secret: new Uint8Array(32), // Use a 32-byte (256-bit) secret
+  integrity: "require", // Recommended for production
+  expectedWorkerScriptHash: WORKER_HASH,
+});
+
+const signaturePayload = await signer.sign({ message: "hello" });
+console.log("Signed payload:", signaturePayload);
+```
 
 ## The Constitutions & Methodology
 
 This library is more than just code; it's an architecture.
 
-- The **[Security Constitution](./Security%20Consitution.md)** is a mandatory read for any team using this library. It serves as a single source of truth for the non-negotiable rules and principles that this library enforces.
+- The **[Security Constitution](./docs/Constitutions.md)** is a mandatory read for any team using this library. It serves as a single source of truth for the non-negotiable rules and principles that this library enforces.
 - The **[Development Methodology](./docs/METHODOLOGY.md)** document outlines the rigorous, AI-assisted workflow used to create, validate, and harden this toolkit with full transparency.
 
 ## Advanced Topics
 
-### Sealing the Kit for Maximum Security
+### Secure Startup Pattern & Sealing the Kit
 
-At your application's startup, after performing any initial configuration, you should **seal the kit**. This makes the library's configuration immutable, hardening your app against runtime tampering or malicious dependency behavior.
+The library enforces a secure startup pattern. Configuration and secret-bearing "capabilities" (like a signer) should be created once during application bootstrap. Afterward, the kit should be **sealed** to make its configuration immutable, hardening your app against runtime tampering or malicious dependency behavior.
 
 ```typescript
 import { sealSecurityKit, setAppEnvironment } from "@david-osipov/security-kit";
 
-// 1. Perform any configuration at startup.
+// 1. Perform all configuration at startup.
 setAppEnvironment("production");
+// ... create signing capabilities, etc.
 
-// 2. Seal the kit.
-// You can also call the alias `freezeConfig()` which calls `sealSecurityKit()`
-// (use whichever name better matches your team's terminology).
-// freezeConfig();
+// 2. Seal the kit before accepting traffic.
+// `freezeConfig()` is an alias for `sealSecurityKit()`.
 sealSecurityKit();
 
 // 3. Any further attempts to configure the library will now throw an error.
 // setAppEnvironment("development"); // Throws InvalidConfigurationError
 ```
+
+### Worker Integrity Controls and CSP
+
+The `SecureApiSigner` defaults to the strictest integrity mode (`require`), which demands a pre-computed hash of the worker script. This is the best way to mitigate Time-of-Check to Time-of-Use (TOCTOU) attacks.
+
+- **`integrity: "require"` (Default, Recommended):** You must provide `expectedWorkerScriptHash`. The library fetches the worker, verifies its hash, and only then proceeds.
+- **`integrity: "compute"`:** The library fetches the worker and computes the hash at runtime. This is convenient for development but is **blocked in production by default** unless you explicitly opt-in via runtime policy, as it leaves a small TOCTOU window.
+- **`integrity: "none"`:** Disables all integrity checks. **Forbidden in production.**
+
+#### Blob Workers and Content Security Policy (CSP)
+
+To completely eliminate the TOCTOU window when using `integrity: "compute"` or `integrity: "require"`, the library can create the worker from a `Blob` of the verified script bytes. This requires your Content Security Policy (CSP) to allow `blob:` URLs.
+
+- **Recommended CSP:** `worker-src 'self' blob:;`
+- If Blob workers are blocked by CSP, the library will fall back to instantiating the worker by its URL, which re-introduces the TOCTOU risk.
+
+#### Integrity Modes Matrix (summary)
+
+- **`require` + Blob usable:** Executes from verified bytes (no TOCTOU). In production, HTTPS is enforced for `workerUrl`.
+- **`require` + Blob not usable:** Library verifies script bytes but instantiates by URL; a TOCTOU window remains. Recommended: enable Blob workers via CSP (`worker-src blob:`) and runtime policy, or precompute hashes and serve immutable worker assets.
+- **`compute`:** Dev-only by default; in production requires BOTH a global override (runtime policy) AND a per-call override. If Blob is allowed, the Worker is created from the verified bytes to eliminate TOCTOU.
 
 ### Bundler Configuration (Vite)
 
@@ -356,35 +397,7 @@ export default defineConfig({
 Some features (fast fallbacks and convenience parsers) are provided as optional dependencies to keep the core runtime small and secure by default. The package declares a few optional packages such as `hash-wasm`, `fast-sha256`, `css-what`, and `lru-cache` — they are only required in environments where the native Web Crypto API or other platform capabilities are unavailable.
 
 - If you rely on modern browsers or Node >= 18 with Web Crypto available, you do not need to install these optional packages; the kit will use the native secure implementations.
-- If you want the bundled fallbacks (for older runtimes or convenience), install the optional packages in your project. Example:
-
-```bash
-# Install optional fallbacks (only if you need them)
-npm install --save hash-wasm fast-sha256 css-what lru-cache
-```
-
-Implementation note: the library build excludes these optional packages from the main distributed bundle (they are externalized) to reduce package size. This keeps the published `dist/` small and lets bundlers (Webpack/Rollup/Vite/esbuild) handle tree-shaking and minification for your application.
-
-If you want a single-file bundle that includes fallbacks, install the optional deps in your project or contact the maintainers about publishing a "full" build variant.
-
-### Content Security Policy (CSP) and Blob Workers
-
-Blob-based Web Workers (created via URL.createObjectURL(new Blob(...))) can be a useful mitigation to avoid TOCTOU when loading remote worker scripts, because you can create the worker from bytes you verified locally. However, strict Content Security Policy (CSP) headers can prevent Blob creation or worker loading. To use Blob workers reliably, ensure your application's CSP allows blob: for worker-src (and optionally for script-src when module workers are used).
-
-Minimum recommended directives:
-
-- worker-src 'self' blob:;
-- script-src 'self' 'wasm-unsafe-eval' blob:; # if loading module workers from Blobs in some browsers
-
-If your application uses a very restrictive CSP (e.g., only 'self' with no blob:), Blob workers will fail with a CSP error when calling URL.createObjectURL or when the browser refuses to instantiate the worker. In that case, the library will fall back to normal URL-based workers when allowed by policy, but you should prefer providing a build-time hashed `expectedWorkerScriptHash` and using integrity: 'require' to eliminate TOCTOU without relying on Blobs.
-
-See docs/User docs.md for more details and examples on runtime policy and CSP guidance.
-
-### Integrity Modes Matrix (summary)
-
-- require + Blob usable: executes from verified bytes (no TOCTOU). In production, HTTPS is enforced for workerUrl.
-- require + Blob not usable: library verifies script bytes but instantiates by URL; a TOCTOU window remains. Recommended: enable Blob workers via CSP (`worker-src blob:`) and runtime policy, or precompute hashes and serve immutable worker assets.
-- compute: dev-only by default; in production requires BOTH a global override (runtime policy) AND a per-call override. If Blob is allowed, the Worker is created from the verified bytes to eliminate TOCTOU.
+- If you want the bundled fallbacks (for older runtimes or convenience), install the optional packages in your project.
 
 ### Production Error Reporting
 
@@ -443,9 +456,16 @@ npm test
 npm run coverage
 ```
 
+The repository also contains opt-in performance benchmarks for security-sensitive modules. These are intended for local profiling and are excluded from normal CI runs.
+
+```bash
+# Run all performance tests
+npm run perf
+```
+
 ## Contributing
 
-Contributions are welcome! Please read the **[Security Constitution](./Security%20Consitution.md)** and ensure any pull requests adhere to its principles and include corresponding tests.
+Contributions are welcome! Please read the **[Security Constitution](./docs/Constitutions.md)** and ensure any pull requests adhere to its principles and include corresponding tests.
 
 ## Author and License
 

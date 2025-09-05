@@ -36,9 +36,21 @@ export default defineConfig([
   {
     entry: ["tests/helpers/test-internals.ts"],
     format: ["esm", "cjs"],
-    dts: true,
+    // Do not emit d.ts for test-only builds (avoid conflicts)
+    dts: false,
     sourcemap: true,
     outDir: "dist",
+    // Disable code splitting for test internals to avoid emitting shared chunks
+    splitting: false,
+    // Keep optional runtime fallbacks external so tests use the same runtime behavior
+    external: [
+      "hash-wasm",
+      "fast-sha256",
+      "css-what",
+      "lru-cache",
+      "isomorphic-dompurify",
+      "dompurify",
+    ],
     outExtension({ format }) {
       if (format === "cjs") return { js: ".cjs" };
       if (format === "esm") return { js: ".mjs" };
@@ -49,7 +61,9 @@ export default defineConfig([
   {
     entry: ["src/worker/signing-worker.ts"],
     format: ["esm", "cjs"],
-    dts: true,
+    // Worker-specific declarations are not emitted separately to avoid colliding
+    // with the main declaration bundle.
+    dts: false,
     sourcemap: true,
     outDir: "dist/worker",
     // Disable code splitting to keep worker as a single file
@@ -76,7 +90,9 @@ export default defineConfig([
       "server/verify-api-request-signature.ts",
     ],
     format: ["esm", "cjs"],
-    dts: true,
+    // Server declarations are produced by the main bundle to keep a single
+    // unified set of type declarations and avoid delete races.
+    dts: false,
     sourcemap: true,
     outDir: "dist/server",
     // Disable code splitting to prevent chunk files and keep modules separate

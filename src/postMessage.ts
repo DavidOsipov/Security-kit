@@ -862,6 +862,23 @@ export function createSecurePostMessageListener(
         throw new InvalidParameterError("insecure origin");
       return norm;
     } catch {
+      // Fallback: accept explicit http://localhost(:port) forms that may not
+      // pass stricter URL normalization but are valid development origins.
+      try {
+        const u = new URL(o);
+        // Ensure it's a pure origin
+        if ((u.pathname && u.pathname !== "/") || u.search || u.hash)
+          throw new Error("not-origin");
+        const isLocalhost = isHostnameLocalhost(u.hostname);
+        if (u.protocol === "http:" && isLocalhost) {
+          // Return a canonical origin string
+          const portPart = u.port ? `:${u.port}` : "";
+          return `${u.protocol}//${u.hostname}${portPart}`;
+        }
+      } catch {
+        /* fall through to error below */
+      }
+
       throw new InvalidParameterError(
         `Invalid allowed origin '${o}'. Use an absolute origin 'https://example.com' or 'http://localhost'.`,
       );

@@ -3,7 +3,7 @@ import {
   configureUrlPolicy,
   getSafeSchemes,
   _resetUrlPolicyForTests,
-} from "../../src/url-policy";
+} from "../../src/config";
 import {
   InvalidParameterError,
   InvalidConfigurationError,

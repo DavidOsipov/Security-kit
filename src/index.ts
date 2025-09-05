@@ -41,8 +41,14 @@ export * from "./crypto";
 
 // URL Utilities
 export * from "./url";
+// URL hardening runtime config helpers
+export {
+  getUrlHardeningConfig,
+  setUrlHardeningConfig,
+  runWithStrictUrlHardening,
+} from "./config";
 // URL policy configuration (controlled opt-in)
-export { configureUrlPolicy, getSafeSchemes } from "./url-policy";
+export { configureUrlPolicy, getSafeSchemes } from "./config";
 
 // PostMessage Utilities
 export * from "./postMessage";

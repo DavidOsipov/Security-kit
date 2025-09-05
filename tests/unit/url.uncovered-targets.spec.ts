@@ -1,10 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
-import {
-  normalizeOrigin,
-  encodeHostLabel,
-  InvalidParameterError,
-} from "../../src/url";
-import { getSafeSchemes } from "../../src/url-policy";
+import { normalizeOrigin, encodeHostLabel } from "../../src/url";
+import { InvalidParameterError } from "../../src/errors";
+import { getSafeSchemes } from "../../src/config";
 
 // Import internal functions for testing (these would need to be exposed for testing)
 import * as urlModule from "../../src/url";
@@ -41,9 +38,15 @@ describe("url module - uncovered areas", () => {
         expect(() => normalizeOrigin(url)).toThrow(InvalidParameterError);
       }
 
-      // These are actually valid according to URL constructor
-      expect(normalizeOrigin("ftp:///path")).toBe("ftp://path");
-      expect(normalizeOrigin("javascript:alert(1)")).toBe("javascript://");
+      // Security hardening: reject ambiguous edge cases that browser accepts
+      // ftp:///path should be rejected due to ambiguous authority parsing
+      expect(() => normalizeOrigin("ftp:///path")).toThrow(
+        InvalidParameterError,
+      );
+      // javascript:alert(1) should be rejected due to missing authority (//)
+      expect(() => normalizeOrigin("javascript:alert(1)")).toThrow(
+        InvalidParameterError,
+      );
     });
   });
 

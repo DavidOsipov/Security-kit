@@ -3,7 +3,7 @@ import {
   SecureLRUCache,
   type CacheOptions,
   type EvictedEntry,
-} from "../../src/secure-lru-cache";
+} from "../../src/secure-cache";
 import { InvalidParameterError } from "../../src/errors";
 
 describe("SecureLRUCache (standalone class)", () => {

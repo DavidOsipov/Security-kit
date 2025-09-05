@@ -500,10 +500,12 @@ describe("url.ts - comprehensive coverage improvement", () => {
 
       it("prevents path segment exhaustion", { timeout: 10000 }, () => {
         const manySegments = Array(100).fill("segment"); // Reduced from 1000
-        // Implementation doesn't have a hard limit on path segments
-        // but it should still work without throwing
+        // The implementation enforces a default maxPathSegments of 64. Provide a higher cap
+        // here to ensure the function processes many segments without throwing or hanging.
         expect(() =>
-          createSecureURL("https://example.com", manySegments),
+          createSecureURL("https://example.com", manySegments, {}, undefined, {
+            maxPathSegments: 150,
+          }),
         ).not.toThrow();
       });
 
@@ -559,9 +561,12 @@ describe("url.ts - comprehensive coverage improvement", () => {
           const url = `https://${hostname}`;
           const result = validateURL(url);
           if (result.ok) {
-            // URL constructor normalizes hostnames: converts to lowercase and trims whitespace
-            // but preserves trailing dots
-            const expectedHostname = hostname.toLowerCase().trim();
+            // Security hardening: our implementation normalizes hostnames more aggressively
+            // than the browser to prevent FQDN confusion attacks. Trailing dots are stripped.
+            const expectedHostname = hostname
+              .toLowerCase()
+              .trim()
+              .replace(/\.+$/, "");
             expect(result.url.hostname).toBe(expectedHostname);
           }
         }
@@ -711,7 +716,14 @@ describe("url.ts - comprehensive coverage improvement", () => {
       }
 
       const start = Date.now();
-      const result = createSecureURL("https://example.com", [], largeParams);
+      // Provide a higher maxQueryParameters cap to avoid tripping the default (256)
+      const result = createSecureURL(
+        "https://example.com",
+        [],
+        largeParams,
+        undefined,
+        { maxQueryParameters: 1000 },
+      );
       const duration = Date.now() - start;
 
       expect(duration).toBeLessThan(15000); // Allow up to 15 seconds for processing

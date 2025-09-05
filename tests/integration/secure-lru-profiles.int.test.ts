@@ -3,7 +3,7 @@
 // Integration tests for SecureLRUCache profiles and semantics
 
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { SecureLRUCache, type EvictedEntry } from "../../src/secure-lru-cache";
+import { SecureLRUCache, type EvictedEntry } from "../../src/secure-cache";
 import {
   getSecureLRUProfiles,
   resolveSecureLRUOptions,

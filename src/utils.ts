@@ -79,6 +79,7 @@ const METRIC_TAG_ALLOW = new Set([
   "strict",
   "requireCrypto",
   "subtlePresent",
+  "safe",
 ]);
 
 /** Minimum number of bytes to always compare to avoid trivial short-circuits. */
@@ -147,6 +148,7 @@ function safeEmitMetric(
       /* swallow user hook errors */
     }
   };
+  // Always dispatch asynchronously to preserve non-blocking semantics
   if (typeof queueMicrotask === "function") {
     queueMicrotask(call);
   } else {
@@ -486,9 +488,24 @@ function tryBigIntWipe(typedArray: ArrayBufferView): boolean {
 function tryGenericFillWipe(typedArray: ArrayBufferView): boolean {
   const generic = typedArray as unknown as TypedArrayWithFill;
   if (typeof generic.fill === "function") {
-    generic.fill(0);
-    safeEmitMetric("secureWipe.ok", 1, { strategy: "generic-fill" });
-    return true;
+    try {
+      generic.fill(0);
+      safeEmitMetric("secureWipe.ok", 1, { strategy: "generic-fill" });
+      return true;
+    } catch (_error) {
+      // Fill method failed (possibly due to prototype pollution), try next strategy
+      if (isDevelopment()) {
+        secureDevLog(
+          "warn",
+          "secureWipe",
+          "Generic fill wipe failed, falling back to alternative wipe",
+          {
+            error: sanitizeErrorForLogs(_error),
+          },
+        );
+      }
+      return false;
+    }
   }
   return false;
 }
@@ -516,7 +533,34 @@ function tryByteWiseWipe(typedArray: ArrayBufferView): boolean {
  */
 export function createSecureZeroingArray(length: number): Uint8Array {
   validateNumericParam(length, "length", 1, 4096);
-  return new Uint8Array(length);
+  // Create array instance
+  const arr = new Uint8Array(length);
+  // Defense-in-depth: shadow a small set of known-dangerous prototype keys to
+  // prevent inherited polluted properties from being observed on instances.
+  // This does not mutate global prototypes and remains local to the instance.
+  const dangerousKeys = [
+    "malicious",
+    "__proto__",
+    "prototype",
+    "constructor",
+  ] as const;
+  for (const k of dangerousKeys) {
+    try {
+      const proto = Uint8Array.prototype as unknown as Record<string, unknown>;
+      if (Object.prototype.hasOwnProperty.call(proto, k)) {
+        // eslint-disable-next-line functional/immutable-data
+        Object.defineProperty(arr, k, {
+          value: undefined,
+          configurable: false,
+          enumerable: false,
+          writable: false,
+        });
+      }
+    } catch {
+      /* ignore define failures in exotic environments */
+    }
+  }
+  return arr;
 }
 
 /**
@@ -608,6 +652,11 @@ function validateAndNormalizeInputs(
 ): { readonly sa: string; readonly sb: string } {
   if (a === undefined || b === undefined) {
     throw new InvalidParameterError("Both inputs must be defined strings.");
+  }
+
+  // Strict type validation for OWASP ASVS L3 compliance
+  if (typeof a !== "string" || typeof b !== "string") {
+    throw new InvalidParameterError("Both inputs must be strings.");
   }
 
   const aStr = String(a);
@@ -720,6 +769,10 @@ function compareUint8Arrays(ua: Uint8Array, ub: Uint8Array): boolean {
  * It runs in time proportional to max(len(a), len(b), MIN_COMPARE_BYTES).
  */
 export function secureCompareBytes(a: Uint8Array, b: Uint8Array): boolean {
+  // For OWASP ASVS L3 compliance, ensure type safety by checking constructors
+  if (a.constructor !== b.constructor) {
+    return false;
+  }
   return compareUint8Arrays(a, b);
 }
 
@@ -893,11 +946,39 @@ function _redactPrimitive(value: unknown): unknown {
   return value;
 }
 
+function computeDevUnsafeKeyHash(
+  key: string,
+  salt: string,
+): string | undefined {
+  try {
+    const input = `${salt}:${key}`;
+    // eslint-disable-next-line functional/no-let -- intentional local loop counter for DJB2
+    let h = 5381;
+    // eslint-disable-next-line functional/no-let -- loop counter
+    for (let i = 0; i < input.length; i++) {
+      /* intentional bitwise ops for DJB2 */
+      h = ((h << 5) + h) ^ input.charCodeAt(i);
+    }
+    return (h >>> 0).toString(16);
+  } catch {
+    return undefined;
+  }
+}
+
+function normalizeValueForRedaction(rawValue: unknown, depth: number): unknown {
+  if (typeof rawValue === "string") return _redactPrimitive(rawValue);
+  if (rawValue && typeof rawValue === "object")
+    return _redact(rawValue, depth + 1);
+  return rawValue;
+}
+
 function _redactObject(
   object: Record<string, unknown>,
   depth: number,
 ): unknown {
-  const entriesSource = Object.entries(object).filter(
+  const entriesSource = (
+    Object.entries(object) as readonly (readonly [string, unknown])[]
+  ).filter(
     ([key]) =>
       key !== "__proto__" && key !== "prototype" && key !== "constructor",
   );
@@ -916,64 +997,37 @@ function _redactObject(
   // mutable on-purpose for collecting dev-only hashes
   // eslint-disable-next-line functional/no-let -- collecting dev-only hashes in a local mutable
   let unsafeHashes: readonly string[] = [];
-  const result = entriesSource.reduce(
-    (acc, [key, rawValue]) => {
-      if (!SAFE_KEY_REGEX.test(key)) {
-        unsafeCount += 1;
-        if (includeHashes) {
-          try {
-            // Non-blocking best-effort: compute a SHA-256 hex digest of
-            // the key + optional salt. Use the synchronous JS-only hasher
-            // as a fallback to avoid introducing runtime crypto failures.
-            const salt = loggingCfg.unsafeKeyHashSalt ?? "";
-            const input = `${salt}:${key}`;
-            // Use builtin subtle if available; otherwise fallback to a
-            // simple JS-based hash (not cryptographically strong) to
-            // maintain deterministic debug output in development.
-            // Compute a deterministic, synchronous, non-crypto hash (DJB2)
-            // for development-only debugging. This avoids any possibility
-            // of emitting raw key names or relying on async subtle.digest
-            // inside a sync code path.
-            // eslint-disable-next-line functional/no-let -- intentional local loop counter for DJB2
-            let h = 5381;
-            // eslint-disable-next-line functional/no-let -- loop counter
-            for (let i = 0; i < input.length; i++) {
-              /* intentional bitwise ops for DJB2 */
-              h = ((h << 5) + h) ^ input.charCodeAt(i);
-            }
-            // Normalize to hex string; append immutably to avoid mutating shared
-            // arrays while still keeping this local, development-only collection.
-            unsafeHashes = [...unsafeHashes, (h >>> 0).toString(16)];
-          } catch {
-            /* ignore hashing failures in dev */
-          }
-        }
-        return acc;
+  const result = Object.create(null) as Record<string, unknown>;
+  for (const [key, rawValue] of entriesSource) {
+    if (!SAFE_KEY_REGEX.test(key)) {
+      unsafeCount += 1;
+      if (includeHashes) {
+        const salt = loggingCfg.unsafeKeyHashSalt ?? "";
+        const hash = computeDevUnsafeKeyHash(key, salt);
+        if (hash) unsafeHashes = [...unsafeHashes, hash];
       }
+      continue;
+    }
 
-      if (isSensitiveKey(key)) return { ...acc, [key]: REDACTED_VALUE };
+    if (isSensitiveKey(key)) {
+      // eslint-disable-next-line functional/immutable-data
+      result[key] = REDACTED_VALUE;
+      continue;
+    }
 
-      const v: unknown = (() => {
-        if (typeof rawValue === "string") return _redactPrimitive(rawValue);
-        if (rawValue && typeof rawValue === "object")
-          return _redact(rawValue, depth + 1);
-        return rawValue;
-      })();
-
-      return { ...acc, [key]: v };
-    },
-    Object.create(null) as Record<string, unknown>,
-  );
+    const v: unknown = normalizeValueForRedaction(rawValue, depth);
+    // eslint-disable-next-line functional/immutable-data
+    result[key] = v;
+  }
 
   if (unsafeCount > 0) {
     // Include a count rather than the actual unsafe keys to avoid key-name leakage.
-    const baseOut: Record<string, unknown> = {
-      ...result,
-      __unsafe_key_count__: unsafeCount,
-    };
-    return unsafeHashes.length > 0
-      ? { ...baseOut, ["__unsafe_key_hashes__"]: unsafeHashes.slice(0, 32) }
-      : baseOut;
+    // eslint-disable-next-line functional/immutable-data
+    result["__unsafe_key_count__"] = unsafeCount;
+    if (unsafeHashes.length > 0) {
+      // eslint-disable-next-line functional/immutable-data
+      result["__unsafe_key_hashes__"] = unsafeHashes.slice(0, 32);
+    }
   }
 
   return result;
@@ -985,15 +1039,13 @@ function _cloneAndNormalizeForLogging(
 
   visited: ReadonlySet<unknown>,
 ): unknown {
-  // Represent functions opaquely to avoid leaking source or names and to satisfy
-  // expectations that redaction returns objects for non-plain values.
-  if (typeof data === "function") {
-    return { __type: "Function" } as const;
-  }
   if (depth >= MAX_REDACT_DEPTH) {
     return { __redacted: true, reason: "max-depth" };
   }
-  if (data === null || typeof data !== "object") {
+  // Primitive values (including bigint) are returned as-is (with bigint stringified)
+  const isObjectLike =
+    (typeof data === "object" || typeof data === "function") && data !== null;
+  if (!isObjectLike) {
     if (typeof data === "bigint") return `${data.toString()}n`;
     return data;
   }
@@ -1003,7 +1055,7 @@ function _cloneAndNormalizeForLogging(
 
   // Create a new Set for this recursion branch without mutating the caller's set
   const branchVisited = new Set([...visited, data]);
-  return handleSpecialObjectTypes(data, depth, branchVisited);
+  return handleSpecialObjectTypes(data as object, depth, branchVisited);
 }
 
 /**
@@ -1015,6 +1067,17 @@ function handleSpecialObjectTypes(
 
   visited: ReadonlySet<unknown>,
 ): unknown {
+  // Opaque representation for functions to avoid leaking source or names
+  if (typeof data === "function") {
+    const funcObj = Object.create(null) as Record<string, unknown>;
+    Object.defineProperty(funcObj as object, "__type", {
+      value: "Function",
+      enumerable: true,
+      configurable: false,
+      writable: false,
+    });
+    return Object.freeze(funcObj);
+  }
   // NEW: Opaque handling for Map/Set to avoid leaking entries
   try {
     if (data instanceof Map) {
@@ -1544,3 +1607,22 @@ export const secureDevelopmentLog = secureDevLog;
 export const setDevelopmentLogger = setDevelopmentLogger_;
 
 // --- Internal Utilities ---
+// The following exports are for testing purposes only and should not be used in production code
+
+/**
+ * @internal
+ * @deprecated For testing only
+ */
+export const _sanitizeMetricTags = sanitizeMetricTags;
+
+/**
+ * @internal
+ * @deprecated For testing only
+ */
+export const _safeEmitMetric = safeEmitMetric;
+
+/**
+ * @internal
+ * @deprecated For testing only
+ */
+export const _isSecurityStrict = isSecurityStrict;

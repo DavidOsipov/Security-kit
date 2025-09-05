@@ -4,7 +4,7 @@
 // Comprehensive integration test for VerifiedByteCache.setAsync cooperative eviction behavior
 
 import { describe, it, expect, beforeEach } from "vitest";
-import { VerifiedByteCache } from "../../src/secure-lru-cache";
+import { VerifiedByteCache } from "../../src/secure-cache";
 
 // Helper to create test data
 function makeBytes(size: number, fill: number = 0): Uint8Array {

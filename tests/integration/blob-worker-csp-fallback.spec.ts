@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { SecureApiSigner } from "../../src/secure-api-signer";
-import { VerifiedByteCache } from "../../src/secure-lru-cache";
+import { VerifiedByteCache } from "../../src/secure-cache";
 import { secureDevLog } from "../../src/utils";
 
 describe("Blob worker CSP strict behavior (no fallback)", () => {

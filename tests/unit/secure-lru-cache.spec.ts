@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { VerifiedByteCache } from "../../src/secure-lru-cache";
+import { VerifiedByteCache } from "../../src/secure-cache";
 import { SecureApiSigner } from "../../src/secure-api-signer";
 
 // These tests focus on cache eviction/TTL and blob URL revocation behavior

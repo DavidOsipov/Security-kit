@@ -12,7 +12,7 @@
 // RULE-ID: module-state-isolation (ensured via beforeEach reset)
 
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { SecureLRUCache } from "../../src/secure-lru-cache";
+import { SecureLRUCache } from "../../src/secure-cache";
 import { VerifiedByteCache } from "../../src/secure-cache";
 
 // Statistical analysis utilities with enhanced metrics

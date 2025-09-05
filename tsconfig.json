@@ -86,8 +86,7 @@
     "node_modules",
     "dist",
     "tests",
-    "vitest.config.ts",
-    // STRICTER: Explicitly exclude any fuzzing harnesses or temporary scripts from the main build.
-    "src/fuzz-harness.ts"
+    "vitest.config.ts"
+    // Note: fuzz-harness.ts now properly located in tests/fuzz/ (excluded via "tests" above)
   ]
 }

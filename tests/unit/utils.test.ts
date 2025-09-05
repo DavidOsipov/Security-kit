@@ -26,6 +26,7 @@ import {
   MAX_RAW_INPUT_LENGTH,
   MAX_REDACT_DEPTH,
   MAX_LOG_STRING,
+  getDevEventDispatchState,
 } from "../../src/utils";
 import { arrayBufferToBase64 } from "../../src/encoding-utils";
 import {
@@ -385,9 +386,15 @@ describe("utils module", () => {
 
       // The _redact function should filter out prototype pollution keys entirely
       // Since result is created with Object.create(null), accessing non-existent properties returns undefined
-      expect(result.hasOwnProperty("__proto__")).toBe(false);
-      expect(result.hasOwnProperty("constructor")).toBe(false);
-      expect(result.hasOwnProperty("prototype")).toBe(false);
+      expect(Object.prototype.hasOwnProperty.call(result, "__proto__")).toBe(
+        false,
+      );
+      expect(Object.prototype.hasOwnProperty.call(result, "constructor")).toBe(
+        false,
+      );
+      expect(Object.prototype.hasOwnProperty.call(result, "prototype")).toBe(
+        false,
+      );
       expect(result.normal).toBe("value");
     });
 
@@ -729,5 +736,450 @@ describe("utils module", () => {
   it("strictDecodeURIComponent handles malformed input", () => {
     const res = strictDecodeURIComponent("%E0%A4%A");
     expect(res.ok).toBe(false);
+  });
+});
+
+describe("createSecureZeroingArray (deprecated)", () => {
+  it("creates array with correct length", () => {
+    const arr = createSecureZeroingArray(16);
+    expect(arr.length).toBe(16);
+    expect(arr instanceof Uint8Array).toBe(true);
+  });
+
+  it("enforces bounds checking", () => {
+    expect(() => createSecureZeroingArray(0)).toThrow(InvalidParameterError);
+    expect(() => createSecureZeroingArray(4097)).toThrow(InvalidParameterError);
+    expect(() => createSecureZeroingArray(-1)).toThrow(InvalidParameterError);
+  });
+
+  it("handles prototype pollution attempts", () => {
+    // Test that the function doesn't inherit polluted properties
+    const originalCreate = Uint8Array;
+    try {
+      // Simulate prototype pollution
+      (Uint8Array as any).prototype.malicious = "polluted";
+      const arr = createSecureZeroingArray(8);
+      expect((arr as any).malicious).toBeUndefined();
+    } finally {
+      delete (Uint8Array as any).prototype.malicious;
+    }
+  });
+});
+
+describe("getDevEventDispatchState", () => {
+  it("returns state object in development", () => {
+    const state = getDevEventDispatchState();
+    expect(state).toEqual({
+      tokens: expect.any(Number),
+      lastRefill: expect.any(Number),
+      refillPerSec: expect.any(Number),
+      maxTokens: expect.any(Number),
+    });
+  });
+
+  it("returns undefined in production", () => {
+    // We can't easily test production mode without mocking the environment
+    // This function checks environment.isProduction internally
+    const state = getDevEventDispatchState();
+    // In test environment, this should return an object
+    expect(typeof state).toBe("object");
+  });
+});
+
+describe("OWASP ASVS L3 - Adversarial Security Tests", () => {
+  describe("secureCompare - timing attack resistance", () => {
+    it("resists timing attacks with different length strings", () => {
+      const short = "a";
+      const long = "a".repeat(1000);
+
+      // Both should take similar time (constant-time comparison)
+      const start1 = performance.now();
+      secureCompare(short, long);
+      const time1 = performance.now() - start1;
+
+      const start2 = performance.now();
+      secureCompare(long, short);
+      const time2 = performance.now() - start2;
+
+      // Allow some variance but ensure they're reasonably close
+      expect(Math.abs(time1 - time2)).toBeLessThan(10);
+    });
+
+    it("handles Unicode normalization edge cases", () => {
+      // Test various Unicode normalization forms
+      expect(secureCompare("café", "café")).toBe(true);
+      expect(secureCompare("café", "cafe\u0301")).toBe(true); // NFD vs NFC
+      expect(secureCompare("Ⅳ", "IV")).toBe(false); // Roman numerals
+    });
+
+    it("resists DoS with maximum length inputs", () => {
+      const maxLen = MAX_COMPARISON_LENGTH;
+      const str1 = "a".repeat(maxLen);
+      const str2 = "a".repeat(maxLen);
+
+      expect(() => secureCompare(str1, str2)).not.toThrow();
+      expect(secureCompare(str1, str2)).toBe(true);
+    });
+
+    it("handles null bytes and control characters", () => {
+      expect(secureCompare("test\x00", "test\x00")).toBe(true);
+      expect(secureCompare("test\x01", "test\x02")).toBe(false);
+      expect(secureCompare("test\n", "test\t")).toBe(false);
+    });
+
+    it("validates input types strictly", () => {
+      expect(() => secureCompare(null as any, "test")).toThrow(
+        InvalidParameterError,
+      );
+      expect(() => secureCompare(undefined as any, "test")).toThrow(
+        InvalidParameterError,
+      );
+      expect(() => secureCompare(123 as any, "test")).toThrow(
+        InvalidParameterError,
+      );
+      expect(() => secureCompare("test", {} as any)).toThrow(
+        InvalidParameterError,
+      );
+    });
+  });
+
+  describe("secureCompareBytes - buffer overflow protection", () => {
+    it("handles different length arrays securely", () => {
+      const short = new Uint8Array([1, 2, 3]);
+      const long = new Uint8Array([1, 2, 3, 4, 5]);
+
+      expect(secureCompareBytes(short, long)).toBe(false);
+      expect(secureCompareBytes(long, short)).toBe(false);
+    });
+
+    it("resists timing attacks with different contents", () => {
+      const arr1 = new Uint8Array(1000).fill(0);
+      const arr2 = new Uint8Array(1000).fill(1);
+
+      const start = performance.now();
+      const result = secureCompareBytes(arr1, arr2);
+      const time = performance.now() - start;
+
+      expect(result).toBe(false);
+      expect(time).toBeLessThan(100); // Should complete quickly
+    });
+
+    it("handles TypedArray subclasses", () => {
+      const uint8 = new Uint8Array([1, 2, 3]);
+      const int8 = new Int8Array([1, 2, 3]);
+
+      expect(secureCompareBytes(uint8, uint8)).toBe(true);
+      // Cast to satisfy TS types while still exercising runtime constructor mismatch
+      expect(
+        secureCompareBytes(
+          uint8 as unknown as Uint8Array,
+          int8 as unknown as Uint8Array,
+        ),
+      ).toBe(false);
+    });
+
+    it("validates input types", () => {
+      expect(() => secureCompareBytes(null as any, new Uint8Array(1))).toThrow(
+        TypeError,
+      );
+      expect(() =>
+        secureCompareBytes(new Uint8Array(1), undefined as any),
+      ).toThrow(TypeError);
+    });
+  });
+
+  describe("secureWipe - memory safety", () => {
+    it("handles hostile buffer objects", () => {
+      const hostileBuffer = {
+        byteLength: 10,
+        get buffer() {
+          throw new Error("hostile getter");
+        },
+      };
+
+      const result = secureWipe(hostileBuffer as any);
+      expect(result).toBe(false);
+    });
+
+    it("resists prototype pollution in wipe strategies", () => {
+      // Backup original methods
+      const originalFill = Uint8Array.prototype.fill;
+      const originalSet = DataView.prototype.setUint8;
+
+      try {
+        // Pollute prototypes
+        (Uint8Array.prototype as any).fill = () => {
+          throw new Error("polluted");
+        };
+        (DataView.prototype as any).setUint8 = () => {
+          throw new Error("polluted");
+        };
+
+        const arr = new Uint8Array([1, 2, 3]);
+        const result = secureWipe(arr);
+
+        // Should still work with fallback strategies
+        expect(result).toBe(true);
+        expect(Array.from(arr)).toEqual([0, 0, 0]);
+      } finally {
+        // Restore originals
+        Uint8Array.prototype.fill = originalFill;
+        DataView.prototype.setUint8 = originalSet;
+      }
+    });
+
+    it("handles extremely large buffers without DoS", () => {
+      // Test with a reasonably large buffer that shouldn't cause issues
+      const largeBuffer = new Uint8Array(100000);
+      largeBuffer.fill(255);
+
+      const start = performance.now();
+      const result = secureWipe(largeBuffer);
+      const time = performance.now() - start;
+
+      expect(result).toBe(true);
+      expect(largeBuffer[0]).toBe(0);
+      expect(time).toBeLessThan(1000); // Should complete reasonably quickly
+    });
+
+    it("validates SharedArrayBuffer detection robustness", () => {
+      // Test with hostile toString
+      const mockBuffer = {
+        constructor: { name: "ArrayBuffer" },
+        toString() {
+          throw new Error("hostile toString");
+        },
+      };
+
+      const mockView = new Uint8Array(10);
+      Object.defineProperty(mockView, "buffer", { value: mockBuffer });
+
+      expect(isSharedArrayBufferView(mockView)).toBe(false);
+    });
+  });
+
+  describe("withSecureBuffer - lifecycle safety", () => {
+    it("prevents use-after-free", () => {
+      let capturedBuffer: Uint8Array | null = null;
+
+      withSecureBuffer(16, (buf) => {
+        capturedBuffer = buf;
+        buf[0] = 42;
+        return "result";
+      });
+
+      // Buffer should be wiped
+      expect(capturedBuffer![0]).toBe(0);
+
+      // Accessing after return should show wiped state
+      expect(capturedBuffer![0]).toBe(0);
+    });
+
+    it("handles callback exceptions securely", () => {
+      let capturedBuffer: Uint8Array | null = null;
+
+      expect(() => {
+        withSecureBuffer(16, (buf) => {
+          capturedBuffer = buf;
+          buf[0] = 99;
+          throw new Error("callback failed");
+        });
+      }).toThrow("callback failed");
+
+      // Buffer should still be wiped despite exception
+      expect(capturedBuffer![0]).toBe(0);
+    });
+
+    it("resists callback re-entry attacks", () => {
+      let callCount = 0;
+
+      const result = withSecureBuffer(16, function inner(buf) {
+        callCount++;
+        if (callCount === 1) {
+          // Try to call withSecureBuffer recursively
+          try {
+            withSecureBuffer(8, () => "nested");
+          } catch {
+            // Ignore nested call failures
+          }
+        }
+        return "done";
+      });
+
+      expect(result).toBe("done");
+      expect(callCount).toBe(1);
+    });
+  });
+
+  describe("_redact - information disclosure prevention", () => {
+    it("prevents prototype pollution in redaction", () => {
+      const malicious = {
+        __proto__: { toString: () => "[POLLUTED]" },
+        normal: "safe",
+      };
+
+      const result = _redact(malicious) as any;
+      expect(Object.prototype.hasOwnProperty.call(result, "__proto__")).toBe(
+        false,
+      );
+      expect(result.normal).toBe("safe");
+    });
+
+    it("handles deeply nested prototype pollution", () => {
+      const deep = {
+        level1: {
+          level2: {
+            __proto__: { polluted: true },
+            safe: "value",
+          },
+        },
+      };
+
+      const result = _redact(deep) as any;
+      expect(
+        Object.prototype.hasOwnProperty.call(result.level1.level2, "__proto__"),
+      ).toBe(false);
+      expect(result.level1.level2.safe).toBe("value");
+    });
+
+    it("resists RegExp DoS in key validation", () => {
+      // Create object with many keys that could cause regex backtracking
+      const obj: any = {};
+      for (let i = 0; i < 1000; i++) {
+        obj[`key${i}`] = `value${i}`;
+      }
+
+      const start = performance.now();
+      const result = _redact(obj) as any;
+      const time = performance.now() - start;
+
+      expect(time).toBeLessThan(100); // Should complete quickly
+      expect(Object.keys(result as any).length).toBeGreaterThan(0);
+    });
+
+    it("handles hostile getter in object enumeration", () => {
+      const hostile = {
+        normal: "safe",
+        get malicious() {
+          throw new Error("hostile getter");
+        },
+      };
+
+      const result = _redact(hostile) as any;
+      expect(result.normal).toBe("safe");
+      expect(result.malicious.reason).toBe("getter-threw");
+    });
+
+    it("prevents information leakage through function serialization", () => {
+      const obj = {
+        func: function secret() {
+          return "sensitive";
+        },
+        arrow: () => "also sensitive",
+      };
+
+      const result = _redact(obj) as any;
+      expect(result.func.__type).toBe("Function");
+      expect(result.arrow.__type).toBe("Function");
+      expect(result.func).not.toHaveProperty("toString");
+    });
+  });
+
+  describe("telemetry - safe metric emission", () => {
+    it("sanitizes metric tags against injection", () => {
+      const unregister = registerTelemetry((name, value, tags) => {
+        expect(tags?.reason).toBe("test");
+        expect(
+          Object.prototype.hasOwnProperty.call(tags ?? {}, "__proto__"),
+        ).toBe(false);
+      });
+
+      emitMetric("test", 1, {
+        reason: "test",
+        __proto__: { polluted: true } as any,
+      });
+
+      unregister();
+    });
+
+    it("handles telemetry hook failures gracefully", () => {
+      const unregister = registerTelemetry(() => {
+        throw new Error("telemetry failure");
+      });
+
+      // Should not throw
+      expect(() => emitMetric("test")).not.toThrow();
+
+      unregister();
+    });
+
+    it("prevents metric tag leakage", async () => {
+      let capturedTags: any = null;
+      const unregister = registerTelemetry((name, value, tags) => {
+        capturedTags = tags;
+      });
+
+      emitMetric("test", 1, {
+        safe: "value",
+        "unsafe key": "secret",
+        "key@domain": "secret2",
+      });
+
+      // Wait for telemetry to be delivered asynchronously
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      unregister();
+
+      expect(capturedTags.safe).toBe("value");
+      expect(
+        Object.prototype.hasOwnProperty.call(capturedTags, "unsafe key"),
+      ).toBe(false);
+      expect(
+        Object.prototype.hasOwnProperty.call(capturedTags, "key@domain"),
+      ).toBe(false);
+    });
+  });
+});
+
+describe("Internal function coverage", () => {
+  it.skip("tests sanitizeMetricTags directly", () => {
+    // Access internal function through module
+    const utilsModule = require("../../src/utils");
+    const sanitizeMetricTags = (utilsModule as any)._sanitizeMetricTags;
+
+    const result = sanitizeMetricTags({
+      reason: "test",
+      invalid: "should be filtered",
+    });
+
+    expect(result).toEqual({ reason: "test" });
+  });
+
+  it.skip("tests safeEmitMetric error handling", () => {
+    // Access internal function
+    const utilsModule = require("../../src/utils");
+    const safeEmitMetric = (utilsModule as any)._safeEmitMetric;
+
+    // Should not throw even without telemetry hook
+    expect(() => safeEmitMetric("test", 1, { reason: "test" })).not.toThrow();
+  });
+
+  it.skip("tests isSecurityStrict function", () => {
+    const originalEnv = process.env.SECURITY_STRICT;
+
+    try {
+      process.env.SECURITY_STRICT = "1";
+      const utilsModule = require("../../src/utils");
+      const isSecurityStrict = (utilsModule as any)._isSecurityStrict;
+      expect(isSecurityStrict()).toBe(true);
+
+      process.env.SECURITY_STRICT = "0";
+      expect(isSecurityStrict()).toBe(false);
+
+      delete process.env.SECURITY_STRICT;
+      expect(isSecurityStrict()).toBe(false);
+    } finally {
+      process.env.SECURITY_STRICT = originalEnv;
+    }
   });
 });

@@ -4,7 +4,7 @@ import { describe, expect, test } from "vitest";
 // Env knobs
 const PERF_LOG =
   process.env.PERF_LOG === "1" || process.env.PERF_LOG === "true";
-import { SecureLRUCache } from "../../src/secure-lru-cache";
+import { SecureLRUCache } from "../../src/secure-cache";
 
 // Utilities (kept small and focused)
 function now(): number {
