@@ -1,4 +1,5 @@
 import { expect, test, beforeEach, afterEach, vi } from "vitest";
+import { CryptoUnavailableError } from "../../src/errors";
 
 // enable runtime test APIs
 beforeEach(async () => {
@@ -19,7 +20,7 @@ test("ensureFingerprintSalt fallback when ensureCrypto rejects, then cached", as
   const state = await import("../../src/state");
   const spy = vi
     .spyOn(state, "ensureCrypto")
-    .mockRejectedValue(new Error("no crypto"));
+    .mockRejectedValue(new CryptoUnavailableError());
 
   const postMessage = await import("../../src/postMessage");
   // First call should produce a fallback deterministic salt in test/dev

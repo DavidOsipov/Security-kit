@@ -22,3 +22,5 @@ coverage_*.*
 benchmarks/results-*.*
 benchmarks/summary-*.*
 benchmarks/sweep-*.*
+# stryker temp files
+.stryker-tmp

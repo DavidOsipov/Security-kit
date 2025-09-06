@@ -198,7 +198,7 @@ describe("crypto.ts - core primitives", () => {
     // Test when crypto fails
     const ensureCryptoSpy = vi
       .spyOn(state, "ensureCrypto")
-      .mockRejectedValue(new Error("no crypto"));
+      .mockRejectedValue(new CryptoUnavailableError());
     try {
       expect(await cryptoModule.hasRandomUUID()).toBe(false);
     } finally {
@@ -320,7 +320,7 @@ describe("crypto.ts - core primitives", () => {
     // Test when crypto fails
     const ensureCryptoSpy = vi
       .spyOn(state, "ensureCrypto")
-      .mockRejectedValue(new Error("no crypto"));
+      .mockRejectedValue(new CryptoUnavailableError());
     try {
       expect(await cryptoModule.hasRandomUUID()).toBe(false);
     } finally {
@@ -442,7 +442,7 @@ describe("crypto.ts - core primitives", () => {
     // Test when crypto fails
     const ensureCryptoSpy = vi
       .spyOn(state, "ensureCrypto")
-      .mockRejectedValue(new Error("no crypto"));
+      .mockRejectedValue(new CryptoUnavailableError());
     try {
       expect(await cryptoModule.hasRandomUUID()).toBe(false);
     } finally {
@@ -595,7 +595,7 @@ describe("crypto.ts - core primitives", () => {
     // Test when crypto fails
     const ensureCryptoSpy = vi
       .spyOn(state, "ensureCrypto")
-      .mockRejectedValue(new Error("no crypto"));
+      .mockRejectedValue(new CryptoUnavailableError());
     try {
       expect(await cryptoModule.hasRandomUUID()).toBe(false);
     } finally {

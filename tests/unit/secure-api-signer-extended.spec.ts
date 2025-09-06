@@ -232,7 +232,7 @@ describe("SecureApiSigner - Extended Canonical Format & Security Features", () =
   });
 
   describe("Extended Canonical Format", () => {
-    it("creates signatures compatible with server verification", async () => {
+  it("creates signatures compatible with server verification", async () => {
       const secret = new Uint8Array(32);
       crypto.getRandomValues(secret);
       const kid = "0123456789abcdef0123456789abcdef";
@@ -277,7 +277,7 @@ describe("SecureApiSigner - Extended Canonical Format & Security Features", () =
       await signer.destroy();
     });
 
-    it("includes all canonical parts in correct order", async () => {
+  it("includes all canonical parts in correct order", async () => {
       const secret = Buffer.from(
         "test-secret-canonical-check-32bytes-owasp-compliant-strength",
       );
@@ -323,7 +323,7 @@ describe("SecureApiSigner - Extended Canonical Format & Security Features", () =
       await signer.destroy();
     });
 
-    it("handles empty/missing context fields correctly", async () => {
+  it("handles empty/missing context fields correctly", async () => {
       const secret = Buffer.from(
         "test-secret-empty-context-32bytes-owasp-compliant-key",
       );

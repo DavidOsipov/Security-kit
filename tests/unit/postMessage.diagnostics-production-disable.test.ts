@@ -6,6 +6,7 @@ import {
 import * as state from "../../src/state";
 import { environment } from "../../src/environment";
 import * as utils from "../../src/utils";
+import { CryptoUnavailableError } from "../../src/errors";
 
 (globalThis as any).__SECURITY_KIT_ALLOW_TEST_APIS = true;
 
@@ -26,8 +27,8 @@ afterEach(() => {
 test("when in production and ensureCrypto rejects, fingerprinting is disabled and we fail loudly", async () => {
   // Force production
   vi.spyOn(environment, "isProduction", "get").mockReturnValue(true as any);
-  // ensureCrypto rejects
-  vi.spyOn(state, "ensureCrypto").mockRejectedValue(new Error("no crypto"));
+  // ensureCrypto rejects with explicit CryptoUnavailableError for clarity
+  vi.spyOn(state, "ensureCrypto").mockRejectedValue(new CryptoUnavailableError());
 
   // Spy on secureDevLog to capture the warning log emitted before throwing
   const logSpy = vi.spyOn(utils, "secureDevLog");

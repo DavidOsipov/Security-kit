@@ -1,4 +1,5 @@
 import { expect, test, vi, afterEach } from "vitest";
+import { CryptoUnavailableError } from "../../src/errors";
 
 (globalThis as any).__SECURITY_KIT_ALLOW_TEST_APIS = true;
 
@@ -23,7 +24,7 @@ test("production disables diagnostics when crypto unavailable", async () => {
 
   // Make ensureCrypto reject to simulate no crypto available
   const state = await import("../../src/state");
-  vi.spyOn(state, "ensureCrypto").mockRejectedValue(new Error("no crypto"));
+  vi.spyOn(state, "ensureCrypto").mockRejectedValue(new CryptoUnavailableError());
 
   const postMessage = await import("../../src/postMessage");
   const listener = (postMessage as any).createSecurePostMessageListener({

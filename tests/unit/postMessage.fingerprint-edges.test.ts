@@ -5,6 +5,7 @@ import {
   __test_resetForUnitTests,
 } from "../../src/postMessage";
 import * as state from "../../src/state";
+import { CryptoUnavailableError } from "../../src/errors";
 
 // Allow test APIs at runtime
 (globalThis as any).__SECURITY_KIT_ALLOW_TEST_APIS = true;
@@ -62,7 +63,7 @@ test("falls back when subtle.digest rejects", async () => {
 
 // Test: ensureCrypto rejects entirely -> fallback deterministic salt/time-based path
 test("uses time-entropy salt when ensureCrypto rejects", async () => {
-  vi.spyOn(state, "ensureCrypto").mockRejectedValue(new Error("no crypto"));
+  vi.spyOn(state, "ensureCrypto").mockRejectedValue(new CryptoUnavailableError());
   // ensure salt can be produced even when ensureCrypto fails
   const salt = await __test_ensureFingerprintSalt();
   expect(salt).toBeInstanceOf(Uint8Array);

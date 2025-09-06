@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { CryptoUnavailableError } from "../../src/errors";
 
 describe("postMessage fingerprinting (subtle and fallback)", () => {
   beforeEach(async () => {
@@ -44,7 +45,7 @@ describe("postMessage fingerprinting (subtle and fallback)", () => {
 
     const spy = vi
       .spyOn(state, "ensureCrypto")
-      .mockRejectedValue(new Error("no crypto"));
+      .mockRejectedValue(new CryptoUnavailableError());
     // calling ensureFingerprintSalt should not throw in dev and should produce a Uint8Array
     const salt = await postMessage.__test_ensureFingerprintSalt();
     expect(salt).toBeInstanceOf(Uint8Array);

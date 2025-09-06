@@ -25,6 +25,7 @@ import {
   InvalidParameterError,
   IllegalStateError,
 } from "../../src/utils";
+import { CryptoUnavailableError } from "../../src/errors";
 import { environment } from "../../src/environment";
 
 describe("utils - uncovered branches", () => {
@@ -775,14 +776,16 @@ describe("utils - uncovered branches", () => {
     it("handles subtle.digest failures", async () => {
       const originalDigest = globalThis.crypto?.subtle?.digest;
       if (globalThis.crypto?.subtle) {
+        // Tests should explicitly signal crypto unavailability by throwing
+        // the library's CryptoUnavailableError so intent is unambiguous.
         globalThis.crypto.subtle.digest = vi
           .fn()
-          .mockRejectedValue(new Error("digest error"));
+          .mockRejectedValue(new CryptoUnavailableError());
       }
 
       try {
         const result = await secureCompareAsync("a", "b");
-        expect(result).toBe(false); // Should fall back to sync
+        expect(result).toBe(false); // Should fall back to sync when crypto unavailable
       } finally {
         if (globalThis.crypto?.subtle && originalDigest) {
           globalThis.crypto.subtle.digest = originalDigest;
