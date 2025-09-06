@@ -148,7 +148,7 @@
     "eslint-plugin-security": "^3.0.1",
     "eslint-plugin-security-node": "^1.1.4",
     "eslint-plugin-sonarjs": "^3.0.5",
-    "eslint-plugin-unicorn": "^60.0.0",
+    "eslint-plugin-unicorn": "^61.0.0",
     "fast-check": "^4.3.0",
     "husky": "^9.1.7",
     "isomorphic-dompurify": "^2.26.0",
