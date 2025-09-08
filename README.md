@@ -8,16 +8,30 @@
 
 ![Security-kit logo](https://github.com/user-attachments/assets/4fde77c1-9510-4b55-8e19-83f7be42201a)
 
+## ⚠️ Security & Use Case Disclaimer
 
-# ⚠️ SECURITY WARNING: EXPERIMENTAL & NON-AUDITED ⚠️
+This library was designed and developed with the stringent principles of the **OWASP Application Security Verification Standard (ASVS) Level 3** as its guiding architectural blueprint. The goal is to provide a toolkit that is secure by default, resilient against common web vulnerabilities, and built upon a foundation of verifiable security patterns as outlined in the project's [Security Constitution](./docs/Constitutions/Security Constitution.md).
 
-## **DO NOT USE THIS LIBRARY IN PRODUCTION ENVIRONMENTS.**
+However, it is crucial for users to understand the following:
 
-This repository is a security-critical library created as a case study in using advanced prompt engineering with Large Language Models (LLMs) to generate code aligned with the OWASP Application Security Verification Standard (ASVS).
+1.  **This library has not undergone a formal, independent security audit.** While the development methodology is rigorous and AI-assisted, it is not a substitute for a comprehensive audit by a professional security firm.
 
-**This code has NOT undergone a professional, third-party security audit.**
+2.  **Do not use this library as a drop-in solution where a specific OWASP ASVS Level (e.g., L1, L2, or L3) is a formal contractual or regulatory requirement.** Compliance with the ASVS is a property of a fully-audited application, not a single component.
 
-**Security-Kit is not just a collection of utilities; it's a security philosophy you can install.**
+### Intended Use Case
+
+This library is intended for developers and teams who need a robust, security-hardened toolkit to build upon. It is designed to significantly elevate the security posture of a typical web application and to serve as a powerful component within a broader, defense-in-depth security strategy.
+
+### Shared Responsibility
+
+The security of your final application is a shared responsibility. Users of this library are responsible for:
+*   Implementing it correctly according to best practices.
+*   Conducting their own security testing and code reviews.
+*   Ensuring their overall application architecture is secure.
+
+This library is a powerful tool to help you build secure applications, but it is not a silver bullet.
+
+## Security-Kit is not just a collection of utilities; it's a security philosophy you can install.
 
 This is a comprehensive, opinionated, and modern security toolkit for browser-based applications. It provides both cryptographic primitives and safe development helpers, all designed to be the reference implementation for a project's Security Constitution. It is built on a **Zero Trust** philosophy, assuming no part of the system is infallible.
 
@@ -89,7 +103,7 @@ Preventing regressions:
 
 ## Core Philosophy
 
-This library is built on a set of non-negotiable principles, codified in the included **[Security Constitution](./docs/Constitutions.md)**.
+This library is built on a set of non-negotiable principles, codified in the included **[Security Constitution](./docs/Constitutions/Security Constitution.md)**.
 
 - 🛡️ **Secure by Default:** The default state of every function is the most secure state. Insecure actions are forbidden.
 - 🏰 **Defense in Depth:** Multiple, independent security controls are layered to protect against failure in any single component.
