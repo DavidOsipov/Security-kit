@@ -30,13 +30,13 @@ The security of your final application is a shared responsibility. Users of this
 
 This library is a powerful tool to help you build secure applications, but it is not a silver bullet.
 
+---
+
 ## Security-Kit is not just a collection of utilities; it's a security philosophy you can install.
 
 This is a comprehensive, opinionated, and modern security toolkit for browser-based applications. It provides both cryptographic primitives and safe development helpers, all designed to be the reference implementation for a project's Security Constitution. It is built on a **Zero Trust** philosophy, assuming no part of the system is infallible.
 
 The entire library is written in TypeScript, has zero production dependencies, and leverages the native **Web Crypto API** for maximum performance and security in modern environments.
-
----
 
 ## Secret length policy
 
