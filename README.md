@@ -6,6 +6,9 @@
 ![Security Tests](https://img.shields.io/github/actions/workflow/status/david-osipov/Security-Kit/ci.yml?branch=main&style=for-the-badge&label=security-tests)
 ![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?style=for-the-badge&logo=typescript&logoColor=white)
 
+![Security-kit logo](https://github.com/user-attachments/assets/4fde77c1-9510-4b55-8e19-83f7be42201a)
+
+
 # ⚠️ SECURITY WARNING: EXPERIMENTAL & NON-AUDITED ⚠️
 
 ## **DO NOT USE THIS LIBRARY IN PRODUCTION ENVIRONMENTS.**
