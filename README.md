@@ -10,8 +10,7 @@
 
 ## ⚠️ Security & Use Case Disclaimer
 
-This library was designed and developed with the stringent principles of the **OWASP Application Security Verification Standard (ASVS) Level 3** as its guiding architectural blueprint. The goal is to provide a toolkit that is secure by default, resilient against common web vulnerabilities, and built upon a foundation of verifiable security patterns as outlined in the project's [Security Constitution](./docs/Constitutions/Security Constitution.md).
-
+This library was designed and developed with the stringent principles of the **OWASP Application Security Verification Standard (ASVS) Level 3** as its guiding architectural blueprint. The goal is to provide a toolkit that is secure by default, resilient against common web vulnerabilities, and built upon a foundation of verifiable security patterns as outlined in the project's [Security Constitution](./docs/Constitutions/Security_Constitution.md).
 However, it is crucial for users to understand the following:
 
 1.  **This library has not undergone a formal, independent security audit.** While the development methodology is rigorous and AI-assisted, it is not a substitute for a comprehensive audit by a professional security firm.
@@ -347,8 +346,8 @@ console.log("Signed payload:", signaturePayload);
 
 This library is more than just code; it's an architecture.
 
-- The **[Security Constitution](./docs/Constitutions.md)** is a mandatory read for any team using this library. It serves as a single source of truth for the non-negotiable rules and principles that this library enforces.
-- The **[Development Methodology](./docs/METHODOLOGY.md)** document outlines the rigorous, AI-assisted workflow used to create, validate, and harden this toolkit with full transparency.
+- The **[Security Constitution](./docs/Constitutions/Security_Constitution.md)** is a mandatory read for any team using this library. It serves as a single source of truth for the non-negotiable rules and principles that this library enforces.
+- The **[Development Methodology](./docs/Methodology/METHODOLOGY.md)** document outlines the rigorous, AI-assisted workflow used to create, validate, and harden this toolkit with full transparency.
 
 ## Advanced Topics
 
