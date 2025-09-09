@@ -13,7 +13,7 @@
 This library was designed and developed with the stringent principles of the **OWASP Application Security Verification Standard (ASVS) Level 3** as its guiding architectural blueprint. The goal is to provide a toolkit that is secure by default, resilient against common web vulnerabilities, and built upon a foundation of verifiable security patterns as outlined in the project's [Security Constitution](./docs/Constitutions/Security_Constitution.md).
 However, it is crucial for users to understand the following:
 
-1.  **This library has not undergone a formal, independent security audit.** While the development methodology is rigorous and AI-assisted, it is not a substitute for a comprehensive audit by a professional security firm.
+1.  **This library has not undergone a formal, independent security audit.** While the development methodology is rigorous and AI-assisted, it is not a substitute for a comprehensive audit by a professional security firm. Until an audit has been conducted, this library should be considered insecure.
 
 2.  **Do not use this library as a drop-in solution where a specific OWASP ASVS Level (e.g., L1, L2, or L3) is a formal contractual or regulatory requirement.** Compliance with the ASVS is a property of a fully-audited application, not a single component.
 
