@@ -63,7 +63,9 @@ test("falls back when subtle.digest rejects", async () => {
 
 // Test: ensureCrypto rejects entirely -> fallback deterministic salt/time-based path
 test("uses time-entropy salt when ensureCrypto rejects", async () => {
-  vi.spyOn(state, "ensureCrypto").mockRejectedValue(new CryptoUnavailableError());
+  vi.spyOn(state, "ensureCrypto").mockRejectedValue(
+    new CryptoUnavailableError(),
+  );
   // ensure salt can be produced even when ensureCrypto fails
   const salt = await __test_ensureFingerprintSalt();
   expect(salt).toBeInstanceOf(Uint8Array);

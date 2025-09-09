@@ -3,9 +3,11 @@ import {
   createSecureURL,
   updateURLParams,
   validateURL,
+  validateURLStrict,
   parseURLParams,
   normalizeOrigin,
   strictDecodeURIComponent,
+  strictDecodeURIComponentOrThrow,
 } from "../../src/url";
 import { InvalidParameterError } from "../../src/errors";
 
@@ -107,6 +109,16 @@ describe("url.ts uncovered branches - comprehensive coverage", () => {
         createSecureURL("https://example.com", [], {}, "fragment\x00"),
       ).toThrow(InvalidParameterError);
     });
+      it("createSecureURL accepts Map for queryParameters", () => {
+        const params = new Map([
+          ["key1", "value1"],
+          ["key2", "value2"],
+        ]);
+        const result = createSecureURL("https://example.com", [], params);
+        expect(result).toContain("key1=value1");
+        expect(result).toContain("key2=value2");
+      });
+
 
     it("createSecureURL rejects fragment with control character", () => {
       expect(() =>
@@ -161,6 +173,33 @@ describe("url.ts uncovered branches - comprehensive coverage", () => {
         InvalidParameterError,
       );
     });
+
+    it("createSecureURL can skip dangerous keys when onUnsafeKey='skip'", () => {
+      const params = { safe: "ok", __proto__: "nope" } as const;
+      const href = createSecureURL(
+        "https://example.com",
+        [],
+        params,
+        undefined,
+        { onUnsafeKey: "skip" },
+      );
+      expect(href).toContain("safe=ok");
+      expect(href).not.toContain("__proto__=");
+    });
+
+    it("createSecureURL can warn and continue when onUnsafeKey='warn'", () => {
+      const params = { good: "1", constructor: "bad" } as const;
+      // Behavior: warn path should not throw; unsafe keys should be omitted
+      const href = createSecureURL(
+        "https://example.com",
+        [],
+        params,
+        undefined,
+        { onUnsafeKey: "warn" },
+      );
+      expect(href).toContain("good=1");
+      expect(href).not.toContain("constructor=");
+    });
   });
 
   describe("removeUndefined behavior in updateURLParams", () => {
@@ -199,6 +238,71 @@ describe("url.ts uncovered branches - comprehensive coverage", () => {
         a: undefined,
       });
       expect(result).not.toContain("a=");
+    });
+  });
+
+  describe("onUnsafeKey modes in updateURLParams", () => {
+    it("updateURLParams throws by default on unsafe keys (onUnsafeKey='throw')", () => {
+      expect(() =>
+        updateURLParams("https://example.com", { constructor: "bad" }),
+      ).toThrow(InvalidParameterError);
+    });
+    it("updateURLParams skips unsafe keys when onUnsafeKey='skip'", () => {
+      const url = "https://example.com?good=old";
+      const updated = updateURLParams(
+        url,
+        { good: "new", __proto__: "bad" },
+        { onUnsafeKey: "skip" },
+      );
+      const u = new URL(updated);
+      expect(u.searchParams.get("good")).toBe("new");
+      // __proto__ should not be present
+      expect(u.searchParams.has("__proto__")).toBe(false);
+    });
+
+    it("updateURLParams warns and continues when onUnsafeKey='warn'", () => {
+      const url = "https://example.com?x=1";
+      const updated = updateURLParams(
+        url,
+        { x: "2", constructor: "boom" },
+        { onUnsafeKey: "warn" },
+      );
+      const u = new URL(updated);
+      expect(u.searchParams.get("x")).toBe("2");
+      expect(u.searchParams.has("constructor")).toBe(false);
+    });
+  });
+
+  describe("updateURLParams validations", () => {
+    it("rejects query parameter name exceeding max length (128)", () => {
+      const longKey = "k".repeat(129);
+      expect(() =>
+        updateURLParams("https://example.com", { [longKey]: "v" }),
+      ).toThrow(InvalidParameterError);
+    });
+
+    it("rejects query parameter value exceeding max length (2048)", () => {
+      const longValue = "v".repeat(2049);
+      expect(() =>
+        updateURLParams("https://example.com", { k: longValue }),
+      ).toThrow(InvalidParameterError);
+    });
+
+    it("rejects control characters in update values", () => {
+      expect(() =>
+        updateURLParams("https://example.com", { k: "bad\x00value" }),
+      ).toThrow(InvalidParameterError);
+    });
+
+    it("ignores symbol keys in updates", () => {
+      const sym = Symbol("s");
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+      const updates: Record<string | symbol, unknown> = { good: "1" } as any;
+      // eslint-disable-next-line functional/immutable-data
+      (updates as any)[sym] = "ignored";
+      const out = updateURLParams("https://example.com", updates as any);
+      const u = new URL(out);
+      expect(u.searchParams.get("good")).toBe("1");
     });
   });
 
@@ -322,6 +426,110 @@ describe("url.ts uncovered branches - comprehensive coverage", () => {
         InvalidParameterError,
       );
     });
+
+      describe("createSecureURL query validations", () => {
+        it("rejects query parameter name exceeding max length (128)", () => {
+          const longKey = "k".repeat(129);
+          expect(() =>
+            createSecureURL("https://example.com", [], { [longKey]: "v" }),
+          ).toThrow(InvalidParameterError);
+        });
+
+        it("rejects query parameter value exceeding max length (2048)", () => {
+          const longValue = "v".repeat(2049);
+          expect(() =>
+            createSecureURL("https://example.com", [], { k: longValue }),
+          ).toThrow(InvalidParameterError);
+        });
+
+        it("rejects control characters in query values", () => {
+          expect(() =>
+            createSecureURL("https://example.com", [], { k: "bad\x00value" }),
+          ).toThrow(InvalidParameterError);
+        });
+
+        it("rejects malformed percent-encoding in query values (stray % or non-hex)", () => {
+          expect(() =>
+            createSecureURL("https://example.com", [], { a: "%G1" }),
+          ).toThrow(InvalidParameterError);
+          expect(() =>
+            createSecureURL("https://example.com", [], { b: "%" }),
+          ).toThrow(InvalidParameterError);
+        });
+      });
+
+      describe("strictDecodeURIComponentOrThrow", () => {
+        it("decodes valid percent-encoded input", () => {
+          expect(strictDecodeURIComponentOrThrow("%41%42")).toBe("AB");
+        });
+
+        it("throws on malformed input", () => {
+          expect(() => strictDecodeURIComponentOrThrow("%GZ")).toThrow(
+            InvalidParameterError,
+          );
+        });
+      });
+
+      describe("RFC3986 path segment encoding", () => {
+        it("encodes sub-delims [!'()*] and spaces in path segments", () => {
+          const href = createSecureURL("https://example.com", ["a b!()*'"], {});
+          // Expect %20 for space, %21 !, %28 (, %29 ), %2A *, %27 '
+          expect(href).toContain("/a%20b%21%28%29%2A%27");
+        });
+      });
+
+      describe("validateURLStrict wrapper", () => {
+        it("accepts https and returns ok result", () => {
+          const res = validateURLStrict("https://example.com");
+          expect(res.ok).toBe(true);
+          if (res.ok) expect(res.url.origin).toBe("https://example.com");
+        });
+
+        it("rejects http and returns structured error", () => {
+          const res = validateURLStrict("http://example.com");
+          expect(res.ok).toBe(false);
+        });
+      });
+
+      describe("onUnsafeKey modes in updateURLParams", () => {
+        it("updateURLParams warns and continues when onUnsafeKey='warn'", () => {
+          const url = "https://example.com?x=1";
+          const updated = updateURLParams(
+            url,
+            { x: "2", constructor: "boom" },
+            { onUnsafeKey: "warn" },
+          );
+          const u = new URL(updated);
+          expect(u.searchParams.get("x")).toBe("2");
+          expect(u.searchParams.has("constructor")).toBe(false);
+        });
+
+        it("updateURLParams Map input respects onUnsafeKey='skip'", () => {
+          const updates = new Map<string, string | undefined>([
+            ["good", "y"],
+            ["__proto__", "bad"],
+          ]);
+          const out = updateURLParams("https://example.com?good=x", updates, {
+            onUnsafeKey: "skip",
+          });
+          const u = new URL(out);
+          expect(u.searchParams.get("good")).toBe("y");
+          expect(u.searchParams.has("__proto__")).toBe(false);
+        });
+
+        it("updateURLParams Map input respects onUnsafeKey='warn'", () => {
+          const updates = new Map<string, string | undefined>([
+            ["ok", "1"],
+            ["constructor", "2"],
+          ]);
+          const out = updateURLParams("https://example.com", updates, {
+            onUnsafeKey: "warn",
+          });
+          const u = new URL(out);
+          expect(u.searchParams.get("ok")).toBe("1");
+          expect(u.searchParams.has("constructor")).toBe(false);
+        });
+      });
   });
 
   describe("URL length validation", () => {

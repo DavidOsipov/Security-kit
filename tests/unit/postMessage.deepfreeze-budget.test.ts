@@ -14,9 +14,12 @@ describe("postMessage deepFreeze budget", () => {
 
     const postMessage = await import("../../src/postMessage");
     const onMessage = vi.fn();
-    // Create a very wide object to exceed small node budget
-    const wide: any = {};
-    for (let i = 0; i < 2000; i++) wide[`k${i}`] = i;
+    // Create a nested structure that stays within sanitizer breadth caps
+    // but exceeds deepFreeze node budget during freezing.
+    const wide: any = { items: [] as any[] };
+    for (let i = 0; i < 50; i++) {
+      wide.items.push({ x: i, y: { z: i } });
+    }
 
     const listener = postMessage.createSecurePostMessageListener({
       allowedOrigins: ["http://localhost"],

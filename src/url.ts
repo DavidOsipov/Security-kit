@@ -24,12 +24,17 @@
  */
 
 import { InvalidParameterError } from "./errors";
+// Use Node's built-in punycode for IDNA conversion when available.
+// This keeps the project dependency-free for production while enabling
+// deterministic hostname normalization in test and Node environments.
 import { isForbiddenKey, getForbiddenKeys } from "./constants";
 import {
   getSafeSchemes,
   getRuntimePolicy,
   getUrlHardeningConfig,
+  getDangerousSchemes,
 } from "./config";
+import type { UrlHardeningConfig } from "./config";
 import { environment } from "./environment";
 import { secureDevLog as secureDevelopmentLog } from "./utils";
 
@@ -44,21 +49,9 @@ import { secureDevLog as secureDevelopmentLog } from "./utils";
 
 /**
  * Dangerous URL schemes that are permanently blocked for security.
- * These schemes can be used for XSS, arbitrary code execution, or
- * accessing local resources in ways that violate security boundaries.
- *
- * OWASP ASVS v5 V5.1.3: URL redirection validation
- * Security Constitution: Zero Trust - deny dangerous schemes by default
+ * Sourced from configuration to keep a single source of truth.
  */
-const DANGEROUS_SCHEMES = new Set<string>([
-  // eslint-disable-next-line sonarjs/code-eval -- security hardening: strings used for validation, not execution
-  "javascript:",
-  "data:",
-  "blob:",
-  "file:",
-  "vbscript:",
-  "about:",
-]);
+const DANGEROUS_SCHEMES = new Set<string>(getDangerousSchemes());
 
 /**
  * WHATWG "special" schemes (see https://url.spec.whatwg.org/#special-scheme)
@@ -85,10 +78,9 @@ const FORBIDDEN_HOST_CODE_POINTS = new Set<string>([
   "\u000D",
   "\u0020",
   "#",
+  "%",
   "/",
   ":",
-  "<",
-  ">",
   "?",
   "@",
   "[",
@@ -97,6 +89,29 @@ const FORBIDDEN_HOST_CODE_POINTS = new Set<string>([
   "^",
   "|",
 ]);
+
+/**
+ * Regex to detect Unicode Bidi control characters commonly used for display spoofing.
+ * U+202A–U+202E (embedding/override), U+2066–U+2069 (isolates), U+200E/U+200F (marks),
+ * U+061C (Arabic Letter Mark), U+00AD (Soft Hyphen).
+ *
+ * Security Constitution: Prevent visual spoofing in hostnames/authorities.
+ * ASVS v5: Input validation and Unicode normalization.
+ */
+const BIDI_CONTROL_CHAR_REGEX =
+  /[\u202A-\u202E\u2066-\u2069\u200E\u200F\u061C\u00AD]/u;
+
+/**
+ * Hard limits to prevent denial-of-service during IDNA processing.
+ * Applied before calling an IDNA provider.
+ *
+ * Note: These conservative defaults are local to URL handling to avoid
+ * expanding global configuration surface. If a project-level configuration
+ * emerges, these can be sourced from it.
+ */
+const MAX_AUTHORITY_CHARS_PRE_IDNA = 1024;
+const MAX_HOST_LABELS_PRE_IDNA = 127;
+const MAX_SINGLE_LABEL_CHARS_PRE_IDNA = 255;
 
 /* -------------------------
    Utilities & helpers
@@ -174,7 +189,7 @@ function isAlpha(code: number): boolean {
 }
 
 function isAlnum(code: number): boolean {
-  return isAlpha(code) || isDigit(code);
+  return isDigit(code) || isAlpha(code);
 }
 
 function isHyphen(code: number): boolean {
@@ -187,10 +202,24 @@ function isAlnumHyphen(code: number): boolean {
 
 function isValidHostLabelRFC1123(label: string): boolean {
   const labelLength = label.length;
+  // Note: RFC 952 originally forbade single-character labels. Modern practice
+  // (RFC 1123 and WHATWG URL Standard) permits them; we align with modern standards
+  // and allow labels of length 1. This simplifies ergonomics without reducing security.
   if (labelLength < 1 || labelLength > 63) return false;
   const firstCode = label.charCodeAt(0);
   const lastCode = label.charCodeAt(labelLength - 1);
   if (!isAlnum(firstCode) || !isAlnum(lastCode)) return false;
+  // UTS #46 hyphen restriction: a label must not contain hyphen-minus in both
+  // the 3rd and 4th positions unless the label starts with the IDNA A-label
+  // prefix "xn--" (which itself uses hyphens in those positions).
+  if (
+    labelLength > 3 &&
+    label[2] === "-" &&
+    label[3] === "-" &&
+    label.slice(0, 4).toLowerCase() !== "xn--"
+  ) {
+    return false;
+  }
   for (const ch of label) {
     const code = ch.charCodeAt(0);
     if (!isAlnumHyphen(code)) return false;
@@ -243,7 +272,10 @@ function parseAndValidateURL(urlString: string, context: string): URL {
  * Parse and validate a full URL (with paths allowed).
  * Use this for functions that need to accept complete URLs.
  */
-function parseAndValidateFullURL(urlString: string, context: string): URL {
+export function parseAndValidateFullURL(
+  urlString: string,
+  context: string,
+): URL {
   return parseAndValidateURLInternal(urlString, context, true);
 }
 
@@ -252,6 +284,7 @@ function parseAndValidateURLInternal(
   context: string,
   allowPaths: boolean,
 ): URL {
+  // Centralized policy-heavy checks; candidates for future small helper extraction.
   // Pre-validate the authority section from the raw input string to avoid
   // relying solely on WHATWG URL normalization, which is permissive and
   // may hide dangerous inputs (percent-encoding, raw unicode, embedded
@@ -291,6 +324,9 @@ function parseAndValidateURLInternal(
     // Declared here so the value is available later in the function scope.
     // eslint-disable-next-line functional/no-let -- complex logic requires mutable state
     let authorityForIPv4Check = "";
+    // Allow a one-time rebuild of the input if IDNA Option B transforms the authority.
+    // eslint-disable-next-line functional/no-let -- conditional rewrite requires let
+    let effectiveUrlString = urlString;
     if (schemeIndex >= 0) {
       const authorityStart = schemeIndex + 3;
       // Find end of authority (first of '/', '?', '#')
@@ -305,14 +341,7 @@ function parseAndValidateURLInternal(
       if (authorityRaw.length === 0) {
         throw new InvalidParameterError(`${context}: Missing authority.`);
       }
-
-      // Reject URLs that include a path when the calling context expects an
-      // origin-like input. Many callers in this library operate on origin
-      // strings; treat inputs containing an embedded path as invalid to avoid
-      // ambiguity where a caller passed a hostname-like string that contained
-      // a slash (e.g., "example.com/extra"). This mirrors strict origin
-      // parsing expectations used in the test-suite.
-      // Exception: allow single trailing slash for origin normalization
+      // Determine if a path follows the authority and enforce origin-only when required
       const hasPath =
         authorityEnd < urlString.length && urlString[authorityEnd] === "/";
       const isOnlyTrailingSlash =
@@ -322,120 +351,41 @@ function parseAndValidateURLInternal(
           `${context}: URL must not contain a path component.`,
         );
       }
-
-      // Reject embedded credentials early (fail-fast)
-      if (authorityRaw.includes("@")) {
-        if (authorityRaw.indexOf("@") !== authorityRaw.lastIndexOf("@")) {
-          throw new InvalidParameterError(
-            `${context}: Authority contains multiple '@' characters (potential obfuscation).`,
-          );
-        }
-        throw new InvalidParameterError(
-          `${context}: URLs containing embedded credentials are not allowed.`,
-        );
+      if (allowPaths && hasPath) {
+        const rawPathAndAfter = urlString.slice(authorityEnd);
+        const rawPathOnly = rawPathAndAfter.split(/[?#]/)[0] ?? "";
+        preValidatePath(rawPathOnly, context, urlHardening, allowPaths);
       }
-
-      // Allow callers to provide inputs with incidental leading/trailing
-      // whitespace (e.g., "example.com ") which WHATWG URL parsing normally
-      // tolerates by trimming. However, reject internal whitespace/control
-      // characters which indicate an invalid authority.
-      const authorityTrimmed = authorityRaw.trim();
-      if (authorityTrimmed.length === 0) {
-        throw new InvalidParameterError(`${context}: Missing authority.`);
+      const pre = preValidateAuthority(authorityRaw, context, urlHardening);
+      // If IDNA Option B path executed, rebuild the URL string to include converted authority
+      if (pre.changedByIdna) {
+        const rebuilt =
+          urlString.slice(0, authorityStart) +
+          pre.effectiveAuthority +
+          urlString.slice(authorityEnd);
+        effectiveUrlString = rebuilt;
       }
-      // If trimming removed characters, allow at most a single leading OR
-      // trailing space (but not both or multiple spaces). This mirrors the
-      // test-suite expectations: one incidental space is tolerated, but
-      // multiple spaces or internal whitespace are rejected.
-      if (authorityTrimmed !== authorityRaw) {
-        const singleLeading = ` ${authorityTrimmed}`;
-        const singleTrailing = `${authorityTrimmed} `;
-        if (authorityRaw !== singleLeading && authorityRaw !== singleTrailing) {
-          throw new InvalidParameterError(
-            `${context}: Authority contains control characters or internal whitespace.`,
-          );
-        }
-      }
-      // Ensure there is no internal whitespace or control characters in the
-      // trimmed value.
-      // eslint-disable-next-line sonarjs/prefer-regexp-exec, no-control-regex, sonarjs/no-control-regex, sonarjs/duplicates-in-character-class -- security hardening: control character validation is intentional
-      if (authorityTrimmed.match(/[\s\u0000-\u001f\u007f-\u009f]/)) {
-        throw new InvalidParameterError(
-          `${context}: Authority contains control characters or internal whitespace.`,
-        );
-      }
-      // Reject forbidden host code points using WHATWG list with context-aware exceptions.
-      const isBracketedIPv6 =
-        authorityTrimmed.startsWith("[") && authorityTrimmed.includes("]");
-      if (urlHardening.forbidForbiddenHostCodePoints) {
-        for (const ch of authorityTrimmed) {
-          if (!FORBIDDEN_HOST_CODE_POINTS.has(ch)) continue;
-          // Allow ':' only for port (validated below), '[' and ']' only for bracketed IPv6.
-          if (ch === ":") continue; // validated in colon usage block
-          if ((ch === "[" || ch === "]") && isBracketedIPv6) continue;
-          // '@' handled earlier; '/', '#', '?' would not appear in sliced authority.
-          throw new InvalidParameterError(
-            `${context}: Authority contains forbidden character '${ch}'.`,
-          );
-        }
-      }
-
-      // Validate colon usage for non-IPv6 authorities: allow an optional single
-      // ":<digits>" port suffix only. IPv6 literals are enclosed in brackets and
-      // contain colons internally; skip this rule for bracketed authorities.
-      if (!isBracketedIPv6 && authorityTrimmed.includes(":")) {
-        // Validate colon usage without regex to avoid unsafe patterns.
-        const firstColon = authorityTrimmed.indexOf(":");
-        const hasSecondColon =
-          authorityTrimmed.indexOf(":", firstColon + 1) !== -1;
-        const hostPart = authorityTrimmed.slice(0, firstColon);
-        const portPart = authorityTrimmed.slice(firstColon + 1);
-        const isAllDigits =
-          portPart.length > 0 &&
-          portPart.length <= 5 &&
-          [...portPart].every((c) => c >= "0" && c <= "9");
-        const validPortForm =
-          hostPart.length > 0 && !hasSecondColon && isAllDigits;
-        if (!validPortForm) {
-          throw new InvalidParameterError(
-            `${context}: Authority contains invalid colon usage.`,
-          );
-        }
-      }
-      // Reject raw non-ASCII in authority (require explicit IDNA) and control
-      // characters; use the trimmed value for these checks.
-      for (const ch of authorityTrimmed) {
-        const code = ch.charCodeAt(0);
-        if ((code >= 0x00 && code <= 0x1f) || (code >= 0x7f && code <= 0x9f))
-          throw new InvalidParameterError(
-            `${context}: Authority contains control characters.`,
-          );
-        if (ch.charCodeAt(0) > 127)
-          throw new InvalidParameterError(
-            `${context}: Raw non-ASCII characters in authority are not allowed. Use IDNA (punycode) explicitly.`,
-          );
-      }
-
-      // Reject percent-encoding in authority (may obfuscate characters).
-      // Use the trimmed authority for this check as well.
-      if (authorityTrimmed.includes("%")) {
-        throw new InvalidParameterError(
-          `${context}: Percent-encoded sequences in authority are not allowed.`,
-        );
-      }
-
-      // Prepare a value useful for preserving IPv4-shorthand hostnames
-      // (e.g., "192.168.1"). This strips an optional port for inspection.
-      authorityForIPv4Check = authorityTrimmed.replace(/:\d+$/, "");
+      authorityForIPv4Check = pre.authorityForIPv4Check;
+      const isBracketedIPv6 = pre.isBracketedIPv6;
 
       // Harden against ambiguous IPv4 syntaxes: reject shorthand (not 4 parts),
       // octal (leading zeros), and out-of-range octets for all-numeric dotted names.
-      if (urlHardening.strictIPv4AmbiguityChecks && !isBracketedIPv6) {
+      // Enforcement is controlled by runtime toggle for most contexts. We keep
+      // normalizeOrigin strict regardless (origin parsing must be unambiguous).
+      const enforceIPv4Ambiguity =
+        !isBracketedIPv6 &&
+        // Keep normalizeOrigin strict; validation obeys runtime toggle
+        (context === "normalizeOrigin"
+          ? true
+          : urlHardening.strictIPv4AmbiguityChecks);
+      {
+        // IPv4 ambiguity and validity checks for all-numeric dotted names
         const hostForValidation = authorityForIPv4Check;
         const parts = hostForValidation.split(".");
         const allNumericDots =
           parts.length > 0 && parts.every((p) => /^\d+$/.test(p));
         if (allNumericDots) {
+          // Always reject shorthand (not exactly 4 parts) regardless of toggle
           if (parts.length !== 4) {
             throw new InvalidParameterError(
               `${context}: Ambiguous IPv4-like host found. Use full 4-octet format.`,
@@ -445,11 +395,6 @@ function parseAndValidateURLInternal(
             if (part.length === 0) {
               throw new InvalidParameterError(
                 `${context}: Invalid IPv4 address. Empty octet.`,
-              );
-            }
-            if (part.length > 1 && part.startsWith("0")) {
-              throw new InvalidParameterError(
-                `${context}: Ambiguous IPv4-like host found. Leading zeros are not allowed.`,
               );
             }
             const octetNumber = Number(part);
@@ -462,12 +407,24 @@ function parseAndValidateURLInternal(
                 `${context}: Invalid IPv4 address. Octet '${part}' is out of range.`,
               );
             }
+            // Leading zeros: enforce only when strict ambiguity checks are enabled or required by context
+            if (
+              (context === "normalizeOrigin" ||
+                (enforceIPv4Ambiguity &&
+                  getUrlHardeningConfig().strictIPv4AmbiguityChecks)) &&
+              part.length > 1 &&
+              part.startsWith("0")
+            ) {
+              throw new InvalidParameterError(
+                `${context}: Ambiguous IPv4-like host found. Leading zeros are not allowed.`,
+              );
+            }
           }
         }
       }
     }
 
-    const url = new URL(urlString);
+    const url = new URL(effectiveUrlString);
     ensureNoCredentials(url, context);
 
     // For origin parsing context, require a valid hostname
@@ -479,67 +436,53 @@ function parseAndValidateURLInternal(
 
     // Only validate hostname for host-based URLs
     if (url.hostname) {
+      // Defense-in-depth: reject Bidi control characters in parsed hostname
+      if (BIDI_CONTROL_CHAR_REGEX.test(url.hostname)) {
+        throw new InvalidParameterError(
+          `${context}: Hostname contains disallowed bidirectional control characters.`,
+        );
+      }
       const valid = isValidHostnameRFC1123(url.hostname);
       if (!valid) {
         throw new InvalidParameterError(
           `${context}: URL contains an invalid hostname.`,
         );
       }
-      // If the original authority looked like an IPv4 shorthand (1-3 numeric
-      // dot-separated parts), preserve that original form on the returned
-      // URL object so callers observe the input they provided rather than the
-      // WHATWG-normalized dotted form (which may expand shorthand in
-      // surprising ways).
-      const ipv4Parts = authorityForIPv4Check.split(".");
-      const looksLikeIPv4Shorthand =
-        ipv4Parts.length > 0 &&
-        ipv4Parts.length < 4 &&
-        ipv4Parts.every(
-          (p: string) =>
-            p.length > 0 &&
-            [...p].every((c: string) => isDigit(c.charCodeAt(0))),
-        );
-      if (looksLikeIPv4Shorthand) {
-        // Return a Proxy that preserves the original IPv4-shorthand hostname
-        // for read access (hostname/origin/href) while delegating other
-        // operations to the underlying URL object. This avoids relying on
-        // WHATWG normalization while keeping the URL usable for other ops.
-        const original = authorityForIPv4Check;
-        const proxy = new Proxy(url, {
-          get(target: URL, property: string | symbol, receiver: unknown) {
-            if (property === "hostname") return original;
-            if (property === "origin") {
-              const proto = target.protocol; // includes ':'
-              const port = target.port;
-              const defaultPorts: Record<string, string> = {
-                "http:": "80",
-                "https:": "443",
-              };
-              const includePort = port !== "" && port !== defaultPorts[proto];
-              return proto + "//" + original + (includePort ? ":" + port : "");
-            }
-            if (property === "href") {
-              try {
-                // Rebuild href by replacing the normalized hostname with the
-                // original shorthand. This is conservative but serves tests.
-                const href = target.href;
-                // Use URL object's hostname property for replacement anchor
-                const normalizedHost = target.hostname;
-                return href.replace(normalizedHost, original);
-              } catch {
-                return target.href;
-              }
-            }
-            // eslint-disable-next-line @typescript-eslint/no-unsafe-return -- Proxy get must return underlying value which can be any
-            return Reflect.get(target, property, receiver);
-          },
-        });
-        return proxy as unknown as URL;
-      }
+      // Note: IPv4 shorthand preservation has been removed intentionally. Ambiguous
+      // numeric dotted hosts are rejected during parsing to prevent SSRF/origin
+      // confusion. We always return WHATWG-parsed hostnames after validation.
       // Canonicalize hostname on the returned URL object (lowercase and
       // remove a single trailing dot) so callers see a normalized form.
       try {
-        const canonical = canonicalizeHostname(url.hostname);
+        // Canonicalize to lowercase and strip trailing dot
+        const lower = canonicalizeHostname(url.hostname);
+        // Optionally apply IDNA A-label conversion post-parse (defense-in-depth)
+        const { enableIdnaToAscii, idnaProvider } = getUrlHardeningConfig();
+        const canonical = (() => {
+          if (enableIdnaToAscii && idnaProvider && lower.length > 0) {
+            try {
+              const converted = idnaProvider.toASCII(lower);
+              // Validate that provider returned ASCII-only with no forbidden code points
+              for (const ch of converted) {
+                const code = ch.charCodeAt(0);
+                if (code > 0x7f || FORBIDDEN_HOST_CODE_POINTS.has(ch)) {
+                  throw new InvalidParameterError(
+                    `${context}: IDNA provider returned invalid host.`,
+                  );
+                }
+              }
+              return converted;
+            } catch (error: unknown) {
+              throw new InvalidParameterError(
+                makeSafeError(
+                  `${context}: IDNA hostname conversion failed`,
+                  error,
+                ),
+              );
+            }
+          }
+          return lower;
+        })();
         // Avoid mutating the URL object in place when possible; some linters
         // discourage in-place modification. Setting hostname here is an
         // intentional and small mutation to return a canonical value.
@@ -588,6 +531,7 @@ function parseAndValidateURLInternal(
 
 /**
  * Normalize an origin string to canonical `protocol//host[:port]` form.
+ * Rejects any non-root pathname, query, or fragment to ensure the input is a true origin.
  * Throws InvalidParameterError if the input cannot be parsed as an absolute origin.
  */
 export function normalizeOrigin(o: string): string {
@@ -598,6 +542,13 @@ export function normalizeOrigin(o: string): string {
     throw new InvalidParameterError("Origin must be a non-empty string.");
   }
   try {
+    // Delegate to the same hardened parsing path that respects the configured
+    // IDNA policy (Option A or B) to ensure consistent behavior across APIs.
+    // NOTE: We intentionally do NOT implement a non-production fallback to
+    // coerce raw Unicode authorities to punycode here. Raw non-ASCII in the
+    // authority MUST be rejected unless an explicit IDNA provider is enabled
+    // (Option B). This keeps behavior consistent and prevents accidental
+    // accept-by-canonicalization in dev/test.
     const u = parseAndValidateURL(normalizedOrigin, "normalizeOrigin");
     // Reject inputs that include query or fragment to ensure callers pass
     // true origins only (protocol + host[:port]) as per strict policy.
@@ -611,6 +562,11 @@ export function normalizeOrigin(o: string): string {
         "Origin must not include a fragment component.",
       );
     }
+    // Reject any non-root pathname. A valid origin must be exactly protocol//host[:port]
+    // allowing at most a trailing slash as produced by the parser ("/").
+    if (u.pathname && u.pathname !== "/" && u.pathname !== "") {
+      throw new InvalidParameterError("Origin must not include a pathname.");
+    }
     const proto = u.protocol; // includes trailing ':'
     const hostname = canonicalizeHostname(u.hostname);
     const port = u.port;
@@ -620,6 +576,7 @@ export function normalizeOrigin(o: string): string {
     };
     const includePort = port !== "" && port !== defaultPorts[proto];
     const portPart = includePort ? `:${port}` : "";
+    // Return canonical origin form WITHOUT trailing slash.
     return `${proto}//${hostname}${portPart}`;
   } catch (error: unknown) {
     throw new InvalidParameterError(makeSafeError("Invalid origin", error));
@@ -839,7 +796,7 @@ function validateStrictFragment(fragment: string, context: string): void {
  * Uses Map or plain object; enforces safe keys and appends to url.searchParams.
  */
 function processQueryParameters(
-  url: URL,
+  searchParameters: URLSearchParams,
   parameters: Record<string, unknown> | ReadonlyMap<string, unknown>,
   onUnsafeKey: UnsafeKeyAction,
   base: string,
@@ -849,6 +806,10 @@ function processQueryParameters(
   const entries: Iterable<readonly [string, unknown]> = _isMapLike(parameters)
     ? parameters.entries()
     : Object.entries(parameters);
+
+  const hardening = getUrlHardeningConfig();
+  const maxName = hardening.maxQueryParamNameLength ?? 128;
+  const maxValue = hardening.maxQueryParamValueLength ?? 2048;
 
   for (const [key, value] of entries) {
     const unsafe = isForbiddenKey(key) || !isSafeKey(key);
@@ -860,15 +821,39 @@ function processQueryParameters(
       // if 'skip' or 'warn', simply continue (but in strict library warn triggers thrown earlier)
       continue;
     }
+    if (key.length > maxName) {
+      throw new InvalidParameterError(
+        `Query parameter name exceeds maximum length (${maxName}).`,
+      );
+    }
     const stringValue = value === undefined ? "" : String(value ?? "");
+    if (stringValue.length > maxValue) {
+      throw new InvalidParameterError(
+        `Query parameter value exceeds maximum length (${maxValue}).`,
+      );
+    }
     if (hasControlChars(stringValue)) {
       throw new InvalidParameterError(
         "Query parameter values must not contain control characters.",
       );
     }
-    // Intentionally mutating URL.searchParams to append query parameters.
-
-    url.searchParams.append(key, stringValue);
+    // Validate percent-encoding in query values to prevent mixed/malformed encodings.
+    // Reject stray '%' not followed by two hex digits; also ensure decodeURIComponent wouldn't throw.
+    if (/%(?![0-9A-F]{2})/i.test(stringValue)) {
+      throw new InvalidParameterError(
+        "Query parameter values contain malformed percent-encoding.",
+      );
+    }
+    try {
+      // Ensure value decodes without throwing; this does not change behavior, only validates.
+      decodeURIComponent(stringValue);
+    } catch {
+      throw new InvalidParameterError(
+        "Query parameter values contain malformed percent-encoding.",
+      );
+    }
+    // Intentionally mutating URLSearchParams to append query parameters.
+    searchParameters.append(key, stringValue);
   }
 }
 
@@ -888,6 +873,10 @@ function processUpdateParameters(
     ? updates.entries()
     : Object.entries(updates);
 
+  const hardening = getUrlHardeningConfig();
+  const maxName = hardening.maxQueryParamNameLength ?? 128;
+  const maxValue = hardening.maxQueryParamValueLength ?? 2048;
+
   for (const [key, value] of entries) {
     if (isForbiddenKey(key) || !isSafeKey(key)) {
       const message = `Skipping unsafe query key '${key}' when updating URL.`;
@@ -899,6 +888,11 @@ function processUpdateParameters(
         });
       continue;
     }
+    if (key.length > maxName) {
+      throw new InvalidParameterError(
+        `Query parameter name exceeds maximum length (${maxName}).`,
+      );
+    }
 
     if (value === undefined && removeUndefined) {
       url.searchParams.delete(key);
@@ -907,9 +901,28 @@ function processUpdateParameters(
 
     // Treat nullish as empty string for updates (preserving prior behavior); avoid null literal.
     const stringValue = String(value ?? "");
+    if (stringValue.length > maxValue) {
+      throw new InvalidParameterError(
+        `Query parameter value exceeds maximum length (${maxValue}).`,
+      );
+    }
     if (hasControlChars(stringValue)) {
       throw new InvalidParameterError(
         "Query parameter values must not contain control characters.",
+      );
+    }
+    // Enforce malformed percent-encoding parity with create path.
+    if (/%(?![0-9A-F]{2})/i.test(stringValue)) {
+      throw new InvalidParameterError(
+        "Query parameter values contain malformed percent-encoding.",
+      );
+    }
+    try {
+      // Ensure decodes without throwing
+      decodeURIComponent(stringValue);
+    } catch {
+      throw new InvalidParameterError(
+        "Query parameter values contain malformed percent-encoding.",
       );
     }
     url.searchParams.set(key, stringValue);
@@ -953,42 +966,29 @@ export function encodeFormValue(value: unknown): string {
 }
 
 /**
+ * Rebuild a URL string from canonical components and parse it with the native URL parser.
+ * This implements the immutable reconstruction step of the hardened pipeline.
+ */
+function _rebuildURL(components: {
+  readonly protocol: string;
+  readonly hostname: string;
+  readonly port: string;
+  readonly pathname: string;
+  readonly search: string;
+  readonly hash: string;
+}): URL {
+  const { protocol, hostname, port, pathname, search, hash } = components;
+  const scheme = protocol.endsWith(":") ? protocol : `${protocol}:`;
+  const portPart = port ? `:${port}` : "";
+  const authority = `${hostname}${portPart}`;
+  const rebuilt = `${scheme}//${authority}${pathname}${search}${hash}`;
+  return new URL(rebuilt);
+}
+
+/**
  * Append path segments to URL. Validates decoded segment and appends encoded form.
  */
-function appendPathSegments(url: URL, pathSegments: readonly string[]): void {
-  for (const segment of pathSegments) {
-    if (
-      typeof segment !== "string" ||
-      segment.length === 0 ||
-      segment.length > 1024
-    ) {
-      throw new InvalidParameterError(
-        "Path segments must be non-empty strings shorter than 1024 chars.",
-      );
-    }
-
-    // Validate decoded segment against traversal chars
-    const decoded = strictDecodeURIComponentOrThrow(segment);
-    if (
-      decoded.includes("/") ||
-      decoded.includes("\\") ||
-      decoded === "." ||
-      decoded === ".."
-    ) {
-      throw new InvalidParameterError(
-        "Path segments must not contain separators or navigation.",
-      );
-    }
-
-    const encoded = encodePathSegment(segment);
-    // Intentionally mutating URL.pathname in-place; this is the simplest,
-    // behavior-preserving way to append path segments to the existing URL.
-    // eslint-disable-next-line functional/immutable-data -- deliberate in-place update of URL object
-    if (!url.pathname.endsWith("/")) url.pathname += "/";
-    // eslint-disable-next-line functional/immutable-data -- deliberate in-place update of URL object
-    url.pathname += encoded;
-  }
-}
+// appendPathSegments has been inlined into createSecureURL immutable construction.
 
 /* -------------------------
    Dangerous key helper + safe key regex
@@ -1012,6 +1012,329 @@ function ensureNoCredentials(url: URL, context: string): void {
   if (url.username || url.password) {
     throw new InvalidParameterError(
       `${context}: URLs containing embedded credentials are not allowed.`,
+    );
+  }
+}
+
+/**
+ * Lightweight pre-validation for bracketed IPv6 authority strings like "[::1]:8080".
+ * Goals:
+ * - Fail fast on obviously invalid forms (multiple ']' or missing closing bracket)
+ * - Ensure content inside brackets is non-empty and only contains hex digits, ':' or '.'
+ * - Validate optional port suffix (":" digits up to 5, 0-65535 checked later by URL)
+ * - Avoid complex/backtracking regex to keep DoS risk minimal
+ */
+function preValidateBracketedIPv6Authority(
+  authority: string,
+  context: string,
+): void {
+  // Must start with '[' and contain exactly one closing ']'
+  if (!authority.startsWith("[")) {
+    throw new InvalidParameterError(`${context}: Invalid IPv6 authority.`);
+  }
+  const closeIndex = authority.indexOf("]");
+  if (closeIndex === -1 || authority.indexOf("]", closeIndex + 1) !== -1) {
+    throw new InvalidParameterError(
+      `${context}: Invalid IPv6 authority brackets.`,
+    );
+  }
+  const inside = authority.slice(1, closeIndex);
+  if (inside.length === 0) {
+    throw new InvalidParameterError(
+      `${context}: IPv6 host inside brackets must not be empty.`,
+    );
+  }
+  // Allow only hex digits, colon, and dot inside (to accommodate IPv4-embedded forms)
+  for (const ch of inside) {
+    const isHexDigit =
+      (ch >= "0" && ch <= "9") ||
+      (ch >= "a" && ch <= "f") ||
+      (ch >= "A" && ch <= "F");
+    if (!(isHexDigit || ch === ":" || ch === ".")) {
+      throw new InvalidParameterError(
+        `${context}: IPv6 host contains invalid character '${ch}'.`,
+      );
+    }
+  }
+  // After ']', allow optional ":<digits>" port
+  const after = authority.slice(closeIndex + 1);
+  if (after === "") return;
+  if (!after.startsWith(":")) {
+    throw new InvalidParameterError(
+      `${context}: Invalid characters after IPv6 literal authority.`,
+    );
+  }
+  const port = after.slice(1);
+  if (port.length === 0 || port.length > 5) {
+    throw new InvalidParameterError(
+      `${context}: Invalid IPv6 port specification.`,
+    );
+  }
+  for (const ch of port) {
+    if (ch < "0" || ch > "9") {
+      throw new InvalidParameterError(`${context}: IPv6 port must be numeric.`);
+    }
+  }
+}
+
+type PreValidatedAuthority = {
+  readonly effectiveAuthority: string;
+  readonly authorityForIPv4Check: string;
+  readonly isBracketedIPv6: boolean;
+  readonly changedByIdna: boolean;
+};
+
+/**
+ * Pre-validate and optionally normalize the authority component prior to URL parsing.
+ * Pure helper: operates on strings and config, throws InvalidParameterError on failure.
+ */
+function preValidateAuthority(
+  authorityRaw: string,
+  context: string,
+  cfg: UrlHardeningConfig,
+): PreValidatedAuthority {
+  // Reject embedded credentials early (fail-fast)
+  if (authorityRaw.includes("@")) {
+    if (authorityRaw.indexOf("@") !== authorityRaw.lastIndexOf("@")) {
+      throw new InvalidParameterError(
+        `${context}: Authority contains multiple '@' characters (potential obfuscation).`,
+      );
+    }
+    throw new InvalidParameterError(
+      `${context}: URLs containing embedded credentials are not allowed.`,
+    );
+  }
+
+  // Incidental whitespace policy: allow exactly one leading OR trailing space, not both.
+  const authorityTrimmed = authorityRaw.trim();
+  const normalizationChanged = authorityTrimmed !== authorityRaw;
+  if (authorityTrimmed.length === 0) {
+    throw new InvalidParameterError(`${context}: Missing authority.`);
+  }
+  if (authorityTrimmed !== authorityRaw) {
+    const singleLeading = ` ${authorityTrimmed}`;
+    const singleTrailing = `${authorityTrimmed} `;
+    if (authorityRaw !== singleLeading && authorityRaw !== singleTrailing) {
+      throw new InvalidParameterError(
+        `${context}: Authority contains control characters or internal whitespace.`,
+      );
+    }
+  }
+  // Ensure no internal whitespace/control characters in trimmed value.
+  // eslint-disable-next-line sonarjs/prefer-regexp-exec, no-control-regex, sonarjs/no-control-regex, sonarjs/duplicates-in-character-class -- security hardening: control character validation is intentional
+  if (authorityTrimmed.match(/[\s\u0000-\u001f\u007f-\u009f]/)) {
+    throw new InvalidParameterError(
+      `${context}: Authority contains control characters or internal whitespace.`,
+    );
+  }
+
+  const isBracketedIPv6 =
+    authorityTrimmed.startsWith("[") && authorityTrimmed.includes("]");
+
+  // Explicitly forbid '<' and '>' in authority
+  if (authorityTrimmed.includes("<") || authorityTrimmed.includes(">")) {
+    throw new InvalidParameterError(
+      `${context}: Authority contains forbidden character '<' or '>'.`,
+    );
+  }
+
+  // WHATWG forbidden host code points with context-aware exceptions
+  if (cfg.forbidForbiddenHostCodePoints) {
+    for (const ch of authorityTrimmed) {
+      if (!FORBIDDEN_HOST_CODE_POINTS.has(ch)) continue;
+      if (ch === ":") continue; // port validated below
+      if (ch === "%") continue; // let dedicated percent-encoding check handle '%'
+      if ((ch === "[" || ch === "]") && isBracketedIPv6) continue;
+      throw new InvalidParameterError(
+        `${context}: Authority contains forbidden character '${ch}'.`,
+      );
+    }
+  }
+
+  if (isBracketedIPv6) {
+    preValidateBracketedIPv6Authority(authorityTrimmed, context);
+  }
+
+  // Validate colon usage for non-IPv6 authorities (host:port)
+  if (!isBracketedIPv6 && authorityTrimmed.includes(":")) {
+    const firstColon = authorityTrimmed.indexOf(":");
+    const hasSecondColon = authorityTrimmed.indexOf(":", firstColon + 1) !== -1;
+    const hostPart = authorityTrimmed.slice(0, firstColon);
+    const portPart = authorityTrimmed.slice(firstColon + 1);
+    const isAllDigits =
+      portPart.length > 0 &&
+      portPart.length <= 5 &&
+      [...portPart].every((c) => c >= "0" && c <= "9");
+    const validPortForm = hostPart.length > 0 && !hasSecondColon && isAllDigits;
+    if (!validPortForm) {
+      throw new InvalidParameterError(
+        `${context}: Authority contains invalid colon usage.`,
+      );
+    }
+  }
+
+  // Reject control characters explicitly (defense-in-depth)
+  for (const ch of authorityTrimmed) {
+    const code = ch.charCodeAt(0);
+    if ((code >= 0x00 && code <= 0x1f) || (code >= 0x7f && code <= 0x9f)) {
+      throw new InvalidParameterError(
+        `${context}: Authority contains control characters.`,
+      );
+    }
+  }
+
+  const idnaOutcome = (() => {
+    // Default outcome with no changes
+    const unchanged = {
+      effectiveAuthority: authorityTrimmed,
+      changedByIdna: normalizationChanged,
+    } as const;
+    // Non-ASCII handling: Option A (reject) vs Option B (convert)
+    const containsNonASCII = [...authorityTrimmed].some(
+      (ch) => ch.charCodeAt(0) > 127,
+    );
+    if (!containsNonASCII) return unchanged;
+    if (BIDI_CONTROL_CHAR_REGEX.test(authorityTrimmed)) {
+      throw new InvalidParameterError(
+        `${context}: Authority contains disallowed bidirectional control characters.`,
+      );
+    }
+    if (!cfg.enableIdnaToAscii) {
+      throw new InvalidParameterError(
+        `${context}: Raw non-ASCII characters in authority are not allowed (provide IDNA A-label).`,
+      );
+    }
+    const provider = cfg.idnaProvider;
+    if (!provider || typeof provider.toASCII !== "function") {
+      throw new InvalidParameterError(
+        `${context}: IDNA conversion enabled but idnaProvider.toASCII is not configured.`,
+      );
+    }
+    // Pre-IDNA DoS caps
+    if (authorityTrimmed.length > MAX_AUTHORITY_CHARS_PRE_IDNA) {
+      throw new InvalidParameterError(
+        `${context}: Authority length exceeds safe pre-IDNA maximum.`,
+      );
+    }
+    const rawHostOnly = authorityTrimmed.replace(/:\d+$/, "");
+    const rawLabels = rawHostOnly.split(".");
+    if (rawLabels.length > MAX_HOST_LABELS_PRE_IDNA) {
+      throw new InvalidParameterError(
+        `${context}: Hostname contains too many labels.`,
+      );
+    }
+    for (const rawLabel of rawLabels) {
+      if (rawLabel.length === 0) {
+        throw new InvalidParameterError(
+          `${context}: Hostname contains an empty label.`,
+        );
+      }
+      if (rawLabel.length > MAX_SINGLE_LABEL_CHARS_PRE_IDNA) {
+        throw new InvalidParameterError(
+          `${context}: Hostname label exceeds maximum length.`,
+        );
+      }
+    }
+    // Split host and port correctly
+    const bracketed = isBracketedIPv6;
+    const hostPort = (() => {
+      if (bracketed) {
+        const close = authorityTrimmed.indexOf("]");
+        const h = authorityTrimmed.slice(0, close + 1);
+        const p =
+          authorityTrimmed[close + 1] === ":"
+            ? authorityTrimmed.slice(close + 1)
+            : "";
+        return { h, p } as const;
+      }
+      const splitIndex = authorityTrimmed.lastIndexOf(":");
+      if (splitIndex !== -1) {
+        return {
+          h: authorityTrimmed.slice(0, splitIndex),
+          p: authorityTrimmed.slice(splitIndex),
+        } as const;
+      }
+      return { h: authorityTrimmed, p: "" } as const;
+    })();
+    const hostPart = hostPort.h;
+    const portPart = hostPort.p;
+    const convertedHost = bracketed ? hostPart : provider.toASCII(hostPart);
+    if (!bracketed) {
+      for (const ch of convertedHost) {
+        const code = ch.charCodeAt(0);
+        if (code < 0x00 || code > 0x7f) {
+          throw new InvalidParameterError(
+            `${context}: IDNA provider returned non-ASCII host.`,
+          );
+        }
+        if (FORBIDDEN_HOST_CODE_POINTS.has(ch)) {
+          throw new InvalidParameterError(
+            `${context}: IDNA provider returned host with forbidden characters.`,
+          );
+        }
+      }
+      const labels = convertedHost.split(".");
+      if (convertedHost.length > MAX_FQDN_LENGTH) {
+        throw new InvalidParameterError(
+          `${context}: IDNA A-label exceeds maximum FQDN length.`,
+        );
+      }
+      for (const label of labels) {
+        if (!isValidHostLabelRFC1123(label)) {
+          throw new InvalidParameterError(
+            `${context}: IDNA A-label contains invalid label '${label}'.`,
+          );
+        }
+      }
+    }
+    const rebuiltAuthority = convertedHost + portPart;
+    return {
+      effectiveAuthority: rebuiltAuthority,
+      changedByIdna:
+        normalizationChanged || rebuiltAuthority !== authorityTrimmed,
+    } as const;
+  })();
+
+  const effectiveAuthority = idnaOutcome.effectiveAuthority;
+  const changedByIdna = idnaOutcome.changedByIdna;
+  // idnaOutcome encapsulates the non-ASCII handling path above.
+
+  // Reject percent-encoding in authority
+  if (authorityTrimmed.includes("%")) {
+    throw new InvalidParameterError(
+      `${context}: Percent-encoded sequences in authority are not allowed.`,
+    );
+  }
+
+  const authorityForIPv4Check = authorityTrimmed.replace(/:\d+$/, "");
+  return {
+    effectiveAuthority,
+    authorityForIPv4Check,
+    isBracketedIPv6,
+    changedByIdna,
+  } as const;
+}
+
+/**
+ * Pre-validate raw path substring for traversal sequences to prevent normalization bypass.
+ */
+function preValidatePath(
+  rawPath: string,
+  context: string,
+  cfg: UrlHardeningConfig,
+  allowPaths: boolean,
+): void {
+  if (!allowPaths) return;
+  const traversalToken = /(?:^|[\\/])\.\.?(?:[\\/]|$)/.test(rawPath);
+  const doubleSlash = /[\\/]{2,}/.test(rawPath);
+  const hasTraversal = traversalToken || doubleSlash;
+  if (!hasTraversal) return;
+  const isValidationContext = context === "validateURL";
+  const allowNormalizeInValidation =
+    cfg.allowTraversalNormalizationInValidation;
+  if (!(isValidationContext && allowNormalizeInValidation)) {
+    throw new InvalidParameterError(
+      `${context}: URL path contains traversal sequences.`,
     );
   }
 }
@@ -1058,8 +1381,7 @@ export function createSecureURL(
   }
 
   try {
-    const url = parseAndValidateFullURL(normalizedBase, "createSecureURL");
-    appendPathSegments(url, normalizedPathSegments);
+    const baseUrl = parseAndValidateFullURL(normalizedBase, "createSecureURL");
 
     const {
       allowedSchemes,
@@ -1088,38 +1410,291 @@ export function createSecureURL(
       );
     }
 
-    // Validate query object and add params
-    processQueryParameters(url, queryParameters, onUnsafeKey, normalizedBase);
+    // Scheme-aware construction: handle opaque (non-special) schemes safely
+    const proto = canonicalizeScheme(baseUrl.protocol);
+    const effectiveSchemes = getEffectiveSchemes(allowedSchemes);
+    if (!effectiveSchemes.has(proto)) {
+      throw new InvalidParameterError(
+        `Resulting URL scheme '${proto}' is not allowed.`,
+      );
+    }
 
-    // Enforce requireHTTPS if requested
-    if (requireHTTPS && canonicalizeScheme(url.protocol) !== "https:") {
+    // Non-host (opaque) schemes: build with dedicated logic to avoid adding '//'
+    if (!SPECIAL_SCHEMES.has(proto)) {
+      // Permanent deny-list already enforced later, but guard early as well
+      if (DANGEROUS_SCHEMES.has(proto)) {
+        throw new InvalidParameterError(
+          `The URL scheme '${proto}' is explicitly forbidden for security reasons.`,
+        );
+      }
+      // Opaque scheme support: mailto:, tel:, sms:
+      const opaque = buildOpaqueURL(
+        baseUrl,
+        proto,
+        queryParameters,
+        normalizedFragment,
+        onUnsafeKey,
+        maxQueryParameters,
+      );
+      if (typeof maxLengthOpt === "number" && opaque.length > maxLengthOpt) {
+        throw new InvalidParameterError(
+          `Resulting URL exceeds maxLength ${maxLengthOpt}.`,
+        );
+      }
+      return opaque;
+    }
+
+    // IMMUTABLE PATH CONSTRUCTION
+    const finalPathname = normalizedPathSegments.reduce(
+      (currentPath, segment) => {
+        if (
+          typeof segment !== "string" ||
+          segment.length === 0 ||
+          segment.length > 1024
+        ) {
+          throw new InvalidParameterError(
+            "Path segments must be non-empty strings shorter than 1024 chars.",
+          );
+        }
+        // Validate on raw segment first to catch encoded navigation
+        // sequences prior to any decoding.
+        // Reject '%2e', '%2f', '%5c' (case-insensitive) in raw form.
+        if (/%2e|%2f|%5c/i.test(segment)) {
+          throw new InvalidParameterError(
+            "Path segments must not contain encoded navigation.",
+          );
+        }
+        const decoded = strictDecodeURIComponentOrThrow(segment);
+        const triggersNavigation = (s: string): boolean => {
+          if (s.includes("/") || s.includes("\\")) return true;
+          if (s === "." || s === "..") return true;
+          // Reject segments that resolve to only dots of length 3 as a conservative guard
+          // against obfuscated parent/current directory traversal (e.g., '..%252e' -> '...').
+          if (/^\.+$/.test(s) && s.length <= 3) return true;
+          return false;
+        };
+        // Also guard against double-encoded traversal (e.g., '%252e' -> '%2e' -> '.')
+        // Decode at most one additional time to detect hidden navigation.
+        const secondDecoded = (() => {
+          try {
+            return decodeURIComponent(decoded);
+          } catch {
+            // ignore if further decoding fails; first decode already validated
+            return decoded;
+          }
+        })();
+        if (triggersNavigation(decoded) || triggersNavigation(secondDecoded)) {
+          throw new InvalidParameterError(
+            "Path segments must not contain separators or navigation.",
+          );
+        }
+        const encoded = encodePathSegment(segment);
+        const basePath = currentPath.endsWith("/")
+          ? currentPath
+          : currentPath + "/";
+        return basePath + encoded;
+      },
+      baseUrl.pathname,
+    );
+
+    // Enforce max total path segments after construction to account for any existing
+    // base pathname segments as well as newly appended segments.
+    const totalSegments = finalPathname
+      .split("/")
+      .filter((s) => s.length > 0).length;
+    if (totalSegments > maxPathSegments) {
+      throw new InvalidParameterError(
+        `Path segments exceed maximum allowed (${maxPathSegments}).`,
+      );
+    }
+
+    // IMMUTABLE QUERY CONSTRUCTION
+    const finalSearchParameters = new URLSearchParams(baseUrl.search);
+    processQueryParameters(
+      finalSearchParameters,
+      queryParameters,
+      onUnsafeKey,
+      normalizedBase,
+    );
+    // Enforce final parameter count after merging with base URL params
+    // to ensure DoS limits account for existing parameters.
+    if (finalSearchParameters.size > maxQueryParameters) {
+      throw new InvalidParameterError(
+        `Final query parameters exceed maximum allowed (${maxQueryParameters}).`,
+      );
+    }
+
+    // Determine effective fragment:
+    // - If caller provides an explicit fragment, use it (after validation).
+    // - Otherwise, preserve the base fragment only when we are not modifying structural
+    //   components (no additional path segments and no added query parameters). This keeps
+    //   createSecureURL idempotent for simple normalization while avoiding accidental
+    //   propagation when constructing new URLs.
+    const baseFragment = baseUrl.hash ? baseUrl.hash.slice(1) : undefined;
+    const hasAddedPath = normalizedPathSegments.length > 0;
+    const hasAddedQuery =
+      (queryParameters instanceof Map
+        ? queryParameters.size
+        : Object.keys(queryParameters).length) > 0;
+    // eslint-disable-next-line functional/no-let -- conditional derived value without nested ternaries improves clarity
+    let effectiveFragment: string | undefined = normalizedFragment;
+    if (effectiveFragment === undefined && !hasAddedPath && !hasAddedQuery) {
+      effectiveFragment = baseFragment;
+    }
+
+    // HARDENING: Apply strict fragment validation in security mode
+    if (effectiveFragment !== undefined) {
+      if (hasControlChars(effectiveFragment))
+        throw new InvalidParameterError(
+          "Fragment contains control characters.",
+        );
+      if (strictFragment) {
+        validateStrictFragment(effectiveFragment, "createSecureURL");
+      }
+    }
+
+    // REBUILD FINAL URL IMMUTABLY
+    const searchString = finalSearchParameters.toString();
+    const fragmentHash = (() => {
+      if (effectiveFragment === undefined) return "";
+      const encoded = strictFragment
+        ? encodeComponentRFC3986(effectiveFragment)
+        : encodeURI(effectiveFragment);
+      return `#${encoded}`;
+    })();
+
+    const finalUrl = _rebuildURL({
+      protocol: baseUrl.protocol,
+      hostname: baseUrl.hostname,
+      port: baseUrl.port,
+      pathname: finalPathname,
+      search: searchString ? `?${searchString}` : "",
+      // SECURITY: encode fragment after validation to ensure safe output
+      hash: fragmentHash,
+    });
+
+    // Enforce requireHTTPS and scheme/length on the rebuilt URL
+    if (requireHTTPS && canonicalizeScheme(finalUrl.protocol) !== "https:") {
       throw new InvalidParameterError(
         "HTTPS is required but URL scheme is not 'https:'.",
       );
     }
+    enforceSchemeAndLength(finalUrl, allowedSchemes, maxLengthOpt);
 
-    enforceSchemeAndLength(url, allowedSchemes, maxLengthOpt);
-
-    if (normalizedFragment !== undefined) {
-      if (hasControlChars(normalizedFragment))
-        throw new InvalidParameterError(
-          "Fragment contains control characters.",
-        );
-
-      // HARDENING: Apply strict fragment validation in security mode
-      if (strictFragment) {
-        validateStrictFragment(normalizedFragment, "createSecureURL");
-      }
-
-      // Set without leading '#'
-      // eslint-disable-next-line functional/immutable-data -- deliberate in-place mutation of URL
-      url.hash = normalizedFragment;
-    }
-
-    return url.href;
+    return finalUrl.href;
   } catch (error: unknown) {
     throw new InvalidParameterError(makeSafeError("Invalid base URL", error));
   }
+}
+
+/** Build safe opaque URLs for allowed non-host schemes. */
+function buildOpaqueURL(
+  baseUrl: URL,
+  proto: string,
+  queryParameters: Record<string, unknown> | ReadonlyMap<string, unknown>,
+  normalizedFragment: string | undefined,
+  onUnsafeKey: UnsafeKeyAction,
+  maxQueryParameters: number,
+): string {
+  // Fragments on opaque schemes are generally meaningless; forbid to avoid confusion
+  if (normalizedFragment !== undefined) {
+    throw new InvalidParameterError(
+      "Fragments are not allowed for opaque URL schemes.",
+    );
+  }
+
+  const searchParameters = new URLSearchParams();
+  processQueryParameters(
+    searchParameters,
+    queryParameters,
+    onUnsafeKey,
+    `${proto}opaque`,
+  );
+  if (searchParameters.size > maxQueryParameters) {
+    throw new InvalidParameterError(
+      `Final query parameters exceed maximum allowed (${maxQueryParameters}).`,
+    );
+  }
+
+  switch (proto) {
+    case "mailto:": {
+      // Base path contains the address list (comma-separated) for non-special schemes
+      const raw = baseUrl.pathname || "";
+      const addresses = raw
+        .split(",")
+        .map((s) => s.trim())
+        .filter((s) => s.length > 0);
+      if (addresses.length === 0) {
+        throw new InvalidParameterError(
+          "mailto: requires at least one address",
+        );
+      }
+      const encodedAddresses = addresses.map((addr) =>
+        encodeMailtoAddress(addr),
+      );
+      const query = searchParameters.toString();
+      const querySuffix = query ? `?${query}` : "";
+      return `mailto:${encodedAddresses.join(",")}` + querySuffix;
+    }
+    case "tel:": {
+      const raw = baseUrl.pathname || "";
+      const normalized = normalizePhoneNumber(raw);
+      const query = searchParameters.toString();
+      const querySuffix = query ? `?${query}` : "";
+      return `tel:${normalized}` + querySuffix;
+    }
+    case "sms:": {
+      const raw = baseUrl.pathname || "";
+      const normalized = normalizePhoneNumber(raw);
+      const query = searchParameters.toString();
+      const querySuffix = query ? `?${query}` : "";
+      return `sms:${normalized}` + querySuffix;
+    }
+    default: {
+      throw new InvalidParameterError(
+        `Unsupported opaque scheme '${proto}' in createSecureURL`,
+      );
+    }
+  }
+}
+
+function encodeMailtoAddress(address: string): string {
+  // Conservative validation: local@domain with optional IDNA in domain.
+  const parts = address.split("@");
+  if (parts.length !== 2) {
+    throw new InvalidParameterError("Invalid mailto address format");
+  }
+  const local = parts[0] ?? "";
+  const domain = parts[1] ?? "";
+  if (!local || !domain) {
+    throw new InvalidParameterError("Invalid mailto address components");
+  }
+  // Validate domain via hostname canonical validator. This will throw on invalid.
+  if (!isValidHostnameRFC1123(domain)) {
+    throw new InvalidParameterError("Invalid mailto domain");
+  }
+  // Percent-encode conservatively (RFC 3986). '@' is not included in encoded output here as it's the separator
+  const localEncoded = encodeMailtoValue(local);
+  const domainEncoded = domain.toLowerCase();
+  return `${localEncoded}@${domainEncoded}`;
+}
+
+function normalizePhoneNumber(raw: string): string {
+  // Allow E.164-like numbers: optional leading '+', digits, spaces, hyphens, parentheses.
+  const trimmed = raw.trim();
+  if (trimmed.length === 0) {
+    throw new InvalidParameterError("Phone number must not be empty");
+  }
+  if (!/^[+\d()\-\s]+$/.test(trimmed)) {
+    throw new InvalidParameterError("Phone number contains invalid characters");
+  }
+  // Strip spaces, hyphens, parentheses; keep a single leading '+' if present
+  const leadingPlus = trimmed.startsWith("+");
+  const digitsOnly = trimmed.replace(/[()\-\s]/g, "").replace(/^\+/, "");
+  if (!/^\d{3,20}$/.test(digitsOnly)) {
+    throw new InvalidParameterError("Phone number must contain 3-20 digits");
+  }
+  return (leadingPlus ? "+" : "") + digitsOnly;
 }
 
 /**
@@ -1180,6 +1755,14 @@ export function updateURLParams(
       onUnsafeKey,
       normalizedBaseUrl,
     );
+
+    // Enforce final parameter count after applying updates to account for
+    // deletes/overwrites and prevent DoS via excessive parameters.
+    if (url.searchParams.size > maxQueryParameters) {
+      throw new InvalidParameterError(
+        `Final query parameters exceed maximum allowed (${maxQueryParameters}).`,
+      );
+    }
 
     if (requireHTTPSOpt && canonicalizeScheme(url.protocol) !== "https:") {
       throw new InvalidParameterError(
@@ -1279,6 +1862,18 @@ export function validateURL(
   try {
     const url = parseAndValidateFullURL(normalizedUrlString, "validateURL");
 
+    // Enforce permanent dangerous scheme block explicitly post-parse to ensure
+    // consistency even if callers pass permissive allowedSchemes.
+    const proto = canonicalizeScheme(url.protocol);
+    if (DANGEROUS_SCHEMES.has(proto)) {
+      return {
+        ok: false,
+        error: new InvalidParameterError(
+          `URL scheme '${proto}' is explicitly forbidden for security reasons.`,
+        ),
+      } as const;
+    }
+
     // Validate that percent-encoded sequences in the pathname are well-formed
     // to prevent ambiguous or malformed encodings from slipping through.
     if (getUrlHardeningConfig().validatePathPercentEncoding) {
@@ -1287,6 +1882,17 @@ export function validateURL(
       // This is equivalent to scanning for malformed percent-encodings but avoids mutable loop counters.
       const malformedPercent = /%(?![0-9A-F]{2})/i;
       if (malformedPercent.test(path)) {
+        return {
+          ok: false,
+          error: new InvalidParameterError(
+            "URL pathname contains malformed percent-encoding.",
+          ),
+        };
+      }
+      // Also ensure decodeURIComponent would not throw to catch other malformations
+      try {
+        decodeURIComponent(path);
+      } catch {
         return {
           ok: false,
           error: new InvalidParameterError(
@@ -1353,10 +1959,12 @@ export function validateURL(
 
     return { ok: true, url };
   } catch (error: unknown) {
+    // Do not mask structural/parse errors with allowlist mismatch. If parsing fails,
+    // return a generic malformed error regardless of allowlist parameters.
     return {
       ok: false,
       error: new InvalidParameterError(makeSafeError("Malformed URL", error)),
-    };
+    } as const;
   }
 }
 

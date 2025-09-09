@@ -25,7 +25,7 @@ describe("URL Hostname Validation - Adversarial Tests", () => {
   describe("Invalid Hostname Cases", () => {
     const invalidHostnames = [
       "example!.com", // disallowed punctuation
-      "exämple.com", // raw unicode (depends on punycode conversion)
+  "exämple.com", // raw unicode (must be rejected unless explicit IDNA provider is enabled)
       "-bad.com", // leading hyphen
       "bad-.com", // trailing hyphen
       "a..b", // empty label
@@ -118,7 +118,8 @@ describe("URL Hostname Validation - Adversarial Tests", () => {
       { input: "EXAMPLE.COM", valid: true, normalized: "example.com" },
       { input: "example.com.", valid: true, normalized: "example.com" }, // trailing dot removed
       { input: "192.168.1.1", valid: true, normalized: "192.168.1.1" },
-      { input: "192.168.1", valid: true, normalized: "192.168.1" }, // WHATWG accepts
+  // Ambiguous IPv4-like dotted numeric with 3 parts must be rejected (hardened policy)
+  { input: "192.168.1", valid: false, normalized: "" },
       { input: "[::1]", valid: true, normalized: "[::1]" },
       { input: "[2001:db8::1]", valid: true, normalized: "[2001:db8::1]" },
       { input: "a-b.com", valid: true, normalized: "a-b.com" },

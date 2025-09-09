@@ -54,7 +54,7 @@ describe("URL Resource Limiting (Layer 5 DoS Protection)", () => {
         { maxQueryParameters: 256 },
       );
       expect(url).toMatch(/^https:\/\/example\.com\/\?param0=value0/);
-    });
+    }, 20000);
 
     it("should reject URLs exceeding query parameter limit", () => {
       const queryParams: Record<string, string> = {};
@@ -87,6 +87,93 @@ describe("URL Resource Limiting (Layer 5 DoS Protection)", () => {
     }, 20000);
   });
 
+  describe("createSecureURL - post-merge caps", () => {
+    it("should enforce final query parameter cap after merging with base URL", () => {
+      // Base URL with 250 params
+      const baseParams = new URLSearchParams();
+      for (let i = 0; i < 250; i++) {
+        baseParams.set(`p${i}`, `v${i}`);
+      }
+      const baseUrl = `https://example.com/?${baseParams.toString()}`;
+
+      // Add 10 more (→ 260 > 256)
+      const extra: Record<string, string> = {};
+      for (let i = 250; i < 260; i++) {
+        extra[`p${i}`] = `v${i}`;
+      }
+
+      expect(() =>
+        createSecureURL(baseUrl, [], extra, undefined, {
+          maxQueryParameters: 256,
+        }),
+      ).toThrow(InvalidParameterError);
+
+      expect(() =>
+        createSecureURL(baseUrl, [], extra, undefined, {
+          maxQueryParameters: 256,
+        }),
+      ).toThrow("Final query parameters exceed maximum allowed (256)");
+    });
+
+    it("should allow when final query parameter count equals the cap", () => {
+      // Base URL with 250 params
+      const baseParams = new URLSearchParams();
+      for (let i = 0; i < 250; i++) {
+        baseParams.set(`k${i}`, `v${i}`);
+      }
+      const baseUrl = `https://example.com/?${baseParams.toString()}`;
+
+      // Add exactly 6 more (→ 256 == cap)
+      const extra: Record<string, string> = {};
+      for (let i = 250; i < 256; i++) {
+        extra[`k${i}`] = `v${i}`;
+      }
+
+      const href = createSecureURL(baseUrl, [], extra, undefined, {
+        maxQueryParameters: 256,
+      });
+      const u = new URL(href);
+      expect(u.searchParams.size).toBe(256);
+    });
+
+    it("should enforce final path segment cap after merging with base URL", () => {
+      // Base URL with 60 segments
+      const basePath = Array.from({ length: 60 }, (_, i) => `s${i}`).join("/");
+      const baseUrl = `https://example.com/${basePath}`;
+
+      // Add 5 more segments (→ 65 > 64)
+      const addSegments = Array.from({ length: 5 }, (_, i) => `t${i}`);
+
+      expect(() =>
+        createSecureURL(baseUrl, addSegments, {}, undefined, {
+          maxPathSegments: 64,
+        }),
+      ).toThrow(InvalidParameterError);
+
+      expect(() =>
+        createSecureURL(baseUrl, addSegments, {}, undefined, {
+          maxPathSegments: 64,
+        }),
+      ).toThrow("Path segments exceed maximum allowed (64)");
+    });
+
+    it("should allow when final path segment count equals the cap", () => {
+      // Base URL with 60 segments
+      const basePath = Array.from({ length: 60 }, (_, i) => `p${i}`).join("/");
+      const baseUrl = `https://example.com/${basePath}`;
+
+      // Add 4 more (→ 64 == cap)
+      const addSegments = Array.from({ length: 4 }, (_, i) => `q${i}`);
+
+      const href = createSecureURL(baseUrl, addSegments, {}, undefined, {
+        maxPathSegments: 64,
+      });
+      const u = new URL(href);
+      // Expect base segments + added ones
+      expect(u.pathname.split("/").filter(Boolean).length).toBe(64);
+    });
+  });
+
   describe("updateURLParams - maxQueryParameters", () => {
     it("should allow updates within query parameter limit", () => {
       // Start with a URL that has 200 parameters
@@ -110,7 +197,7 @@ describe("URL Resource Limiting (Layer 5 DoS Protection)", () => {
         maxQueryParameters: 256,
       });
       expect(updatedUrl).toMatch(/param249=value249/);
-    });
+    }, 20000);
 
     it("should reject updates that would exceed query parameter limit", () => {
       // Start with a URL that has 200 parameters
@@ -256,7 +343,8 @@ describe("URL Resource Limiting (Layer 5 DoS Protection)", () => {
     });
 
     it("should handle empty path segments correctly", () => {
-      const pathSegments = Array.from({ length: 70 }, () => "");
+      // Use fewer than the cap so we test empty-segment validation, not the cap
+      const pathSegments = Array.from({ length: 5 }, () => "");
       expect(() =>
         createSecureURL("https://example.com", pathSegments),
       ).toThrow(

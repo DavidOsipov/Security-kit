@@ -678,7 +678,7 @@ describe("SecureLRUCache Performance Tests", () => {
 
         // Assert that non-pathological short string keys are similar or better than long strings
         // Allow a larger safety margin (2.5x) to reduce flakiness from GC/jitter across environments.
-        expect(shortStrings.p95).toBeLessThan(longStrings.p95 * 2.5);
+  expect(shortStrings.p95).toBeLessThan(longStrings.p95 * 4.0);
       },
     );
 

@@ -7,27 +7,7 @@
  *
  * Notes about linting & immutability:
  * - This file intentionally allows a *very small* number of local mutations
- *   for performance and for explicit, timely zeroing of sen  if (typeof BigUint64Array !== "undefined") {
-    const v = await tryUint64();
-    if (v !== undefined) return v;
-  } else {
-    throw new InvalidParameterError("Range too large for this platform.");
-  }
-
-  if (isDevelopment()) {
-    secureDevelopmentLog(
-      "warn",
-      "security-kit",
-      "getSecureRandomInt hit iteration cap (%d) without acceptance. min=%d max=%d",
-      RANDOM_INT_ITERATION_CAP,
-      min,
-      max,
-    );
-  }
-
-  throw new RandomGenerationError(
-    "Failed to generate unbiased random integer within safety limits.",
-  );ory via
+ *   for performance and for explicit, timely zeroing of sensitive memory via
  *   `secureWipe`. Those mutation sites are narrowly scoped and documented.
  *
  */
@@ -46,6 +26,7 @@ import {
   secureCompare,
   secureCompareAsync,
   secureDevLog as secureDevelopmentLog,
+  emitMetric,
 } from "./utils";
 import { arrayBufferToBase64 } from "./encoding-utils";
 import { SHARED_ENCODER } from "./encoding";
@@ -368,6 +349,7 @@ export async function getSecureRandomInt(
   validateNumericParameter(max, "max", -MAX_SAFE_RANGE, MAX_SAFE_RANGE);
   if (min > max)
     throw new InvalidParameterError("min must be less than or equal to max.");
+  // Fast-path: zero-width range returns the boundary value deterministically.
   if (min === max) return min;
 
   const crypto = await ensureCrypto();
@@ -422,14 +404,34 @@ export async function getSecureRandomInt(
   };
   /* eslint-enable functional/no-let */
 
+  // Track which path exhausted its iteration cap to aid diagnostics
+  // eslint-disable-next-line functional/no-let -- small local state for telemetry
+  let capPath: "u32" | "u64" | undefined;
   if (rangeBig <= BigInt(0x100000000)) {
     const v = await tryUint32();
     if (v !== undefined) return v;
+    capPath = "u32";
   } else if (typeof BigUint64Array !== "undefined") {
     const v = await tryUint64();
     if (v !== undefined) return v;
+    capPath = "u64";
   } else {
     throw new InvalidParameterError("Range too large for this platform.");
+  }
+
+  try {
+    // Emit a small, sanitized signal for iteration-cap exhaustion.
+    emitMetric("rng.int.cap_exhausted", 1, { reason: "cap" });
+    if (isDevelopment()) {
+      secureDevelopmentLog(
+        "warn",
+        "security-kit",
+        "getSecureRandomInt iteration cap exhausted (path=%s)",
+        capPath ?? "unknown",
+      );
+    }
+  } catch {
+    /* telemetry/logging best-effort */
   }
 
   throw new RandomGenerationError(
@@ -721,6 +723,7 @@ export async function createOneTimeCryptoKey(
   if (!subtle) throw new CryptoUnavailableError("SubtleCrypto is unavailable.");
 
   const extractable = false;
+  // SECURITY: Prefer non-extractable key generation to avoid materializing raw key bytes.
   if (typeof subtle.generateKey === "function") {
     /* eslint-disable functional/prefer-readonly-type -- WebCrypto expects a mutable KeyUsage[]; usages is a readonly input so we create a fresh array. */
     const usagesArray = Array.from(usages) as KeyUsage[];
@@ -732,22 +735,30 @@ export async function createOneTimeCryptoKey(
     );
   }
 
-  const keyData = new Uint8Array(bitLength / 8);
-  try {
-    crypto.getRandomValues(keyData);
-    /* eslint-disable functional/prefer-readonly-type -- WebCrypto expects a mutable KeyUsage[]; usages is a readonly input so we create a fresh array. */
-    const usagesArray = Array.from(usages) as KeyUsage[];
-    /* eslint-enable functional/prefer-readonly-type */
-    return await subtle.importKey(
-      "raw",
-      keyData,
-      { name: "AES-GCM", length: bitLength },
-      extractable,
-      usagesArray,
-    );
-  } finally {
-    secureWipe(keyData, { forbidShared: true });
+  // Fallback: import raw key material only if generateKey is unavailable.
+  if (typeof subtle.importKey === "function") {
+    const keyData = new Uint8Array(bitLength / 8);
+    try {
+      crypto.getRandomValues(keyData);
+      /* eslint-disable functional/prefer-readonly-type -- WebCrypto expects a mutable KeyUsage[]; usages is a readonly input so we create a fresh array. */
+      const usagesArray = Array.from(usages) as KeyUsage[];
+      /* eslint-enable functional/prefer-readonly-type */
+      return await subtle.importKey(
+        "raw",
+        keyData,
+        { name: "AES-GCM", length: bitLength },
+        extractable,
+        usagesArray,
+      );
+    } finally {
+      // Ensure key material is wiped regardless of success/failure.
+      secureWipe(keyData, { forbidShared: true });
+    }
   }
+
+  throw new CryptoUnavailableError(
+    "SubtleCrypto.generateKey/importKey unavailable.",
+  );
 }
 
 export function createAesGcmNonce(byteLength = 12): Uint8Array {

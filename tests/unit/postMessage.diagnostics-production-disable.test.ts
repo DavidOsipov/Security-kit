@@ -28,7 +28,9 @@ test("when in production and ensureCrypto rejects, fingerprinting is disabled an
   // Force production
   vi.spyOn(environment, "isProduction", "get").mockReturnValue(true as any);
   // ensureCrypto rejects with explicit CryptoUnavailableError for clarity
-  vi.spyOn(state, "ensureCrypto").mockRejectedValue(new CryptoUnavailableError());
+  vi.spyOn(state, "ensureCrypto").mockRejectedValue(
+    new CryptoUnavailableError(),
+  );
 
   // Spy on secureDevLog to capture the warning log emitted before throwing
   const logSpy = vi.spyOn(utils, "secureDevLog");

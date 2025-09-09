@@ -56,6 +56,9 @@ export * from "./postMessage";
 // General Utilities
 export {
   secureWipe,
+  secureWipeOrThrow,
+  secureWipeAsync,
+  secureWipeAsyncOrThrow,
   secureCompare,
   secureCompareAsync,
   secureDevLog,

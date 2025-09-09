@@ -15,4 +15,14 @@ describe("validateURL origin normalization", () => {
     });
     expect(res.ok).toBe(false);
   });
+
+  it("returns Malformed URL for structurally invalid inputs even when allowedOrigins is provided", () => {
+    const res = validateURL("http:///\\\\bad[host]", {
+      allowedOrigins: ["https://example.com"],
+    });
+    expect(res.ok).toBe(false);
+    if (!res.ok) {
+      expect(res.error.message).toMatch(/Malformed URL/i);
+    }
+  });
 });

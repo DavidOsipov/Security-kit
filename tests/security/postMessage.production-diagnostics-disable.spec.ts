@@ -24,7 +24,9 @@ test("production disables diagnostics when crypto unavailable", async () => {
 
   // Make ensureCrypto reject to simulate no crypto available
   const state = await import("../../src/state");
-  vi.spyOn(state, "ensureCrypto").mockRejectedValue(new CryptoUnavailableError());
+  vi.spyOn(state, "ensureCrypto").mockRejectedValue(
+    new CryptoUnavailableError(),
+  );
 
   const postMessage = await import("../../src/postMessage");
   const listener = (postMessage as any).createSecurePostMessageListener({

@@ -119,6 +119,20 @@ test("module evaluated with __TEST__ but no require should not expose __test_int
           },
         };
       }
+      if (spec.endsWith("/config") || spec === "./config") {
+        // Minimal config stub to satisfy postMessage's runtime getters
+        return {
+          getPostMessageConfig: () => ({
+            maxPayloadBytes: 32 * 1024,
+            maxTraversalNodes: 5000,
+            maxObjectKeys: 256,
+            maxSymbolKeys: 32,
+            maxArrayItems: 256,
+            maxTransferables: 2,
+            includeSymbolKeysInSanitizer: false,
+          }),
+        };
+      }
       if (spec.endsWith("/errors") || spec === "./errors") {
         class E extends Error {}
         return {
@@ -269,6 +283,19 @@ test("runtime test API guard throws in production unless explicitly allowed", ()
           setExplicitEnv: (_: any) => {},
           clearCache: () => {},
         },
+      };
+    }
+    if (spec === "./config" || spec.endsWith("/config")) {
+      return {
+        getPostMessageConfig: () => ({
+          maxPayloadBytes: 32 * 1024,
+          maxTraversalNodes: 5000,
+          maxObjectKeys: 256,
+          maxSymbolKeys: 32,
+          maxArrayItems: 256,
+          maxTransferables: 2,
+          includeSymbolKeysInSanitizer: false,
+        }),
       };
     }
     if (spec === "./errors" || spec.endsWith("/errors")) {

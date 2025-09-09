@@ -3,14 +3,18 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 // Set up test environment flag to enable test APIs
 process.env.SECURITY_KIT_ALLOW_TEST_APIS = "true";
 
-// Mock the config module
-vi.mock("../../src/config", () => ({
-  getHandshakeConfig: vi.fn(() => ({
-    allowedNonceFormats: ["base64", "base64url", "hex"],
-    handshakeMaxNonceLength: 100,
-  })),
-  setHandshakeConfig: vi.fn(),
-}));
+// Mock the config module (partial mock). Preserve real exports like getDangerousSchemes.
+vi.mock("../../src/config", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../src/config")>();
+  return {
+    ...actual,
+    getHandshakeConfig: vi.fn(() => ({
+      allowedNonceFormats: ["base64", "base64url", "hex"],
+      handshakeMaxNonceLength: 100,
+    })),
+    setHandshakeConfig: vi.fn(),
+  };
+});
 
 // Mock encoding utilities
 vi.mock("../../src/encoding-utils", () => ({

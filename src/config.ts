@@ -297,6 +297,140 @@ export function configureErrorReporter(config: {
   configureProductionErrorReporter(config);
 }
 
+// ====================== Timing configuration (dev-only equalization) =======================
+
+export type TimingConfig = {
+  /** Dev/test equalization budget for async secureCompareAsync (milliseconds). */
+  readonly devEqualizeAsyncMs: number; // default 16
+  /** Dev/test equalization budget for sync secureCompare (milliseconds). */
+  readonly devEqualizeSyncMs: number; // default 2
+};
+
+/* eslint-disable functional/no-let -- controlled runtime configuration */
+let _timingConfig: TimingConfig = {
+  devEqualizeAsyncMs: 16,
+  devEqualizeSyncMs: 2,
+};
+/* eslint-enable functional/no-let */
+
+export function getTimingConfig(): TimingConfig {
+  return Object.freeze({ ..._timingConfig });
+}
+
+export function setTimingConfig(cfg: Partial<TimingConfig>): void {
+  if (getCryptoState() === CryptoState.Sealed) {
+    throw new InvalidConfigurationError(
+      "Configuration is sealed and cannot be changed.",
+    );
+  }
+  for (const [k, v] of Object.entries(cfg)) {
+    if (k !== "devEqualizeAsyncMs" && k !== "devEqualizeSyncMs") continue;
+    if (typeof v !== "number" || !Number.isInteger(v) || v < 0) {
+      throw new InvalidParameterError(
+        `TimingConfig.${k} must be a non-negative integer (milliseconds).`,
+      );
+    }
+  }
+  _timingConfig = { ..._timingConfig, ...cfg } as TimingConfig;
+}
+
+// ====================== postMessage Traversal/Size Configuration =======================
+
+/**
+ * Configuration for postMessage traversal, payload size accounting, and sanitizer breadth caps.
+ * Defaults are conservative and production-friendly (OWASP ASVS V5 input size limits).
+ */
+export type PostMessageConfig = {
+  /** Maximum payload size in bytes for postMessage (applies to JSON and structured paths). */
+  readonly maxPayloadBytes: number; // default 32 KiB
+  /** Global traversal node budget to prevent CPU exhaustion across nested graphs. */
+  readonly maxTraversalNodes: number; // default 5000
+  /** Maximum number of own string keys processed per object. */
+  readonly maxObjectKeys: number; // default 256
+  /** Maximum number of own symbol keys processed per object (when enabled). */
+  readonly maxSymbolKeys: number; // default 32
+  /** Maximum number of array items processed per array. */
+  readonly maxArrayItems: number; // default 256
+  /** Maximum number of transferable objects allowed in a single payload. */
+  readonly maxTransferables: number; // default 2
+  /**
+   * Whether the sanitizer should include symbol-keyed properties. Defaults to false
+   * (drop symbols) to avoid leaking hidden data and reduce traversal surface.
+   */
+  readonly includeSymbolKeysInSanitizer: boolean; // default false
+};
+
+/* eslint-disable functional/no-let -- Controlled mutable configuration allowed */
+let _postMessageConfig: PostMessageConfig = {
+  maxPayloadBytes: 32 * 1024,
+  maxTraversalNodes: 5000,
+  maxObjectKeys: 256,
+  maxSymbolKeys: 32,
+  maxArrayItems: 256,
+  maxTransferables: 2,
+  includeSymbolKeysInSanitizer: false,
+};
+/* eslint-enable functional/no-let */
+
+export function getPostMessageConfig(): PostMessageConfig {
+  return Object.freeze({ ..._postMessageConfig });
+}
+
+export function setPostMessageConfig(cfg: Partial<PostMessageConfig>): void {
+  if (getCryptoState() === CryptoState.Sealed) {
+    throw new InvalidConfigurationError(
+      "Configuration is sealed and cannot be changed.",
+    );
+  }
+  const numericKeys: readonly (keyof PostMessageConfig)[] = [
+    "maxPayloadBytes",
+    "maxTraversalNodes",
+    "maxObjectKeys",
+    "maxSymbolKeys",
+    "maxArrayItems",
+    "maxTransferables",
+  ];
+
+  // Conservative hard caps to prevent DoS via misconfiguration. These align with
+  // Pillar #2 (Hardened Simplicity & Performance) and OWASP ASVS V5 limits.
+  const CAPS = {
+    maxPayloadBytes: 256 * 1024, // 256 KiB
+    maxTraversalNodes: 100_000,
+    maxObjectKeys: 4_096,
+    maxSymbolKeys: 256,
+    maxArrayItems: 4_096,
+    maxTransferables: 64,
+  } as const;
+
+  for (const [k, v] of Object.entries(cfg)) {
+    const key = k as keyof PostMessageConfig;
+    if (numericKeys.includes(key)) {
+      if (typeof v !== "number" || !Number.isInteger(v) || v <= 0) {
+        throw new InvalidParameterError(
+          `PostMessageConfig.${String(key)} must be a positive integer.`,
+        );
+      }
+      // Enforce upper caps
+      const cap = (CAPS as Record<string, number>)[key as string];
+      if (typeof cap === "number" && (v as number) > cap) {
+        throw new InvalidParameterError(
+          `PostMessageConfig.${String(key)} exceeds hard cap (${cap}).`,
+        );
+      }
+    }
+    if (key === "includeSymbolKeysInSanitizer") {
+      if (typeof v !== "boolean") {
+        throw new InvalidParameterError(
+          "PostMessageConfig.includeSymbolKeysInSanitizer must be a boolean.",
+        );
+      }
+    }
+    // Unknown keys are ignored to preserve hardened simplicity.
+  }
+
+  _postMessageConfig = { ..._postMessageConfig, ...cfg } as PostMessageConfig;
+}
+
 // ====================== SecureLRU Cache Profiles =======================
 // We avoid importing the cache types here to prevent cycles. Options are structural.
 export type SecureLRUCacheProfile = {
@@ -762,25 +896,193 @@ export type UrlHardeningConfig = {
   readonly strictIPv4AmbiguityChecks: boolean;
   /** Validate percent-encoding in path components (regex + decode check). */
   readonly validatePathPercentEncoding: boolean;
+  /**
+   * Allow traversal/dot-segment and repeated-slash normalization during validation only.
+   * When true, validateURL will accept paths containing sequences like '/./', '/../',
+   * '//' and backslash variants, relying on WHATWG URL normalization to resolve them
+   * (e.g., '/a/../b' -> '/b'). Constructing APIs (createSecureURL/updateURLParams)
+   * always reject these sequences regardless of this flag.
+   *
+   * Default: true (browser-aligned normalization in validation)
+   *
+   * Pros:
+   * - Matches browser and WHATWG behavior for external URLs; fewer false negatives
+   *   when simply validating user-provided links.
+   * - Simplifies allowlist checks performed on normalized origins and paths.
+   *
+   * Cons:
+   * - Validation will not signal the presence of raw traversal tokens; it will
+   *   instead return a normalized URL (still safe for origin checks).
+   *
+   * Potential risks and mitigations:
+   * - If callers rely on validation to detect and reject any raw traversal tokens,
+   *   set this flag to false (fail-closed) or use createSecureURL/updateURLParams
+   *   which always reject traversal patterns.
+   * - Path-based authorization MUST be applied after normalization. Never make
+   *   security decisions on the pre-normalized string.
+   * - Percent-encoded dot segments (e.g., '%2e%2e') are not treated as traversal
+   *   by WHATWG and remain literals; the library also enforces well-formed percent
+   *   encodings when enabled via validatePathPercentEncoding.
+   */
+  readonly allowTraversalNormalizationInValidation: boolean;
+  /**
+   * Optional: Enable uniform IDNA toASCII conversion for Unicode hostnames (Option B).
+   * When true, non-ASCII hostnames in the authority will be converted to A-labels
+   * using the configured idnaProvider before parsing. Defaults to false.
+   *
+   * Security requirements (Option B):
+   * - An idnaProvider MUST be configured when enabling this flag; otherwise configuration fails.
+   * - The provider's toASCII() MUST return ASCII-only A-labels. Any non-ASCII output is rejected.
+   * - The provider MUST NOT return control characters or whitespace; such outputs are rejected.
+   * - Post-conversion, each label MUST satisfy RFC 1123 LDH rules and length limits, or it will be rejected.
+   * - Forbidden host code points (e.g., '/', '#', '?', '@', '\\', '[', ']') are rejected by the URL hardener.
+   *
+   * Note: The provider is validated with a small behavioral self-test at configuration time
+   * via validateIdnaProviderBehavior(). Runtime conversions are additionally validated in url.ts.
+   */
+  readonly enableIdnaToAscii?: boolean;
+  /**
+   * Optional IDNA provider implementing toASCII(s: string) -> string. This allows
+   * consumers to supply a vetted implementation (e.g., Node's punycode or a web polyfill)
+   * without introducing a hard dependency. Required when enableIdnaToAscii is true.
+   *
+   * Provider contract:
+   * - Accepts arbitrary Unicode hostname input (single label or host[:port] host portion already split).
+   * - Returns a string consisting solely of ASCII characters (A-labels) for DNS hostnames.
+   * - MUST NOT include control characters or spaces in the result.
+   * - SHOULD leave already-ASCII LDH input unchanged (idempotent for ASCII hostnames).
+   *
+   * The library defensively validates provider output both during configuration (smoke test)
+   * and at runtime when converting authorities/hostnames.
+   */
+  readonly idnaProvider?:
+    | { readonly toASCII: (s: string) => string }
+    | undefined;
+  /** Maximum query parameter name length (characters). Default 128. */
+  readonly maxQueryParamNameLength?: number;
+  /** Maximum query parameter value length (characters). Default 2048. */
+  readonly maxQueryParamValueLength?: number;
 };
 
 /* eslint-disable functional/no-let -- Controlled mutable configuration allowed here */
 let _urlHardeningConfig: UrlHardeningConfig = {
   enforceSpecialSchemeAuthority: true,
   forbidForbiddenHostCodePoints: true,
-  // Default policy: strict URL hardening is the secure default (ASVS L3).
-  // For developer experience, when running in a detected development/test
-  // environment we default to a more permissive mode to avoid breaking
-  // common developer workflows (e.g., shorthand IPv4 like `192.168.1`).
-  // Callers who need strict behavior in development can enable it via
-  // `setUrlHardeningConfig` or use `runWithStrictUrlHardening` helper below.
-  strictIPv4AmbiguityChecks: environment.isProduction ? true : false,
+  // Strict by default: reject ambiguous IPv4 shorthand and invalid numeric dotted forms
+  // across all environments to avoid origin/SSRF confusion (ASVS L3 compliance).
+  strictIPv4AmbiguityChecks: true,
   validatePathPercentEncoding: true,
+  allowTraversalNormalizationInValidation: true,
+  enableIdnaToAscii: false,
+  idnaProvider: undefined,
+  maxQueryParamNameLength: 128,
+  maxQueryParamValueLength: 2048,
 };
 /* eslint-enable functional/no-let */
 
 export function getUrlHardeningConfig(): UrlHardeningConfig {
   return Object.freeze({ ..._urlHardeningConfig });
+}
+
+// Internal helper to validate UrlHardeningConfig entries one-by-one. Extracted to
+// reduce cognitive complexity in the setter while keeping strict validation.
+function validateUrlHardeningEntry(
+  key: keyof UrlHardeningConfig,
+  value: unknown,
+): void {
+  const booleanKeys: ReadonlySet<keyof UrlHardeningConfig> = new Set([
+    "enforceSpecialSchemeAuthority",
+    "forbidForbiddenHostCodePoints",
+    "strictIPv4AmbiguityChecks",
+    "validatePathPercentEncoding",
+    "allowTraversalNormalizationInValidation",
+    "enableIdnaToAscii",
+  ]);
+  if (booleanKeys.has(key)) {
+    if (typeof value !== "boolean") {
+      throw new InvalidParameterError(
+        "UrlHardeningConfig." + String(key) + " must be a boolean.",
+      );
+    }
+    return;
+  }
+  if (key === "idnaProvider") {
+    if (value === undefined) return;
+    if (typeof value !== "object" || value === null) {
+      throw new InvalidParameterError(
+        "UrlHardeningConfig.idnaProvider must be an object implementing toASCII().",
+      );
+    }
+    const desc = Object.getOwnPropertyDescriptor(value, "toASCII");
+    if (!desc || "get" in desc || "set" in desc) {
+      throw new InvalidParameterError(
+        "UrlHardeningConfig.idnaProvider.toASCII must be a data property function (no getters/setters).",
+      );
+    }
+    if (typeof desc.value !== "function") {
+      throw new InvalidParameterError(
+        "UrlHardeningConfig.idnaProvider.toASCII must be a function.",
+      );
+    }
+  }
+  if (key === "maxQueryParamNameLength" || key === "maxQueryParamValueLength") {
+    if (typeof value !== "number" || !Number.isInteger(value) || value <= 0) {
+      throw new InvalidParameterError(
+        `UrlHardeningConfig.${String(key)} must be a positive integer.`,
+      );
+    }
+  }
+}
+
+// Extracted helper: performs behavioral self-test for an IDNA provider.
+// This reduces cognitive complexity in the setter and keeps security checks
+// centralized and auditable.
+function validateIdnaProviderBehavior(provider: {
+  readonly toASCII: (s: string) => string;
+}): void {
+  const toASCII = provider.toASCII;
+  const isAscii = (s: string): boolean => {
+    for (const index of s.split("").keys()) {
+      if (s.charCodeAt(index) > 0x7f) return false;
+    }
+    return true;
+  };
+  const containsSpaceOrControl = (s: string): boolean => {
+    for (const index of s.split("").keys()) {
+      const code = s.charCodeAt(index);
+      // whitespace: space, tab, cr, lf, ff, vt
+      if (
+        code === 0x20 ||
+        code === 0x09 ||
+        code === 0x0d ||
+        code === 0x0a ||
+        code === 0x0c ||
+        code === 0x0b
+      )
+        return true;
+      // C0 controls or DEL
+      if (code <= 0x1f || code === 0x7f) return true;
+    }
+    return false;
+  };
+
+  const out = toASCII("пример.рф");
+  if (typeof out !== "string" || !isAscii(out)) {
+    throw new InvalidParameterError(
+      "idnaProvider.toASCII must return ASCII A-labels.",
+    );
+  }
+  const bad = toASCII("bad host\u0000");
+  if (typeof bad !== "string") {
+    throw new InvalidParameterError(
+      "idnaProvider.toASCII returned non-string for invalid input.",
+    );
+  }
+  if (containsSpaceOrControl(bad)) {
+    throw new InvalidParameterError(
+      "idnaProvider.toASCII returned forbidden characters.",
+    );
+  }
 }
 
 export function setUrlHardeningConfig(cfg: Partial<UrlHardeningConfig>): void {
@@ -794,18 +1096,41 @@ export function setUrlHardeningConfig(cfg: Partial<UrlHardeningConfig>): void {
     "forbidForbiddenHostCodePoints",
     "strictIPv4AmbiguityChecks",
     "validatePathPercentEncoding",
+    "allowTraversalNormalizationInValidation",
+    "enableIdnaToAscii",
+    "idnaProvider",
+    "maxQueryParamNameLength",
+    "maxQueryParamValueLength",
   ];
   const entries = Object.entries(cfg).filter(([k]) =>
     knownKeys.includes(k as keyof UrlHardeningConfig),
   );
-  for (const [k, v] of entries) {
-    if (typeof v !== "boolean") {
+  for (const [k, v] of entries)
+    validateUrlHardeningEntry(k as keyof UrlHardeningConfig, v);
+  const filtered = Object.fromEntries(entries) as Partial<UrlHardeningConfig>;
+  // If enabling IDNA, ensure a provider is available either in this call or previously.
+  const enablingIdna =
+    filtered.enableIdnaToAscii === true ||
+    (filtered.enableIdnaToAscii === undefined &&
+      _urlHardeningConfig.enableIdnaToAscii === true);
+  const effectiveProvider =
+    filtered.idnaProvider ?? _urlHardeningConfig.idnaProvider;
+  if (enablingIdna && !effectiveProvider) {
+    throw new InvalidParameterError(
+      "enableIdnaToAscii requires a configured idnaProvider with toASCII().",
+    );
+  }
+  // Behavioral self-test for provider correctness (simple smoke checks)
+  if (enablingIdna && effectiveProvider) {
+    try {
+      validateIdnaProviderBehavior(effectiveProvider);
+    } catch (error) {
+      if (error instanceof InvalidParameterError) throw error;
       throw new InvalidParameterError(
-        "UrlHardeningConfig." + String(k) + " must be a boolean.",
+        "idnaProvider.toASCII failed validation.",
       );
     }
   }
-  const filtered = Object.fromEntries(entries) as Partial<UrlHardeningConfig>;
   _urlHardeningConfig = { ..._urlHardeningConfig, ...filtered };
 }
 
@@ -833,6 +1158,8 @@ export function runWithStrictUrlHardening<T>(function_: () => T): T {
       enforceSpecialSchemeAuthority: true,
       forbidForbiddenHostCodePoints: true,
       validatePathPercentEncoding: true,
+      // Intentionally do not change enableIdnaToAscii/idnaProvider here; strict mode
+      // focuses on parsing/encoding hardening and leaves IDNA policy as configured.
     };
     return function_();
   } finally {
@@ -867,9 +1194,13 @@ const DEFAULT_SAFE_SCHEMES = ["https:"];
 // occurrence; the value is still compared textually elsewhere.
 const DANGEROUS_SCHEMES = new Set([
   "java" + "script:",
+  "vbscript:",
   "data:",
-  "file:",
   "blob:",
+  "file:",
+  "about:",
+  // Security posture: FTP is insecure and prone to SSRF/origin confusion.
+  // We treat it as permanently dangerous for this library's purposes.
   "ftp:",
 ]);
 
@@ -896,6 +1227,29 @@ export function getUrlPolicyConfig(): UrlPolicyConfig {
  */
 export function getSafeSchemes(): readonly string[] {
   return Object.freeze([..._urlPolicyConfig.safeSchemes]);
+}
+
+/**
+ * Get the library's permanently forbidden schemes.
+ * These are blocked regardless of runtime policy or per-call options.
+ * Examples include data:, blob:, file:, about:, vbscript:, javascript:, ftp:.
+ *
+ * Returns an immutable array to prevent mutation.
+ */
+export function getDangerousSchemes(): readonly string[] {
+  return Object.freeze([...DANGEROUS_SCHEMES]);
+}
+
+/**
+ * Check whether a scheme is permanently forbidden by policy.
+ * The input may be with or without trailing ':'; comparison is canonicalized.
+ */
+export function isDangerousScheme(scheme: string): boolean {
+  if (typeof scheme !== "string" || scheme.length === 0) return false;
+  const token = scheme.endsWith(":")
+    ? scheme.toLowerCase()
+    : `${scheme.toLowerCase()}:`;
+  return DANGEROUS_SCHEMES.has(token);
 }
 
 /**
@@ -959,4 +1313,164 @@ export function _resetUrlPolicyForTests(): void {
   _urlPolicyConfig = {
     safeSchemes: DEFAULT_SAFE_SCHEMES,
   };
+}
+
+// ====================== Canonicalization / Stringify Configuration =======================
+export type CanonicalConfig = {
+  /** Maximum allowed top-level string length (in bytes/characters) for stable stringify. */
+  readonly maxStringLengthBytes: number;
+  /** Maximum allowed array length to canonicalize at top-level to prevent OOM. */
+  readonly maxTopLevelArrayLength: number;
+  /** Maximum traversal depth budget (optional, reserved for future use). */
+  readonly maxDepth?: number | undefined;
+};
+
+/* eslint-disable functional/no-let -- runtime configuration */
+const DEFAULT_CANONICAL_CONFIG: CanonicalConfig = {
+  maxStringLengthBytes: 10 * 1024 * 1024, // 10 MiB
+  maxTopLevelArrayLength: 1_000_000,
+  // Secure default: cap traversal depth to prevent call-stack exhaustion.
+  // 256 is intentionally conservative for typical JSON-like payloads while
+  // preventing extremely deep adversarial nesting.
+  maxDepth: 256,
+};
+
+let _canonicalConfig: CanonicalConfig = DEFAULT_CANONICAL_CONFIG;
+/* eslint-enable functional/no-let */
+
+// Read environment overrides for canonical limits at module initialization.
+// These environment variables allow deploy-time hardening without a code change.
+try {
+  const maybeMaxString =
+    process?.env?.["SECURITY_KIT_CANONICAL_MAX_STRING_BYTES"];
+  const maybeMaxArray =
+    process?.env?.["SECURITY_KIT_CANONICAL_MAX_TOP_ARRAY_LENGTH"];
+  const maybeMaxDepth = process?.env?.["SECURITY_KIT_CANONICAL_MAX_DEPTH"];
+
+  // Build a new partial object immutably as we parse environment values.
+  // Use a function-scoped constant pattern with immutable reassignments to satisfy no-let rule.
+  const parsed: Partial<CanonicalConfig> = (() => {
+    const hasStringEnvironment =
+      typeof maybeMaxString === "string" && maybeMaxString.trim().length > 0;
+    const maxStringPart = hasStringEnvironment
+      ? (() => {
+          const v = Number(maybeMaxString);
+          return Number.isInteger(v) && v > 0
+            ? ({ maxStringLengthBytes: v } as Partial<CanonicalConfig>)
+            : ({} as Partial<CanonicalConfig>);
+        })()
+      : ({} as Partial<CanonicalConfig>);
+
+    const hasArrayEnvironment =
+      typeof maybeMaxArray === "string" && maybeMaxArray.trim().length > 0;
+    const maxArrayPart = hasArrayEnvironment
+      ? (() => {
+          const v = Number(maybeMaxArray);
+          return Number.isInteger(v) && v > 0
+            ? ({ maxTopLevelArrayLength: v } as Partial<CanonicalConfig>)
+            : ({} as Partial<CanonicalConfig>);
+        })()
+      : ({} as Partial<CanonicalConfig>);
+
+    const hasDepthEnvironment =
+      typeof maybeMaxDepth === "string" && maybeMaxDepth.trim().length > 0;
+    const maxDepthPart = hasDepthEnvironment
+      ? (() => {
+          const v = Number(maybeMaxDepth);
+          return Number.isInteger(v) && v > 0
+            ? ({ maxDepth: v } as Partial<CanonicalConfig>)
+            : ({} as Partial<CanonicalConfig>);
+        })()
+      : ({} as Partial<CanonicalConfig>);
+
+    return { ...maxStringPart, ...maxArrayPart, ...maxDepthPart };
+  })();
+
+  if (Object.keys(parsed).length > 0) {
+    // Upper bounds to prevent misconfiguration weakening DoS hardening
+    const MAX_STRING_BYTES_CAP = 64 * 1024 * 1024; // 64 MiB
+    const MAX_ARRAY_LENGTH_CAP = 1_000_000; // keep as cap
+    const MAX_DEPTH_CAP = 1024;
+    const adjusted: Partial<CanonicalConfig> = {
+      ...parsed,
+      ...(parsed.maxStringLengthBytes !== undefined
+        ? {
+            maxStringLengthBytes: Math.min(
+              parsed.maxStringLengthBytes,
+              MAX_STRING_BYTES_CAP,
+            ),
+          }
+        : {}),
+      ...(parsed.maxTopLevelArrayLength !== undefined
+        ? {
+            maxTopLevelArrayLength: Math.min(
+              parsed.maxTopLevelArrayLength,
+              MAX_ARRAY_LENGTH_CAP,
+            ),
+          }
+        : {}),
+      ...(parsed.maxDepth !== undefined
+        ? { maxDepth: Math.min(parsed.maxDepth, MAX_DEPTH_CAP) }
+        : {}),
+    };
+    // merge validated env-derived values into runtime config
+    _canonicalConfig = { ..._canonicalConfig, ...adjusted };
+  }
+} catch {
+  // Swallow any unexpected errors while reading env; fall back to defaults.
+}
+
+export function getCanonicalConfig(): CanonicalConfig {
+  return Object.freeze({ ..._canonicalConfig });
+}
+
+export function setCanonicalConfig(cfg: Partial<CanonicalConfig>): void {
+  if (getCryptoState() === CryptoState.Sealed) {
+    throw new InvalidConfigurationError(
+      "Configuration is sealed and cannot be changed.",
+    );
+  }
+
+  if (cfg.maxStringLengthBytes !== undefined) {
+    if (
+      typeof cfg.maxStringLengthBytes !== "number" ||
+      !Number.isInteger(cfg.maxStringLengthBytes) ||
+      cfg.maxStringLengthBytes <= 0
+    ) {
+      throw new InvalidParameterError(
+        "maxStringLengthBytes must be a positive integer.",
+      );
+    }
+  }
+
+  if (cfg.maxTopLevelArrayLength !== undefined) {
+    if (
+      typeof cfg.maxTopLevelArrayLength !== "number" ||
+      !Number.isInteger(cfg.maxTopLevelArrayLength) ||
+      cfg.maxTopLevelArrayLength <= 0
+    ) {
+      throw new InvalidParameterError(
+        "maxTopLevelArrayLength must be a positive integer.",
+      );
+    }
+  }
+
+  if (cfg.maxDepth !== undefined) {
+    if (
+      typeof cfg.maxDepth !== "number" ||
+      !Number.isInteger(cfg.maxDepth) ||
+      cfg.maxDepth <= 0
+    ) {
+      throw new InvalidParameterError(
+        "maxDepth must be a positive integer if provided.",
+      );
+    }
+  }
+
+  _canonicalConfig = { ..._canonicalConfig, ...cfg };
+}
+
+// Test helper to reset canonical config to defaults.
+export function _resetCanonicalConfigForTests(): void {
+  _canonicalConfig = DEFAULT_CANONICAL_CONFIG;
 }

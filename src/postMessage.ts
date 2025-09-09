@@ -35,6 +35,17 @@ import { SHARED_ENCODER } from "./encoding";
 import { isForbiddenKey } from "./constants";
 import { environment } from "./environment";
 import { normalizeOrigin as normalizeUrlOrigin } from "./url";
+import { getPostMessageConfig } from "./config";
+
+// Internal helpers for controlled mutable operations on otherwise readonly types
+// Remove readonly from all properties in T
+// eslint-disable-next-line functional/prefer-readonly-type -- Intentional mapped type to create a mutable view for controlled internal state
+type Mutable<T> = { -readonly [P in keyof T]: T[P] };
+type TraversalCounters = {
+  readonly nodes: number;
+  readonly transferables: number;
+};
+type TraversalNodes = { readonly nodes: number };
 
 // --- Interfaces and Types ---
 
@@ -91,6 +102,11 @@ const DEFAULT_DIAGNOSTIC_BUDGET = 5; // fingerprints per minute
 
 // Budget for deep-freeze traversal to avoid CPU/DoS via very wide objects
 const DEFAULT_DEEP_FREEZE_NODE_BUDGET = 5000; // tunable
+
+function _pmCfg() {
+  // Helper to avoid repeated getter import noise and ease auditing
+  return getPostMessageConfig();
+}
 
 // --- Utilities ---
 
@@ -239,13 +255,68 @@ function safeCtorName(value: unknown): string | undefined {
   }
 }
 
+/**
+ * Collect own data property descriptors for both string and symbol keys without invoking getters.
+ * Skips accessor properties and returns a flat array of [key, value] pairs.
+ */
+function getOwnDataPropertyEntries(
+  object: unknown,
+): ReadonlyArray<readonly [string | symbol, unknown]> {
+  if (object === null || typeof object !== "object") return [] as const;
+  try {
+    const names = Object.getOwnPropertyNames(object) as readonly string[];
+    const symbols = Object.getOwnPropertySymbols(
+      object as object,
+    ) as readonly symbol[];
+    // Local accumulator; cast to readonly on return
+    // eslint-disable-next-line functional/prefer-readonly-type
+    const entries: Array<readonly [string | symbol, unknown]> = [];
+    for (const key of names) {
+      try {
+        const desc = Object.getOwnPropertyDescriptor(
+          object as Record<string, unknown>,
+          key,
+        );
+        if (
+          !desc ||
+          typeof desc.get === "function" ||
+          typeof desc.set === "function" ||
+          !Object.prototype.hasOwnProperty.call(desc, "value")
+        )
+          continue;
+        entries.push([key, desc.value as unknown]);
+      } catch {
+        /* ignore faulty descriptor */
+      }
+    }
+    for (const sym of symbols) {
+      try {
+        const desc = Object.getOwnPropertyDescriptor(object as object, sym);
+        if (
+          !desc ||
+          typeof desc.get === "function" ||
+          typeof desc.set === "function" ||
+          !Object.prototype.hasOwnProperty.call(desc, "value")
+        )
+          continue;
+        entries.push([sym, (desc as PropertyDescriptor).value as unknown]);
+      } catch {
+        /* ignore faulty descriptor */
+      }
+    }
+    return entries as ReadonlyArray<readonly [string | symbol, unknown]>;
+  } catch {
+    return [] as const;
+  }
+}
+
 // --- Internal Security Helpers ---
 
 /**
  * Validates that payload does not contain disallowed transferable objects
  * like MessagePort, ArrayBuffer, or SharedArrayBuffer unless explicitly allowed.
  */
-/* eslint-disable-next-line sonarjs/cognitive-complexity -- Single-pass defensive validation requires conditional branches; splitting would harm auditability without real risk reduction. */
+// eslint-disable-next-line sonarjs/cognitive-complexity -- Audited: validates nested structured-clone payloads for transferables; decomposition would harm clarity. Covered by unit/adversarial tests.
 function validateTransferables(
   payload: unknown,
   allowTransferables: boolean,
@@ -253,6 +324,7 @@ function validateTransferables(
   depth = 0,
   maxDepth = POSTMESSAGE_MAX_PAYLOAD_DEPTH,
   visited?: WeakSet<object>,
+  state?: TraversalCounters,
 ): void {
   if (depth > maxDepth) return; // depth check handled elsewhere
   if (payload === null || typeof payload !== "object") return;
@@ -262,6 +334,28 @@ function validateTransferables(
   if (visited.has(payload)) return;
 
   visited.add(payload);
+
+  // Enforce global traversal/node budget to prevent CPU exhaustion
+  // Track a simple node count; if exceeded, fail closed.
+  state ??= { nodes: 0, transferables: 0 } as TraversalCounters;
+  const mut = state as Mutable<TraversalCounters>;
+  mut.nodes += 1;
+  const nodeBudget = _pmCfg().maxTraversalNodes;
+  if (state.nodes > nodeBudget) {
+    throw new InvalidParameterError(
+      `Payload traversal exceeds node budget of ${nodeBudget}.`,
+    );
+  }
+  // Helper to count a transferable and enforce cap
+  const countTransferable = () => {
+    const maxT = _pmCfg().maxTransferables;
+    mut.transferables += 1;
+    if (state!.transferables > maxT) {
+      throw new TransferableNotAllowedError(
+        `Too many transferable objects in payload (max ${maxT}).`,
+      );
+    }
+  };
 
   // Check for disallowed transferable types
   const ctorName = safeCtorName(payload);
@@ -278,6 +372,9 @@ function validateTransferables(
         `Transferable object ${ctorName} is not allowed unless allowTransferables=true`,
       );
     }
+    // Enforce maxTransferables cap when transferables are allowed
+    countTransferable();
+    return; // do not traverse into host objects
   }
 
   // ArrayBuffer and typed arrays
@@ -287,6 +384,9 @@ function validateTransferables(
         `${ctorName} is not allowed unless allowTypedArrays=true`,
       );
     }
+    // Count as a transferable when allowed and do not traverse further
+    if (allowTransferables || allowTypedArrays) countTransferable();
+    return;
   }
 
   // TypedArray and DataView check
@@ -297,6 +397,8 @@ function validateTransferables(
           "TypedArray/DataView is not allowed unless allowTypedArrays=true",
         );
       }
+      if (allowTransferables || allowTypedArrays) countTransferable();
+      return; // do not traverse properties of typed arrays/views
     }
   } catch {
     // If ArrayBuffer.isView throws, continue
@@ -304,6 +406,13 @@ function validateTransferables(
 
   // Recursively check nested objects and arrays
   if (Array.isArray(payload)) {
+    // Validate array items
+    const maxItems = _pmCfg().maxArrayItems;
+    if (payload.length > maxItems) {
+      throw new InvalidParameterError(
+        `Array has too many items (max ${maxItems}).`,
+      );
+    }
     for (const item of payload) {
       validateTransferables(
         item,
@@ -312,31 +421,59 @@ function validateTransferables(
         depth + 1,
         maxDepth,
         visited,
+        state,
+      );
+    }
+    // Also validate any additional own non-index properties on the array object itself
+    const includeSymbols = _pmCfg().includeSymbolKeysInSanitizer === true;
+    const extraProperties = getOwnDataPropertyEntries(payload).filter(
+      ([k]) =>
+        (typeof k === "string" && k !== "length" && String(Number(k)) !== k) ||
+        (typeof k === "symbol" && includeSymbols),
+    );
+    const maxProperties = _pmCfg().maxObjectKeys;
+    const symbolAllowance = includeSymbols ? _pmCfg().maxSymbolKeys : 0;
+    if (extraProperties.length > maxProperties + symbolAllowance) {
+      throw new InvalidParameterError(
+        `Array object has too many own properties (max ${maxProperties}).`,
+      );
+    }
+    for (const [, v] of extraProperties) {
+      validateTransferables(
+        v,
+        allowTransferables,
+        allowTypedArrays,
+        depth + 1,
+        maxDepth,
+        visited,
+        state,
       );
     }
     return;
   }
 
-  for (const key of Object.keys(payload as Record<string, unknown>)) {
-    try {
-      const desc = Object.getOwnPropertyDescriptor(
-        payload as Record<string, unknown>,
-        key,
-      );
-      if (desc && Object.hasOwn(desc, "value")) {
-        const descValue = desc.value as unknown;
-        validateTransferables(
-          descValue,
-          allowTransferables,
-          allowTypedArrays,
-          depth + 1,
-          maxDepth,
-          visited,
-        );
-      }
-    } catch {
-      continue;
-    }
+  // Validate all own data properties (including non-enumerable and symbols) without invoking getters
+  const includeSymbols = _pmCfg().includeSymbolKeysInSanitizer === true;
+  const properties = getOwnDataPropertyEntries(payload).filter(([k]) =>
+    typeof k === "symbol" ? includeSymbols : true,
+  );
+  const maxKeys =
+    _pmCfg().maxObjectKeys + (includeSymbols ? _pmCfg().maxSymbolKeys : 0);
+  if (properties.length > maxKeys) {
+    throw new InvalidParameterError(
+      `Object has too many properties (max ${maxKeys}).`,
+    );
+  }
+  for (const [, v] of properties) {
+    validateTransferables(
+      v,
+      allowTransferables,
+      allowTypedArrays,
+      depth + 1,
+      maxDepth,
+      visited,
+      state,
+    );
   }
 }
 
@@ -344,12 +481,14 @@ function validateTransferables(
  * Converts objects to null-prototype objects to prevent prototype pollution attacks.
  * Also enforces depth limits and strips forbidden keys.
  */
-/* eslint-disable-next-line sonarjs/cognitive-complexity -- Defensive conversions and filtering require explicit branches to stay auditable. */
+// eslint-disable-next-line sonarjs/cognitive-complexity -- Audited: prototype-pollution hardening with descriptor guards; splitting risks inconsistencies. Thoroughly tested.
 function toNullProto(
   object: unknown,
   depth = 0,
   maxDepth = POSTMESSAGE_MAX_PAYLOAD_DEPTH,
   visited?: WeakSet<object>,
+  nodesLeft?: number,
+  state?: TraversalNodes,
 ): unknown {
   if (depth > maxDepth) {
     throw new InvalidParameterError(
@@ -395,15 +534,32 @@ function toNullProto(
 
   // Use a WeakSet per top-level invocation to detect cycles.
   visited ??= new WeakSet<object>();
+  // Initialize and enforce a global traversal node budget shared across recursion
+  const cfg = _pmCfg();
+  state ??= { nodes: nodesLeft ?? cfg.maxTraversalNodes } as TraversalNodes;
+  const mut = state as Mutable<TraversalNodes>;
+  mut.nodes -= 1;
+  if (state.nodes < 0) {
+    throw new InvalidParameterError(
+      `Payload traversal exceeds node budget of ${cfg.maxTraversalNodes}.`,
+    );
+  }
   if (visited.has(object)) {
     throw new InvalidParameterError("Circular reference detected in payload.");
   }
   visited.add(object);
 
   if (Array.isArray(object)) {
+    const maxItems = cfg.maxArrayItems;
+    const array = object as readonly unknown[];
+    if (array.length > maxItems) {
+      throw new InvalidParameterError(
+        `Array has too many items (max ${maxItems}).`,
+      );
+    }
     // Map children using the same visited set so cycles across array/object are detected.
-    const mapped = (object as readonly unknown[]).map((item) =>
-      toNullProto(item, depth + 1, maxDepth, visited),
+    const mapped = array.map((item) =>
+      toNullProto(item, depth + 1, maxDepth, visited, undefined, state),
     );
     return mapped;
   }
@@ -414,9 +570,27 @@ function toNullProto(
     string,
     unknown
   >;
-  // iterate string keys only; ignore symbol-keyed properties to avoid
-  // invoking exotic symbol-based traps or leaking internals
-  for (const key of Object.keys(object as Record<string, unknown>)) {
+  // Iterate over both string and symbol own data properties while avoiding accessors
+  const stringKeysAll = Object.getOwnPropertyNames(object);
+  const symbolKeysAll = Object.getOwnPropertySymbols(
+    object as object,
+  ) as readonly symbol[];
+  const maxStringKeys = cfg.maxObjectKeys;
+  const maxSymbolKeys = cfg.maxSymbolKeys;
+  if (stringKeysAll.length > maxStringKeys) {
+    throw new InvalidParameterError(
+      `Object has too many string-keyed properties (max ${maxStringKeys}).`,
+    );
+  }
+  const includeSymbols = cfg.includeSymbolKeysInSanitizer === true;
+  if (includeSymbols && symbolKeysAll.length > maxSymbolKeys) {
+    throw new InvalidParameterError(
+      `Object has too many symbol-keyed properties (max ${maxSymbolKeys}).`,
+    );
+  }
+  const stringKeys = stringKeysAll;
+  const symbolKeys = includeSymbols ? symbolKeysAll : ([] as readonly symbol[]);
+  for (const key of stringKeys) {
     // Use safe property access to avoid invoking getters
     let value: unknown;
     try {
@@ -424,23 +598,13 @@ function toNullProto(
         object as Record<string, unknown>,
         key,
       );
-      if (
-        desc &&
-        (typeof desc.get === "function" || typeof desc.set === "function")
-      ) {
-        // Skip accessor properties to avoid executing untrusted getters
+      if (!desc) continue; // skip non-own or otherwise unavailable descriptors
+      // Skip accessors to avoid invoking getters
+      if (typeof desc.get === "function" || typeof desc.set === "function")
         continue;
-      }
-      if (desc && Object.hasOwn(desc, "value")) {
-        const descValueValue = desc.value as unknown;
-        value = descValueValue;
-      } else {
-        // Fallback, but guard in try/catch
-        const oRec = object as Record<string, unknown>;
-        value = oRec[key];
-      }
+      if (!Object.prototype.hasOwnProperty.call(desc, "value")) continue;
+      value = desc.value as unknown;
     } catch (error: unknown) {
-      // If property access throws, skip it but log best-effort in dev
       try {
         secureDevelopmentLog(
           "warn",
@@ -460,11 +624,45 @@ function toNullProto(
     }
 
     // Additional defensive check for prototype-related keys
-    if (key === "__proto__" || key === "constructor" || key === "prototype") {
+    if (key === "__proto__" || key === "constructor" || key === "prototype")
       continue;
-    }
 
-    out[key] = toNullProto(value, depth + 1, maxDepth, visited);
+    out[key] = toNullProto(
+      value,
+      depth + 1,
+      maxDepth,
+      visited,
+      undefined,
+      state,
+    );
+  }
+
+  // Copy over symbol-keyed data properties as well (defense-in-depth). Accessors are skipped.
+  try {
+    for (const sym of symbolKeys) {
+      try {
+        const desc = Object.getOwnPropertyDescriptor(object as object, sym);
+        if (
+          !desc ||
+          typeof desc.get === "function" ||
+          typeof desc.set === "function" ||
+          !Object.prototype.hasOwnProperty.call(desc, "value")
+        )
+          continue;
+        (out as unknown as Record<symbol, unknown>)[sym] = toNullProto(
+          (desc as PropertyDescriptor).value as unknown,
+          depth + 1,
+          maxDepth,
+          visited,
+          undefined,
+          state,
+        );
+      } catch {
+        /* ignore symbol copy errors */
+      }
+    }
+  } catch {
+    /* ignore */
   }
 
   return out;
@@ -481,7 +679,7 @@ function isHostnameLocalhost(hostname: string): boolean {
 }
 
 // Iterative deep-freeze with node budget to avoid deep recursion and DoS via wide structures.
-/* eslint-disable-next-line sonarjs/cognitive-complexity -- Iterative deep-freeze avoids recursion risks and requires controlled mutation locally. */
+// eslint-disable-next-line sonarjs/cognitive-complexity -- Audited: iterative deep-freeze with DoS budget and best-effort logging. Refactoring would obscure invariants.
 function deepFreeze<T>(
   object: T,
   nodeBudget = DEFAULT_DEEP_FREEZE_NODE_BUDGET,
@@ -652,6 +850,383 @@ function sendJsonMessage(
  * Sends a structured clone message with security validation.
  */
 
+function assertStructuredOptions(
+  options: SecurePostMessageOptions,
+  sanitizeOutgoing: boolean,
+): { allowTransferables: boolean; allowTypedArrays: boolean } {
+  const allowTransferables = options.allowTransferables ?? false;
+  const allowTypedArrays = options.allowTypedArrays ?? false;
+  if (sanitizeOutgoing && allowTypedArrays) {
+    throw new InvalidParameterError(
+      "Incompatible options: sanitize=true is incompatible with allowTypedArrays=true. " +
+        "To send TypedArray/DataView/ArrayBuffer, set sanitize=false and ensure allowTypedArrays=true.",
+    );
+  }
+  return { allowTransferables, allowTypedArrays };
+}
+
+// Removed unused isJsonSerializablePrimitive helper (previously used only by a removed projection function)
+
+function estimateStructuredPayloadSizeBytes(
+  value: unknown,
+  sanitized: boolean,
+): number | undefined {
+  try {
+    if (!sanitized) {
+      const approx = estimateApproximateSizeBytesBounded(value);
+      return typeof approx === "number" ? approx : undefined;
+    }
+    const stable = stableStringify(
+      value,
+      POSTMESSAGE_MAX_PAYLOAD_DEPTH,
+      _pmCfg().maxTraversalNodes,
+    );
+    if (stable.ok) return SHARED_ENCODER.encode(stable.s).length;
+  } catch {
+    /* ignore estimation errors */
+  }
+  return undefined;
+}
+
+// Best-effort, bounded approximate size estimator for sanitize=false path.
+// - Enforces depth and node budgets
+// - Limits breadth for arrays and objects to prevent DoS
+// - Skips accessors to avoid invoking getters
+// Returns a number on success, or +Infinity to force rejection when limits exceeded.
+function estimateApproximateSizeBytesBounded(
+  value: unknown,
+): number | undefined {
+  try {
+    const INF = Number.POSITIVE_INFINITY;
+    const DEPTH_LIMIT = POSTMESSAGE_MAX_PAYLOAD_DEPTH;
+    const cfg = _pmCfg();
+    const NODE_BUDGET = cfg.maxTraversalNodes;
+    const MAX_ARRAY_ITEMS = cfg.maxArrayItems;
+    const MAX_OBJECT_KEYS = cfg.maxObjectKeys;
+
+    const visit = (
+      v: unknown,
+      depth: number,
+      nodesLeft: number,
+      seen: WeakSet<object>,
+    ): { readonly bytes: number; readonly nodesLeft: number } => {
+      if (nodesLeft <= 0 || depth > DEPTH_LIMIT)
+        return { bytes: INF, nodesLeft };
+      if (v === null) return { bytes: 8, nodesLeft: nodesLeft - 1 };
+      const t = typeof v;
+      if (t !== "object") {
+        return {
+          bytes: t === "string" ? (v as string).length : 8,
+          nodesLeft: nodesLeft - 1,
+        };
+      }
+      const object = v as object;
+      if (seen.has(object)) return { bytes: INF, nodesLeft };
+      seen.add(object);
+      // Treat typed arrays and ArrayBuffers as terminal nodes with byteLength
+      try {
+        if (isArrayBufferViewSafe(v)) {
+          const view = v as ArrayBufferView;
+          return { bytes: 2 + view.byteLength, nodesLeft: nodesLeft - 1 };
+        }
+      } catch {
+        /* ignore */
+      }
+      const ctorName = safeCtorName(v);
+      if (ctorName === "ArrayBuffer" || ctorName === "SharedArrayBuffer") {
+        try {
+          const length =
+            (v as { readonly byteLength?: number }).byteLength ?? 0;
+          return { bytes: 2 + length, nodesLeft: nodesLeft - 1 };
+        } catch {
+          return { bytes: INF, nodesLeft };
+        }
+      }
+      if (Array.isArray(v)) {
+        const array = v as readonly unknown[];
+        const lim = Math.min(array.length, MAX_ARRAY_ITEMS);
+        const result = (array as readonly unknown[]).slice(0, lim).reduce(
+          (
+            accumulator: { readonly bytes: number; readonly nodesLeft: number },
+            item,
+          ) => {
+            const next = visit(item, depth + 1, accumulator.nodesLeft, seen);
+            const sum = accumulator.bytes + next.bytes;
+            if (!Number.isFinite(sum))
+              return { bytes: INF, nodesLeft: 0 } as const;
+            return { bytes: sum, nodesLeft: next.nodesLeft } as const;
+          },
+          { bytes: 2, nodesLeft: nodesLeft - 1 } as const,
+        );
+        const extra = array.length > lim ? (array.length - lim) * 2 : 0;
+        const total = result.bytes + extra;
+        return { bytes: total, nodesLeft: result.nodesLeft };
+      }
+      // object path: enumerable own data properties only (skip accessors)
+      const names = Object.getOwnPropertyNames(
+        object as Record<string, unknown>,
+      );
+      const lim = Math.min(names.length, MAX_OBJECT_KEYS);
+      const values = names
+        .slice(0, lim)
+        .map((k) =>
+          Object.getOwnPropertyDescriptor(object as Record<string, unknown>, k),
+        )
+        .filter(
+          (d): d is PropertyDescriptor =>
+            !!d &&
+            typeof d.get !== "function" &&
+            typeof d.set !== "function" &&
+            !!d.enumerable &&
+            Object.prototype.hasOwnProperty.call(d, "value"),
+        )
+        .map((d) => d.value as unknown);
+      const result = values.reduce(
+        (
+          accumulator: { readonly bytes: number; readonly nodesLeft: number },
+          item,
+          index,
+        ) => {
+          const next = visit(item, depth + 1, accumulator.nodesLeft, seen);
+          const keyLength = names[index] ? names[index]!.length : 0;
+          const sum = accumulator.bytes + next.bytes + keyLength;
+          if (!Number.isFinite(sum))
+            return { bytes: INF, nodesLeft: 0 } as const;
+          return { bytes: sum, nodesLeft: next.nodesLeft } as const;
+        },
+        { bytes: 2, nodesLeft: nodesLeft - 1 } as const,
+      );
+      return result;
+    };
+
+    const initialSeen = new WeakSet<object>();
+    const result = visit(value, 0, NODE_BUDGET, initialSeen);
+    return result.bytes;
+  } catch {
+    return undefined;
+  }
+}
+
+function prepareStructuredPayload(
+  raw: unknown,
+  sanitizeOutgoing: boolean,
+  allowTransferables: boolean,
+  allowTypedArrays: boolean,
+): unknown {
+  // Validate transferables before any processing
+  try {
+    validateTransferables(raw, allowTransferables, allowTypedArrays);
+  } catch (error: unknown) {
+    if (error instanceof TransferableNotAllowedError) throw error;
+    throw new InvalidParameterError(
+      "Payload validation failed: " +
+        String((error as Error)?.message ?? String(error)),
+    );
+  }
+
+  if (!sanitizeOutgoing) return raw;
+  try {
+    return toNullProto(raw);
+  } catch (error: unknown) {
+    if (error instanceof TransferableNotAllowedError) throw error;
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    throw new InvalidParameterError(
+      "Structured-clone payload contains unsupported host objects or circular references: " +
+        errorMessage,
+    );
+  }
+}
+
+function processStructuredPayload(
+  targetWindow: Window,
+  payload: unknown,
+  targetOrigin: string,
+  sanitizeOutgoing: boolean,
+  allowTransferables: boolean,
+  allowTypedArrays: boolean,
+): void {
+  const prepared = prepareStructuredPayload(
+    payload,
+    sanitizeOutgoing,
+    allowTransferables,
+    allowTypedArrays,
+  );
+  // Enforce size cap.
+  // 1) Use estimator with traversal caps. If it returns Infinity or > cap, reject.
+  // 2) Regardless of estimator, perform a final strict byte-length check by encoding
+  //    a safe representation of `prepared` before posting. This guarantees byte-accurate
+  //    enforcement even when sanitize=false. We avoid deep serialization on exotic
+  //    types; for typed arrays and buffers, we count their byteLength directly.
+  const estimated = estimateStructuredPayloadSizeBytes(
+    prepared,
+    sanitizeOutgoing,
+  );
+  if (typeof estimated === "number") {
+    if (!Number.isFinite(estimated) || estimated > _pmCfg().maxPayloadBytes) {
+      throw new InvalidParameterError(
+        `Payload exceeds maximum size of ${_pmCfg().maxPayloadBytes} bytes.`,
+      );
+    }
+  }
+
+  // Strict final byte-accurate check. We attempt to compute a conservative
+  // byte length without fully serializing arbitrary objects when sanitize=false.
+  // Strategy:
+  // - If sanitized or JSON-serializable, use stableStringify for deterministic bytes.
+  // - Else, compute an upper bound by walking common containers and summing byte lengths
+  //   (typed arrays and buffers by byteLength; strings by UTF-8 length) under traversal caps.
+  const strictByteLength = ((): number | undefined => {
+    try {
+      if (sanitizeOutgoing) {
+        const stable = stableStringify(
+          prepared,
+          POSTMESSAGE_MAX_PAYLOAD_DEPTH,
+          _pmCfg().maxTraversalNodes,
+        );
+        if (stable.ok) return SHARED_ENCODER.encode(stable.s).length;
+      }
+    } catch {
+      /* fall through to conservative estimator */
+    }
+    // Fallback: compute conservative upper bound without serialization.
+    try {
+      const INF = Number.POSITIVE_INFINITY;
+      const DEPTH_LIMIT = POSTMESSAGE_MAX_PAYLOAD_DEPTH;
+      const cfg = _pmCfg();
+      const NODE_BUDGET = cfg.maxTraversalNodes;
+      const MAX_ARRAY_ITEMS = cfg.maxArrayItems;
+      const MAX_OBJECT_KEYS = cfg.maxObjectKeys;
+      const visit = (
+        v: unknown,
+        depth: number,
+        nodesLeft: number,
+        seen: WeakSet<object>,
+      ): { readonly bytes: number; readonly nodesLeft: number } => {
+        if (nodesLeft <= 0 || depth > DEPTH_LIMIT)
+          return { bytes: INF, nodesLeft };
+        if (v === null) return { bytes: 4, nodesLeft: nodesLeft - 1 };
+        const t = typeof v;
+        if (typeof v === "string")
+          return {
+            bytes: SHARED_ENCODER.encode(v).length,
+            nodesLeft: nodesLeft - 1,
+          };
+        if (t === "number" || t === "boolean")
+          return { bytes: 8, nodesLeft: nodesLeft - 1 };
+        if (t !== "object") return { bytes: 0, nodesLeft: nodesLeft - 1 };
+        const object = v as object;
+        if (seen.has(object)) return { bytes: INF, nodesLeft };
+        seen.add(object);
+        try {
+          if (isArrayBufferViewSafe(v)) {
+            const view = v as ArrayBufferView;
+            return { bytes: view.byteLength, nodesLeft: nodesLeft - 1 };
+          }
+        } catch {
+          /* ignore */
+        }
+        const ctor = safeCtorName(v);
+        if (ctor === "ArrayBuffer" || ctor === "SharedArrayBuffer") {
+          try {
+            const length =
+              (v as { readonly byteLength?: number }).byteLength ?? 0;
+            return { bytes: length, nodesLeft: nodesLeft - 1 };
+          } catch {
+            return { bytes: INF, nodesLeft };
+          }
+        }
+        if (Array.isArray(v)) {
+          const array = v as readonly unknown[];
+          const lim = Math.min(array.length, MAX_ARRAY_ITEMS);
+          const reduction = (array as readonly unknown[]).slice(0, lim).reduce(
+            (
+              accumulator: {
+                readonly bytes: number;
+                readonly nodesLeft: number;
+              },
+              item,
+            ) => {
+              const next = visit(item, depth + 1, accumulator.nodesLeft, seen);
+              const sum = accumulator.bytes + next.bytes;
+              if (!Number.isFinite(sum))
+                return { bytes: INF, nodesLeft: 0 } as const;
+              return { bytes: sum, nodesLeft: next.nodesLeft } as const;
+            },
+            { bytes: 0, nodesLeft: nodesLeft - 1 } as const,
+          );
+          // Penalize truncated tail minimally
+          const extra = array.length > lim ? (array.length - lim) * 1 : 0;
+          return {
+            bytes: reduction.bytes + extra,
+            nodesLeft: reduction.nodesLeft,
+          };
+        }
+        // object: enumerable own data properties only
+        const names = Object.getOwnPropertyNames(
+          object as Record<string, unknown>,
+        );
+        const lim = Math.min(names.length, MAX_OBJECT_KEYS);
+        const reduction = names.slice(0, lim).reduce(
+          (
+            accumulator: { readonly bytes: number; readonly nodesLeft: number },
+            name,
+            _index,
+          ) => {
+            const desc = Object.getOwnPropertyDescriptor(
+              object as Record<string, unknown>,
+              name,
+            );
+            if (
+              !desc ||
+              typeof desc.get === "function" ||
+              typeof desc.set === "function" ||
+              !desc.enumerable ||
+              !Object.prototype.hasOwnProperty.call(desc, "value")
+            )
+              return accumulator;
+            const keyBytes = SHARED_ENCODER.encode(name).length;
+            const next = visit(
+              desc.value,
+              depth + 1,
+              accumulator.nodesLeft,
+              seen,
+            );
+            const sum = accumulator.bytes + keyBytes + next.bytes;
+            if (!Number.isFinite(sum))
+              return { bytes: INF, nodesLeft: 0 } as const;
+            return { bytes: sum, nodesLeft: next.nodesLeft } as const;
+          },
+          { bytes: 0, nodesLeft: nodesLeft - 1 } as const,
+        );
+        return { bytes: reduction.bytes, nodesLeft: reduction.nodesLeft };
+      };
+      const result = visit(prepared, 0, NODE_BUDGET, new WeakSet<object>());
+      return result.bytes;
+    } catch {
+      return undefined;
+    }
+  })();
+
+  if (
+    typeof strictByteLength === "number" &&
+    (!Number.isFinite(strictByteLength) ||
+      strictByteLength > _pmCfg().maxPayloadBytes)
+  ) {
+    throw new InvalidParameterError(
+      `Payload exceeds maximum size of ${_pmCfg().maxPayloadBytes} bytes.`,
+    );
+  }
+  try {
+    targetWindow.postMessage(prepared, targetOrigin);
+  } catch (error: unknown) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    throw new InvalidParameterError(
+      "Failed to post structured payload: ensure payload is structured-cloneable: " +
+        errorMessage,
+    );
+  }
+}
+
 function sendStructuredMessage(
   options: SecurePostMessageOptions,
   targetWindow: Window,
@@ -661,64 +1236,18 @@ function sendStructuredMessage(
 ): void {
   // Structured: allow posting non-string data. 'auto' may be downgraded on receive.
   // By default we sanitize outgoing payloads to null-proto version to avoid prototype pollution.
-  const allowTransferablesOutgoing = options.allowTransferables ?? false;
-  const allowTypedArraysOutgoing = options.allowTypedArrays ?? false;
-
-  // Fail-fast on incompatible options combination
-  if (sanitizeOutgoing && allowTypedArraysOutgoing) {
-    throw new InvalidParameterError(
-      "Incompatible options: sanitize=true is incompatible with allowTypedArrays=true. " +
-        "To send TypedArray/DataView/ArrayBuffer, set sanitize=false and ensure allowTypedArrays=true.",
-    );
-  }
-
-  // Validate transferables before any processing
-  try {
-    validateTransferables(
-      payload,
-      allowTransferablesOutgoing,
-      allowTypedArraysOutgoing,
-    );
-  } catch (error: unknown) {
-    if (error instanceof TransferableNotAllowedError) {
-      throw error; // Re-throw specific transferable errors
-    }
-    throw new InvalidParameterError(
-      "Payload validation failed: " +
-        String((error as Error)?.message ?? String(error)),
-    );
-  }
-
-  if (sanitizeOutgoing) {
-    try {
-      const sanitized = toNullProto(payload);
-      // sanitized is a JSON-safe structure (null-proto or primitives)
-      targetWindow.postMessage(sanitized, targetOrigin);
-      return;
-    } catch (error: unknown) {
-      if (error instanceof TransferableNotAllowedError) {
-        throw error; // Re-throw transferable errors
-      }
-      const errorMessage =
-        error instanceof Error ? error.message : `${String(error)}`;
-      throw new InvalidParameterError(
-        "Structured-clone payload contains unsupported host objects or circular references: " +
-          errorMessage,
-      );
-    }
-  }
-  // If sanitize disabled, attempt to post as-is but transferables were already validated above
-  try {
-    // payload was validated for transferables above; assert safe typing for postMessage
-    targetWindow.postMessage(payload, targetOrigin);
-    return;
-  } catch (error: unknown) {
-    const errorMessage = error instanceof Error ? error.message : String(error);
-    throw new InvalidParameterError(
-      "Failed to post structured payload: ensure payload is structured-cloneable: " +
-        errorMessage,
-    );
-  }
+  const { allowTransferables, allowTypedArrays } = assertStructuredOptions(
+    options,
+    sanitizeOutgoing,
+  );
+  processStructuredPayload(
+    targetWindow,
+    payload,
+    targetOrigin,
+    sanitizeOutgoing,
+    allowTransferables,
+    allowTypedArrays,
+  );
 }
 
 export function sendSecurePostMessage(options: SecurePostMessageOptions): void {
@@ -755,7 +1284,6 @@ export function sendSecurePostMessage(options: SecurePostMessageOptions): void {
   throw new InvalidParameterError("Unsupported wireFormat");
 }
 
-/* eslint-disable-next-line sonarjs/cognitive-complexity -- Public API with explicit validation and guards; splitting would obscure invariants */
 export function createSecurePostMessageListener(
   allowedOriginsOrOptions:
     | readonly string[]
@@ -888,19 +1416,29 @@ export function createSecurePostMessageListener(
   // Build the canonical allowed origin set and an abort controller for the
   // event listener lifecycle. If any origin is invalid, collect them and
   // throw a single informative error.
-  /* eslint-disable functional/no-let -- Local validation loop; scoped to function */
-  let invalidOrigins: readonly string[] = [];
-  const allowedOriginSet = new Set<string>();
-  for (const o of allowedOrigins || []) {
+  const initialReduction: { allowed: Set<string>; invalid: string[] } = {
+    allowed: new Set<string>(),
+    invalid: [],
+  };
+  const originReduction = (allowedOrigins ?? []).reduce<{
+    allowed: Set<string>;
+    invalid: string[];
+  }>((accumulator, o) => {
     try {
       const n = normalizeOrigin(o);
-      /* eslint-disable-next-line functional/immutable-data -- Local set building; safe operation */
-      allowedOriginSet.add(n);
+      return {
+        allowed: new Set<string>([...accumulator.allowed, n]),
+        invalid: accumulator.invalid,
+      };
     } catch {
-      invalidOrigins = [...invalidOrigins, o];
+      return {
+        allowed: accumulator.allowed,
+        invalid: [...accumulator.invalid, o],
+      };
     }
-  }
-  /* eslint-enable functional/no-let */
+  }, initialReduction);
+  const allowedOriginSet = originReduction.allowed;
+  const invalidOrigins = originReduction.invalid as readonly string[];
   if (invalidOrigins.length > 0) {
     throw new InvalidParameterError(
       `Invalid allowedOrigins provided: ${invalidOrigins.join(", ")}`,
@@ -945,40 +1483,13 @@ export function createSecurePostMessageListener(
   }
 
   function freezePayloadIfNeeded(payload: unknown): void {
-    const shouldFreeze = finalOptions.freezePayload !== false; // default true
-    if (!shouldFreeze) return;
+    if (finalOptions.freezePayload === false) return; // default true: freeze
     if (payload == undefined || typeof payload !== "object") return;
     const asObject = payload;
-    const cache = getDeepFreezeCache();
     const nodeBudget =
       finalOptions.deepFreezeNodeBudget ?? DEFAULT_DEEP_FREEZE_NODE_BUDGET;
-    if (cache) {
-      if (!cache.has(asObject)) {
-        try {
-          deepFreeze(asObject, nodeBudget);
-        } catch (error: unknown) {
-          try {
-            secureDevelopmentLog(
-              "warn",
-              "postMessage",
-              "deepFreeze failed or budget exceeded while freezing payload",
-              { error: sanitizeErrorForLogs(error) },
-            );
-          } catch {
-            /* best-effort */
-          }
-        }
-        try {
-          cache.add(asObject);
-        } catch {
-          /* ignore */
-        }
-      }
-      return;
-    }
-    try {
-      deepFreeze(asObject, nodeBudget);
-    } catch (error: unknown) {
+
+    const logDeepFreezeIssue = (error: unknown): void => {
       try {
         secureDevelopmentLog(
           "warn",
@@ -989,6 +1500,27 @@ export function createSecurePostMessageListener(
       } catch {
         /* ignore */
       }
+    };
+
+    const cache = getDeepFreezeCache();
+    if (cache) {
+      if (cache.has(asObject)) return;
+      try {
+        deepFreeze(asObject, nodeBudget);
+      } catch (error: unknown) {
+        logDeepFreezeIssue(error);
+      }
+      try {
+        cache.add(asObject);
+      } catch {
+        /* ignore */
+      }
+      return;
+    }
+    try {
+      deepFreeze(asObject, nodeBudget);
+    } catch (error: unknown) {
+      logDeepFreezeIssue(error);
     }
   }
 
@@ -1043,10 +1575,11 @@ export function createSecurePostMessageListener(
         data,
         context,
       );
-    } catch (error: unknown) {
+    } catch (unknownError: unknown) {
+      const safeError = sanitizeErrorForLogs(unknownError);
       secureDevelopmentLog("error", "postMessage", "Listener handler error", {
         origin: event?.origin,
-        error: sanitizeErrorForLogs(error),
+        error: safeError,
       });
     }
   };
@@ -1088,14 +1621,15 @@ export function createSecurePostMessageListener(
         );
         return false;
       }
-    } catch (error: unknown) {
+    } catch (unknownError: unknown) {
+      const safeError = sanitizeErrorForLogs(unknownError);
       secureDevelopmentLog(
         "warn",
         "postMessage",
         "Dropped message due to invalid origin format",
         {
           origin: incoming,
-          error: sanitizeErrorForLogs(error),
+          error: safeError,
         },
       );
       return false;
@@ -1222,7 +1756,7 @@ export function createSecurePostMessageListener(
     void computeAndLog();
   }
 
-  /* eslint-disable-next-line sonarjs/cognitive-complexity -- Parsing logic with strict branches kept explicit to enforce security constraints */
+  // eslint-disable-next-line sonarjs/cognitive-complexity -- Audited: wire-format parsing with multiple guarded branches; kept linear for auditability.
   function parseMessageEventData(event: MessageEvent): unknown {
     const wireFormat = wireFormatLocal;
 
@@ -1241,6 +1775,10 @@ export function createSecurePostMessageListener(
           event.data,
           allowTransferablesLocal,
           allowTypedArraysLocal,
+          0,
+          POSTMESSAGE_MAX_PAYLOAD_DEPTH,
+          undefined,
+          { nodes: 0, transferables: 0 },
         );
       } catch (error: unknown) {
         if (error instanceof TransferableNotAllowedError) {
@@ -1288,7 +1826,7 @@ export function createSecurePostMessageListener(
       );
     }
     const byteLength = SHARED_ENCODER.encode(event.data).length;
-    if (byteLength > POSTMESSAGE_MAX_PAYLOAD_BYTES) {
+    if (byteLength > _pmCfg().maxPayloadBytes) {
       secureDevelopmentLog("warn", "postMessage", "Dropped oversized payload", {
         origin: event.origin,
       });
@@ -1363,8 +1901,8 @@ function stableStringify(
     if (++nodes > nodeBudget) throw new InvalidParameterError("budget");
     if (o === null || typeof o !== "object") return o;
     if (depth > maxDepth) throw new InvalidParameterError("depth");
-    if (seen.has(o as object)) throw new InvalidParameterError("circular");
-    seen.add(o as object);
+    if (seen.has(o)) throw new InvalidParameterError("circular");
+    seen.add(o);
     if (Array.isArray(o))
       return (o as readonly unknown[]).map((v) => norm(v, depth + 1));
     const keys = Object.keys(o as Record<string, unknown>).sort((a, b) =>
@@ -1437,73 +1975,72 @@ async function ensureFingerprintSalt(): Promise<Uint8Array> {
     true,
   );
 
-  _payloadFingerprintSaltPromise = (async () => {
+  const disableDiagnosticsInProduction = (error: unknown): never => {
+    try {
+      _diagnosticsDisabledDueToNoCryptoInProduction = true;
+    } catch {
+      /* ignore */
+    }
+    try {
+      secureDevelopmentLog(
+        "warn",
+        "postMessage",
+        "Secure crypto unavailable in production; disabling diagnostics that rely on non-crypto fallbacks",
+        { error: sanitizeErrorForLogs(error) },
+      );
+    } catch {
+      /* ignore */
+    }
+    throw new CryptoUnavailableError();
+  };
+
+  const generateDevelopmentSalt = (error: unknown): Uint8Array => {
+    try {
+      secureDevelopmentLog(
+        "warn",
+        "postMessage",
+        "Falling back to non-crypto fingerprint salt (dev/test only)",
+        { error: sanitizeErrorForLogs(error) },
+      );
+    } catch {
+      /* ignore */
+    }
+    const timeEntropy =
+      String(Date.now()) +
+      String(
+        typeof performance !== "undefined" &&
+          typeof performance.now === "function"
+          ? performance.now()
+          : 0,
+      );
+    const buf = new Uint8Array(FINGERPRINT_SALT_LENGTH);
+    /* eslint-disable functional/no-let, functional/immutable-data -- Local loop index and buffer initialization; scoped */
+    for (let index = 0; index < buf.length; index++) {
+      buf[index] = timeEntropy.charCodeAt(index % timeEntropy.length) & 0xff;
+    }
+    /* eslint-enable functional/no-let, functional/immutable-data */
+    return buf;
+  };
+
+  const generateSalt = async (): Promise<Uint8Array> => {
     try {
       const crypto = await ensureCrypto();
       const salt = new Uint8Array(FINGERPRINT_SALT_LENGTH);
       crypto.getRandomValues(salt);
-      _payloadFingerprintSalt = salt;
-      // Success: clear any previous failure timestamp so future attempts won't be blocked
-      _saltGenerationFailureTimestamp = undefined;
       return salt;
     } catch (error: unknown) {
-      // Record failure timestamp to engage cooldown and avoid thundering herd
       _saltGenerationFailureTimestamp = now();
-
-      // No secure crypto available: enforce security constitution.
-      if (environment.isProduction) {
-        try {
-          _diagnosticsDisabledDueToNoCryptoInProduction = true;
-        } catch {
-          /* ignore */
-        }
-        try {
-          secureDevelopmentLog(
-            "warn",
-            "postMessage",
-            "Secure crypto unavailable in production; disabling diagnostics that rely on non-crypto fallbacks",
-            { error: sanitizeErrorForLogs(error) },
-          );
-        } catch {
-          /* ignore */
-        }
-        throw new CryptoUnavailableError();
-      }
-
-      // Non-production (development/test) fallback: log and produce a
-      // deterministic, time-based salt to preserve testability.
-      try {
-        secureDevelopmentLog(
-          "warn",
-          "postMessage",
-          "Falling back to non-crypto fingerprint salt (dev/test only)",
-          {
-            error: sanitizeErrorForLogs(error),
-          },
-        );
-      } catch {
-        // best-effort logging
-      }
-      const timeEntropy =
-        String(Date.now()) +
-        String(
-          typeof performance !== "undefined" &&
-            typeof performance.now === "function"
-            ? performance.now()
-            : 0,
-        );
-      const buf = new Uint8Array(FINGERPRINT_SALT_LENGTH);
-      /* eslint-disable functional/no-let, functional/immutable-data -- Local loop index and buffer initialization; scoped */
-      for (let index = 0; index < buf.length; index++) {
-        buf[index] = timeEntropy.charCodeAt(index % timeEntropy.length) & 0xff;
-      }
-      /* eslint-enable functional/no-let, functional/immutable-data */
-
-      _payloadFingerprintSalt = buf;
-      // Clear failure timestamp on fallback success so we don't block future attempts
-      _saltGenerationFailureTimestamp = undefined;
-      return buf;
+      if (environment.isProduction)
+        return disableDiagnosticsInProduction(error);
+      return generateDevelopmentSalt(error);
     }
+  };
+
+  _payloadFingerprintSaltPromise = (async () => {
+    const salt = await generateSalt();
+    _payloadFingerprintSalt = salt;
+    _saltGenerationFailureTimestamp = undefined;
+    return salt;
   })();
 
   try {
@@ -1511,7 +2048,6 @@ async function ensureFingerprintSalt(): Promise<Uint8Array> {
     return saltResult;
   } finally {
     // clear promise so subsequent calls go fast (salt is cached)
-
     _payloadFingerprintSaltPromise = undefined;
   }
 }
@@ -1583,7 +2119,7 @@ async function getPayloadFingerprint(data: unknown): Promise<string> {
   const stable = stableStringify(
     sanitized,
     POSTMESSAGE_MAX_PAYLOAD_DEPTH,
-    DEFAULT_DEEP_FREEZE_NODE_BUDGET,
+    _pmCfg().maxTraversalNodes,
   );
   if (!stable.ok) {
     // If canonicalization fails, return an explicit error token in prod or a fallback in dev
@@ -1598,7 +2134,7 @@ async function getPayloadFingerprint(data: unknown): Promise<string> {
   }
   // Encode as UTF-8 bytes and truncate by bytes to avoid splitting multi-byte chars
   const fullBytes = SHARED_ENCODER.encode(stable.s);
-  const payloadBytes = fullBytes.slice(0, POSTMESSAGE_MAX_PAYLOAD_BYTES);
+  const payloadBytes = fullBytes.slice(0, _pmCfg().maxPayloadBytes);
   return computeFingerprintFromBytes(payloadBytes);
 }
 
@@ -1785,10 +2321,8 @@ export const __test_internals:
             }
             // Explicitly allowed via flags: proceed without calling development guard.
           } else {
-            /* eslint-disable-next-line @typescript-eslint/no-unsafe-call -- Runtime guard ensures request is a function; test environment only */
-            const developmentGuards = (request as Function)(
-              "./development-guards",
-            ) as {
+            const invoke = request as unknown as (id: string) => unknown;
+            const developmentGuards = invoke("./development-guards") as {
               readonly assertTestApiAllowed: () => void;
             };
             developmentGuards.assertTestApiAllowed();

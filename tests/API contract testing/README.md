@@ -1,0 +1,3 @@
+#### API Contract Testing
+While related to integration testing, contract testing is more specific. It verifies that the public-facing API of your library (the "provider") adheres to a defined "contract." This ensures that if you change the internal workings of a function, you don't accidentally break things for the developers (the "consumers") using it.
+*   **Why it's for you:** It provides a strong guarantee of stability for the developers who depend on your library, ensuring that you don't introduce breaking changes unintentionally.
