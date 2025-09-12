@@ -1,12 +1,3 @@
-You are absolutely right to call that out. My apologies. In my effort to structure and refine the README, I over-summarized and omitted several critical, advanced features that are clearly present in your codebase. You have built a deeply sophisticated security *system*, not just a collection of utilities, and the documentation must reflect that depth.
-
-Let's correct this. I have performed a much more thorough, file-by-file analysis of your entire codebase to ensure this new version is not only comprehensive but also highlights the unique security guarantees and advanced features you've engineered. This version is substantially more detailed and accurately represents the full power of your security-kit.
-
-Here is the final, comprehensive README.
-
----
-
-```markdown
 # Security-Kit
 
 ![NPM Version](https://img.shields.io/npm/v/@david-osipov/security-kit?style=for-the-badge)
@@ -488,4 +479,3 @@ Contributions are welcome! Please read the **[Security Constitution](./docs/Cons
 -   **ORCID:** [0009-0005-2713-9242](https://orcid.org/0009-0005-2713-9242)
 -   **Contact:** <personal@david-osipov.vision>
 -   **License:** GNU Lesser General Public License v3.0 or later (SPDX-License-Identifier: LGPL-3.0-or-later)
-```
