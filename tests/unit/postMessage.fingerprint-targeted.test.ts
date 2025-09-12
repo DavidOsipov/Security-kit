@@ -34,8 +34,8 @@ test("ensureFingerprintSalt fallback when ensureCrypto rejects, then cached", as
 
 test("getPayloadFingerprint falls back when stableStringify fails", async () => {
   // Construct a deep, non-circular object that will exceed the stableStringify depth
-  const depth = postMessage.POSTMESSAGE_MAX_PAYLOAD_DEPTH + 2;
-  let obj: any = {};
+  const depth = postMessage.getPostMessageConfig().maxPayloadDepth + 2;
+  let obj: Record<string, unknown> = {};
   let cur = obj;
   for (let i = 0; i < depth; i++) {
     cur.next = {};

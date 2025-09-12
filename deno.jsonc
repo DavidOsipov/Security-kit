@@ -1,0 +1,47 @@
+{
+  // Deno + JSR configuration for Security-kit
+  "name": "@david-osipov/security-kit",
+  "version": "0.7.1",
+  "lock": true,
+  // Use built outputs for now to avoid refactoring TS import extensions.
+  "exports": {
+    ".": "./dist/index.mjs",
+    "./test-internals": "./dist/test-internals.mjs",
+    "./worker": "./dist/worker/signing-worker.mjs",
+    "./server": "./dist/server/verify-api-request-signature.mjs",
+    "./server/nonce-store": "./dist/server/nonce-store.mjs",
+    "./server/redis-nonce-store": "./dist/server/redis-nonce-store.mjs"
+  },
+  "publish": {
+    "include": [
+      "LICENSE",
+      "README.md",
+      "dist/**/*.mjs",
+      "dist/**/*.cjs",
+      "dist/**/*.d.ts"
+    ]
+  },
+  "fmt": {
+    "lineWidth": 100,
+    "useTabs": false
+  },
+  "lint": {
+    "rules": { "tags": ["recommended"] }
+  },
+  "nodeModulesDir": "auto",
+  "compilerOptions": {
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true
+  },
+  "tasks": {
+    // Hardened build: run tsup inside Deno sandbox with least privileges
+  "build": "npm run build",
+    // Runtime smoke tests (Deno) target dist output
+    "test": "deno task build && deno test -A deno_tests",
+    // Dry pack using Node; optional to run under Deno if desired
+    "pack:dry": "npm pack --dry-run",
+    // Optional JSR dry-run (if we later switch exports to TS source)
+    "publish:dry": "deno publish --dry-run"
+  }
+}

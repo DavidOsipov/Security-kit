@@ -2,8 +2,10 @@ import { describe, test, expect, vi, beforeEach, afterEach } from "vitest";
 
 // Set up test environment
 beforeEach(() => {
-  // Ensure test environment is properly configured
-  globalThis.process = { env: { SECURITY_KIT_ALLOW_TEST_APIS: "true" } } as any;
+  // Ensure test environment is properly configured and detected as non-production
+  globalThis.process = {
+    env: { SECURITY_KIT_ALLOW_TEST_APIS: "true", NODE_ENV: "test" },
+  } as any;
 });
 
 afterEach(() => {
@@ -90,6 +92,7 @@ describe("postMessage uncovered branches", () => {
       delete (globalThis as any).require;
 
       // Force re-evaluation by re-importing
+      vi.resetModules();
       const postMessage = await import("../../src/postMessage");
       const result = postMessage.__test_internals;
       // With __TEST__ build flag enabled, internals should still be exposed for tests
@@ -101,6 +104,7 @@ describe("postMessage uncovered branches", () => {
 
     test("__test_internals factory catches development guards errors", async () => {
       // Under test builds, __test_internals is exposed when dev guards pass
+      vi.resetModules();
       const postMessage = await import("../../src/postMessage");
       const result = postMessage.__test_internals;
       expect(result).toBeDefined();
@@ -108,12 +112,14 @@ describe("postMessage uncovered branches", () => {
 
     test("__test_internals factory catches assertTestApiAllowed errors", async () => {
       // Under test builds, __test_internals is exposed and guarded at callsites
+      vi.resetModules();
       const postMessage = await import("../../src/postMessage");
       const result = postMessage.__test_internals;
       expect(result).toBeDefined();
     });
 
     test("__test_internals factory succeeds when all conditions met", async () => {
+      vi.resetModules();
       const postMessage = await import("../../src/postMessage");
       const result = postMessage.__test_internals;
       expect(result).toBeDefined();

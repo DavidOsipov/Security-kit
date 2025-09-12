@@ -2,22 +2,23 @@
 // SPDX-FileCopyrightText: © 2025 David Osipov <personal@david-osipov.vision>
 // Module-style worker for performing HMAC signing in a separate thread.
 
-import { SHARED_ENCODER } from "../encoding";
-import type { InitMessage, SignRequest } from "../protocol";
+import { SHARED_ENCODER } from "../encoding.ts";
+import type { InitMessage, SignRequest } from "../protocol.ts";
 import {
   bytesToBase64,
   secureWipeWrapper,
   isLikelyBase64,
   isLikelyBase64Url,
-} from "../encoding-utils";
-import { getHandshakeConfig, setHandshakeConfig } from "../config";
-import { secureDevLog as secureDevelopmentLog } from "../utils";
-import { sanitizeErrorForLogs } from "../errors";
+} from "../encoding-utils.ts";
+import { getHandshakeConfig, setHandshakeConfig } from "../config.ts";
+import { secureDevLog as secureDevelopmentLog } from "../utils.ts";
+import { sanitizeErrorForLogs } from "../errors.ts";
+import { assertTestApiAllowed } from "../development-guards";
 import {
   createSecurePostMessageListener,
   isEventAllowedWithLock,
-} from "../postMessage";
-import type { NonceFormat } from "../constants";
+} from "../postMessage.ts";
+import type { NonceFormat } from "../constants.ts";
 
 // --- State Management ---
 
@@ -96,6 +97,10 @@ const { getCurrent, update: updateState } =
 
 // --- Message Handlers ---
 
+// Security hardening: acceptable secret key size bounds to mitigate DoS and weak keys
+const MIN_SECRET_BYTES = 16; // 128-bit minimum
+const MAX_SECRET_BYTES = 4096; // reasonable upper bound to prevent abuse
+
 // Attempt to reserve a concurrency slot without yielding; returns true if reserved
 function tryReserveSlotInline(): boolean {
   const { pendingCount, maxConcurrentSigning } = getCurrent();
@@ -107,7 +112,7 @@ function tryReserveSlotInline(): boolean {
 /**
  * Applies handshake configuration overrides from init message.
  */
-function applyHandshakeOverrides(options: InitMessage["workerOptions"]): void {
+function applyHandshakeOverrides(options?: InitMessage["workerOptions"]): void {
   if (
     typeof options?.handshakeMaxNonceLength === "number" ||
     Array.isArray(options?.allowedNonceFormats)
@@ -130,7 +135,7 @@ function applyHandshakeOverrides(options: InitMessage["workerOptions"]): void {
 /**
  * Applies rate limiting configuration from init message.
  */
-function applyRateLimitConfig(options: InitMessage["workerOptions"]): void {
+function applyRateLimitConfig(options?: InitMessage["workerOptions"]): void {
   if (typeof options?.rateLimitPerMinute === "number") {
     const rateLimit = Math.max(0, Math.floor(options.rateLimitPerMinute));
     // Respect explicit burst settings even if less than the per-minute rate.
@@ -152,7 +157,7 @@ function applyRateLimitConfig(options: InitMessage["workerOptions"]): void {
 /**
  * Applies development and logging configuration from init message.
  */
-function applyDevelopmentConfig(options: InitMessage["workerOptions"]): void {
+function applyDevelopmentConfig(options?: InitMessage["workerOptions"]): void {
   if (typeof options?.dev === "boolean") {
     updateState({ developmentLogging: options.dev });
   }
@@ -161,7 +166,7 @@ function applyDevelopmentConfig(options: InitMessage["workerOptions"]): void {
 /**
  * Applies concurrency configuration from init message.
  */
-function applyConcurrencyConfig(options: InitMessage["workerOptions"]): void {
+function applyConcurrencyConfig(options?: InitMessage["workerOptions"]): void {
   if (
     typeof options?.maxConcurrentSigning === "number" &&
     Number.isFinite(options.maxConcurrentSigning) &&
@@ -177,7 +182,7 @@ function applyConcurrencyConfig(options: InitMessage["workerOptions"]): void {
 /**
  * Applies canonical length configuration from init message.
  */
-function applyCanonicalConfig(options: InitMessage["workerOptions"]): void {
+function applyCanonicalConfig(options?: InitMessage["workerOptions"]): void {
   if (
     typeof options?.maxCanonicalLength === "number" &&
     Number.isFinite(options.maxCanonicalLength) &&
@@ -198,7 +203,7 @@ async function handleInitMessage(
   event?: MessageEvent,
 ): Promise<void> {
   const current = getCurrent();
-  if (current.initialized || current.initializing) {
+  if (current.initialized || current.initializing === true) {
     postMessage({ type: "error", reason: "already-initialized" });
     return;
   }
@@ -215,7 +220,76 @@ async function handleInitMessage(
     applyCanonicalConfig(options);
   }
 
-  if (!message.secretBuffer || !(message.secretBuffer instanceof ArrayBuffer)) {
+  // runtime-guard using an unknown-typed access to avoid false-positive
+  // @typescript-eslint/no-unnecessary_condition when InitMessage types are strict
+  const maybeSecret = (
+    message as unknown as { readonly secretBuffer?: unknown }
+  ).secretBuffer;
+  // Accept ArrayBuffer or ArrayBufferView (TypedArray/DataView). For views, copy
+  // into a fresh ArrayBuffer to allow deterministic wipe without affecting
+  // unrelated memory regions.
+  const secretForImport: ArrayBuffer | undefined = (() => {
+    try {
+      const isArrayBufferTag =
+        Object.prototype.toString.call(maybeSecret) === "[object ArrayBuffer]";
+      if (
+        (typeof ArrayBuffer !== "undefined" &&
+          maybeSecret instanceof ArrayBuffer) ||
+        isArrayBufferTag
+      ) {
+        // Enforce bounds for ArrayBuffer secrets
+        const ab = maybeSecret as ArrayBuffer;
+        if (
+          ab.byteLength < MIN_SECRET_BYTES ||
+          ab.byteLength > MAX_SECRET_BYTES
+        ) {
+          return;
+        }
+        return ab;
+      }
+      if (
+        typeof ArrayBuffer !== "undefined" &&
+        typeof ArrayBuffer.isView === "function" &&
+        ArrayBuffer.isView(maybeSecret as ArrayBufferView)
+      ) {
+        const view = maybeSecret as ArrayBufferView;
+        // Reject SharedArrayBuffer-backed views to avoid shared-memory hazards
+        try {
+          // Cross-runtime guard; instanceof is sufficient for same-realm
+          // detection and safe enough for our purposes.
+          if (
+            typeof SharedArrayBuffer !== "undefined" &&
+            view.buffer instanceof SharedArrayBuffer
+          ) {
+            return;
+          }
+        } catch {
+          // If detection fails, be conservative and reject
+          return;
+        }
+        const u8 = new Uint8Array(
+          view.buffer,
+          view.byteOffset,
+          view.byteLength,
+        );
+        if (
+          u8.byteLength < MIN_SECRET_BYTES ||
+          u8.byteLength > MAX_SECRET_BYTES
+        ) {
+          return;
+        }
+        const copy = new Uint8Array(u8.byteLength);
+        copy.set(u8);
+        return copy.buffer;
+      }
+    } catch {
+      // ignore and return undefined
+    }
+    return;
+  })();
+  if (!(secretForImport instanceof ArrayBuffer)) {
+    // Reset initializing to allow a valid subsequent init attempt
+    updateState({ initializing: false });
     postMessage({ type: "error", reason: "missing-secret" });
     return;
   }
@@ -248,9 +322,14 @@ async function handleInitMessage(
     }
   }
 
-  await importKey(message.secretBuffer);
-  updateState({ initialized: true, initializing: false });
-  postMessage({ type: "initialized" });
+  try {
+    await importKey(secretForImport);
+    updateState({ initialized: true });
+    postMessage({ type: "initialized" });
+  } finally {
+    // Always clear initializing flag even if importKey throws to avoid stuck state
+    updateState({ initializing: false });
+  }
 }
 
 /**
@@ -260,7 +339,8 @@ async function handleHandshakeRequest(
   messageData: unknown,
   event: MessageEvent,
 ): Promise<void> {
-  const replyPort = event?.ports?.[0] as MessagePort | undefined;
+  // Safely access potential reply port; not all environments/tests provide ports
+  const replyPort: MessagePort | undefined = getReplyPort(event);
   if (!isHandshakeMessage(messageData) || !replyPort) {
     postMessage({ type: "error", reason: "invalid-handshake" });
     return;
@@ -284,7 +364,7 @@ async function handleHandshakeRequest(
           case "base64url":
             return isLikelyBase64Url(messageData.nonce);
           case "hex":
-            return /^[0-9a-f]+$/i.test(messageData.nonce);
+            return /^[0-9a-f]+$/iu.test(messageData.nonce);
           default:
             return false;
         }
@@ -328,8 +408,12 @@ async function handleSignRequest(
   signMessage: SignRequest,
   event: MessageEvent,
 ): Promise<void> {
-  const { requestId, canonical } = signMessage;
-  const replyPort = event?.ports?.[0] as MessagePort | undefined;
+  const { requestId, canonical } = signMessage as {
+    readonly requestId: unknown;
+    readonly canonical: unknown;
+  } as SignRequest;
+  // Safely access potential reply port; not all environments/tests provide ports
+  const replyPort: MessagePort | undefined = getReplyPort(event);
 
   // Reject new requests if the worker is shutting down.
   if (getCurrent().shuttingDown) {
@@ -399,6 +483,16 @@ function validateSignParameters(
     const message = {
       type: "error",
       requestId: typeof requestId === "number" ? requestId : undefined,
+      reason: "invalid-params",
+    } as const;
+    if (replyPort) replyPort.postMessage(message);
+    else postMessage(message);
+    return false;
+  }
+  if (!isCanonicalStringAllowed(canonical)) {
+    const message = {
+      type: "error",
+      requestId,
       reason: "invalid-params",
     } as const;
     if (replyPort) replyPort.postMessage(message);
@@ -518,6 +612,27 @@ async function doSign(
 
 // --- Utility Functions & Type Guards ---
 
+// Hardening: forbid C0 control characters and DEL in canonical strings
+function isCanonicalStringAllowed(s: string): boolean {
+  try {
+    // Iterate code units: reject <= 0x1F and 0x7F
+    {
+      // Use a while loop with explicit index to satisfy style rules
+      const length = s.length;
+      // eslint-disable-next-line functional/no-let -- controlled loop counter for validation
+      let index = 0;
+      while (index < length) {
+        const code = s.charCodeAt(index);
+        if (code <= 0x1f || code === 0x7f) return false;
+        index++;
+      }
+    }
+    return true;
+  } catch {
+    return false; // fail-closed on unexpected errors
+  }
+}
+
 async function importKey(raw: ArrayBuffer): Promise<void> {
   try {
     const key = await crypto.subtle.importKey(
@@ -556,26 +671,62 @@ function isHandshakeMessage(data: unknown): data is { readonly nonce: string } {
   );
 }
 
+// Safe helper to extract the first reply port from a MessageEvent if present
+function getReplyPort(
+  event: MessageEvent | undefined,
+): MessagePort | undefined {
+  try {
+    if (!event) return undefined;
+    const candidate = (
+      event as unknown as Readonly<{ readonly ports?: unknown }>
+    ).ports;
+    if (Array.isArray(candidate) && candidate.length > 0) {
+      const first: unknown = candidate[0];
+      // Basic duck-typing: ensure it has postMessage
+      if (
+        first !== null &&
+        typeof first === "object" &&
+        typeof (first as MessagePort).postMessage === "function"
+      ) {
+        return first as MessagePort;
+      }
+    }
+  } catch {
+    // ignore errors and return undefined
+  }
+  return undefined;
+}
+
+// Local helper: safely read environment variables across Node/browser without
+// unsafe any casts or unnecessary optional chaining on known non-nullish types.
+function getEnvironmentVariable(name: string): string | undefined {
+  try {
+    if (typeof process === "undefined") return undefined;
+    // Security: validate property name to prevent prototype pollution
+    if (
+      typeof name !== "string" ||
+      name === "__proto__" ||
+      name === "constructor" ||
+      name === "prototype"
+    ) {
+      return undefined;
+    }
+    const environment_ = process.env as Record<string, string> | undefined;
+    if (!environment_ || !Object.hasOwn(environment_, name)) {
+      return undefined;
+    }
+    // Security: use Reflect.get with validated property name to prevent injection
+    const v = Reflect.get(environment_, name);
+    return typeof v === "string" ? v : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 // Runtime guard for exposing test-only helpers
 function _assertTestApiAllowedInlineWorker(): void {
-  try {
-    // allow in non-production or when explicit allow flag is set
-    const environmentAllow =
-      typeof process !== "undefined" &&
-      process?.env?.["SECURITY_KIT_ALLOW_TEST_APIS"] === "true";
-    const globalAllow = !!(globalThis as unknown as Record<string, unknown>)[
-      "__SECURITY_KIT_ALLOW_TEST_APIS"
-    ];
-    // If either allow is set, permit; otherwise restrict access
-    if (environmentAllow || globalAllow) return;
-    throw new Error(
-      "Test-only APIs are disabled. Set SECURITY_KIT_ALLOW_TEST_APIS=true to enable.",
-    );
-  } catch {
-    throw new Error(
-      "Test-only APIs are disabled. Set SECURITY_KIT_ALLOW_TEST_APIS=true to enable.",
-    );
-  }
+  // Delegate to central guard to ensure consistent policy and typed errors.
+  assertTestApiAllowed();
 }
 
 // Export a test helper that is gated at runtime via environment flags to avoid relying on
@@ -586,20 +737,18 @@ export const __test_validateHandshakeNonce:
   | undefined = (() => {
   try {
     const isTestEnvironment =
-      typeof process !== "undefined" &&
-      (process?.env?.["NODE_ENV"] === "test" ||
-        process?.env?.["SECURITY_KIT_ALLOW_TEST_APIS"] === "true");
-    const isGlobalTestFlag = !!(
-      globalThis as unknown as Record<string, unknown>
-    )["__SECURITY_KIT_ALLOW_TEST_APIS"];
+      getEnvironmentVariable("NODE_ENV") === "test" ||
+      getEnvironmentVariable("SECURITY_KIT_ALLOW_TEST_APIS") === "true";
+    const globalTestValue = (globalThis as unknown as Record<string, unknown>)[
+      "__SECURITY_KIT_ALLOW_TEST_APIS"
+    ];
+    const isGlobalTestFlag = Boolean(globalTestValue);
 
     return isTestEnvironment || isGlobalTestFlag
       ? (nonce: string): boolean => {
           try {
             // Emit a loud warning when invoked outside strict test mode to ensure visibility
-            const inStrictTest =
-              typeof process !== "undefined" &&
-              process?.env?.["NODE_ENV"] === "test";
+            const inStrictTest = getEnvironmentVariable("NODE_ENV") === "test";
             if (!inStrictTest) {
               try {
                 console.warn(
@@ -622,7 +771,7 @@ export const __test_validateHandshakeNonce:
                 case "base64url":
                   return isLikelyBase64Url(nonce);
                 case "hex":
-                  return /^[0-9a-f]+$/i.test(nonce);
+                  return /^[0-9a-f]+$/iu.test(nonce);
                 default:
                   return false;
               }
@@ -633,7 +782,7 @@ export const __test_validateHandshakeNonce:
         }
       : undefined;
   } catch {
-    return undefined;
+    return;
   }
 })();
 
@@ -663,7 +812,7 @@ function workerMessageValidator(data: unknown): boolean {
         const hasArrayBufferView =
           typeof ArrayBuffer !== "undefined" &&
           typeof ArrayBuffer.isView === "function" &&
-          ArrayBuffer.isView(d.secretBuffer as unknown as ArrayBufferView);
+          ArrayBuffer.isView(d.secretBuffer as ArrayBufferView);
         return (
           typeof d["type"] === "string" &&
           (hasArrayBuffer || hasArrayBufferView)
@@ -700,6 +849,7 @@ createSecurePostMessageListener({
   validate: workerMessageValidator,
   wireFormat: "structured",
   allowTypedArrays: true,
+  // Make handler truly async so tests that await the listener wait for processing completion
   onMessage: async (data: unknown, context) => {
     try {
       // Basic shape check
@@ -711,7 +861,7 @@ createSecurePostMessageListener({
       // Respect established allowed origin: the central listener already
       // enforces the allowedOrigins, but we preserve worker-level locking
       // behavior by capturing the origin during init.
-      const event = context?.event as MessageEvent | undefined;
+      const event = context?.event;
 
       // If the worker has no locked inbound origin, allow init to set it when
       // provided via the original event context.
@@ -733,8 +883,9 @@ createSecurePostMessageListener({
             "signing-worker",
             "rejected-message-origin",
             {
-              origin: event?.origin ?? undefined,
-              ports: (event?.ports || []).length,
+              origin:
+                typeof event.origin === "string" ? event.origin : undefined,
+              ports: event.ports.length,
             },
           );
         }

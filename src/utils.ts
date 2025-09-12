@@ -7,16 +7,16 @@ import {
   IllegalStateError,
   InvalidParameterError,
   InvalidConfigurationError,
-} from "./errors";
-import { environment, isDevelopment } from "./environment";
-import { ensureCrypto, getCryptoState, CryptoState } from "./state";
-import { SHARED_ENCODER } from "./encoding";
+} from "./errors.ts";
+import { environment, isDevelopment } from "./environment.ts";
+import { ensureCrypto, getCryptoState, CryptoState } from "./state.ts";
+import { SHARED_ENCODER } from "./encoding.ts";
 import {
   getLoggingConfig,
   getCanonicalConfig,
   getTimingConfig,
-} from "./config";
-import { setDevelopmentLogger_ } from "./dev-logger";
+} from "./config.ts";
+import { setDevelopmentLogger_ } from "./dev-logger.ts";
 
 // --- Internal types used in this module ---
 type GlobalWithSharedArrayBuffer = {
@@ -48,17 +48,34 @@ const ALLOWED_TAG_KEYS = new Set([
   "subtlePresent",
   "safe",
 ]);
-const METRIC_NAME_REGEX = /^[\w.-]{1,64}$/;
+const METRIC_NAME_REGEX = /^[\w.-]{1,64}$/u;
 
 function sanitizeMetricTags(tags: unknown): Record<string, string> | undefined {
-  if (!tags || typeof tags !== "object") return undefined;
+  if (tags === null || tags === undefined || typeof tags !== "object")
+    return undefined;
   const source = tags as Record<string, unknown>;
   const entries = Object.keys(source)
     .filter((key) => ALLOWED_TAG_KEYS.has(key))
     .map((key) => {
-      const value = source[key];
-      if (value === undefined) return undefined; // filter later
-      const stringValue = String(value).slice(0, 64);
+      const value = Object.hasOwn(source, key)
+        ? ((): unknown => {
+            const descriptor = Object.getOwnPropertyDescriptor(source, key);
+            return descriptor?.value;
+          })()
+        : undefined;
+      if (value === undefined) return; // filter later
+      // Avoid base object stringification; only stringify primitives explicitly.
+      const raw = (() => {
+        if (typeof value === "string") return value;
+        if (typeof value === "number" && Number.isFinite(value))
+          return String(value);
+        if (typeof value === "boolean") return value ? "1" : "0";
+        if (typeof value === "bigint") return value.toString();
+        if (value === null) return "null";
+        // Opaque for non-primitive values
+        return "[object]";
+      })();
+      const stringValue = raw.slice(0, 64);
       return [key, stringValue] as const;
     })
     .filter((pair): pair is readonly [string, string] => Boolean(pair));
@@ -87,7 +104,7 @@ function safeEmitMetric(
   try {
     const hook = __telemetryHook;
     if (!hook) return;
-    const safeNameRaw = String(name).slice(0, 64);
+    const safeNameRaw = name.slice(0, 64);
     if (!METRIC_NAME_REGEX.test(safeNameRaw)) return;
     const safeName = safeNameRaw;
     const safeTags = sanitizeMetricTags(tags);
@@ -190,7 +207,7 @@ export function validateNumericParameter(
     value > max
   ) {
     throw new InvalidParameterError(
-      `${parameterName} must be an integer between ${min} and ${max}.`,
+      `${parameterName} must be an integer between ${String(min)} and ${String(max)}.`,
     );
   }
 }
@@ -275,7 +292,7 @@ function logLargeBufferIfDevelopment(view: ArrayBufferView): void {
       // string argument (via toHaveBeenCalledWith(expect.stringContaining()))
       // will match regardless of the numeric size. Keep message concise.
       console.warn(
-        `[security-kit] Wiping a large buffer: ${view.byteLength} bytes`,
+        `[security-kit] Wiping a large buffer: ${String(view.byteLength)} bytes`,
       );
     }
   } catch {
@@ -374,6 +391,18 @@ function tryDate(v: unknown): string | undefined {
   return undefined;
 }
 
+function tryRegExpTop(v: unknown): string | undefined {
+  if (v instanceof RegExp) {
+    try {
+      // Return canonical representation like /pattern/gi
+      return v.toString();
+    } catch {
+      return "/invalid-regexp/";
+    }
+  }
+  return undefined;
+}
+
 function tryTypedTop(v: unknown): string | undefined {
   return ArrayBuffer.isView(v) || v instanceof ArrayBuffer
     ? "[TypedArray]"
@@ -392,12 +421,14 @@ function tryArrayTop(v: unknown): string | undefined {
 }
 
 function tryCustomToStringTop(v: unknown): string | undefined {
-  if (v && typeof v === "object") return tryCustomToString(v);
+  if (v !== null && v !== undefined && typeof v === "object")
+    return tryCustomToString(v);
   return undefined;
 }
 
 function tryToJSONFirstTop(v: unknown): string | undefined {
-  if (v && typeof v === "object") return handleToJSONFirst(v);
+  if (v !== null && v !== undefined && typeof v === "object")
+    return handleToJSONFirst(v);
   return undefined;
 }
 
@@ -405,7 +436,7 @@ function tryGenericObjectTagTop(v: unknown): string | undefined {
   // At the top level, prefer an opaque tag for any non-special object to
   // avoid leaking structure in logs. Earlier handlers already covered arrays,
   // typed arrays, Map/Set, Date, RegExp, Error, custom toString, and toJSON.
-  if (v && typeof v === "object") {
+  if (v !== null && v !== undefined && typeof v === "object") {
     return "[object Object]";
   }
   return undefined;
@@ -415,7 +446,7 @@ function tryGenericObjectTagTop(v: unknown): string | undefined {
 // (password/token/otp/pin/etc.), prefer a sanitized JSON representation so
 // redactions are visible to developers verifying security behavior.
 function trySensitiveObjectTop(v: unknown): string | undefined {
-  if (!v || typeof v !== "object") return undefined;
+  if (v === null || v === undefined || typeof v !== "object") return undefined;
   try {
     // Ignore known structured types – earlier handlers will manage these
     if (Array.isArray(v)) return undefined;
@@ -435,17 +466,13 @@ function trySensitiveObjectTop(v: unknown): string | undefined {
       (k) => SAFE_KEY_REGEX.test(k) && (isSensitiveKey(k) || isOtpLikeKey(k)),
     );
     if (!hasSensitive) return undefined;
-
-    // Produce a sanitized JSON string so callers can see redaction occurred.
     const normalized = normalizeForSanitizer(v, new Set<unknown>());
-    const json = (() => {
-      try {
-        return JSON.stringify(normalized);
-      } catch {
-        return undefined;
-      }
-    })();
-    if (json) return _truncateIfLong(json);
+    try {
+      const json = JSON.stringify(normalized);
+      if (typeof json === "string") return _truncateIfLong(json);
+    } catch {
+      /* ignore JSON errors */
+    }
   } catch {
     /* fall through to generic tag */
   }
@@ -460,6 +487,7 @@ export function sanitizeLogMessage(message: unknown): string {
       tryString,
       tryBigInt,
       tryDate,
+      tryRegExpTop,
       tryTypedTop,
       tryMapSet,
       tryArrayTop,
@@ -485,7 +513,7 @@ export function sanitizeLogMessage(message: unknown): string {
       try {
         return JSON.stringify(normalized);
       } catch {
-        return undefined;
+        return;
       }
     })();
     if (json === undefined) {
@@ -567,12 +595,16 @@ async function wipeU8InChunks(
 ): Promise<boolean> {
   // eslint-disable-next-line functional/no-let -- loop counters are required for chunked wiping
   for (let offset = 0; offset < u8.length; offset += WIPE_CHUNK_SIZE) {
-    if (options?.signal?.aborted) return false;
-    if (await shouldAbortForVisibility()) return false;
+    if (options?.signal?.aborted === true) {
+      return false;
+    }
+    if (shouldAbortForVisibility()) {
+      return false;
+    }
     const end = Math.min(offset + WIPE_CHUNK_SIZE, u8.length);
     // eslint-disable-next-line functional/no-let
     for (let index = offset; index < end; index++) {
-      // eslint-disable-next-line functional/immutable-data -- intentional secure wipe
+      // eslint-disable-next-line functional/immutable-data,security/detect-object-injection -- intentional secure memory wipe with bounds-checked Uint8Array zeroing
       u8[index] = 0;
     }
     await yieldMacroTask();
@@ -595,7 +627,7 @@ async function yieldMacroTask(): Promise<void> {
   await new Promise<void>((resolve) => setTimeout(resolve, 0));
 }
 
-async function shouldAbortForVisibility(): Promise<boolean> {
+function shouldAbortForVisibility(): boolean {
   try {
     if (typeof document !== "undefined") {
       const d = document as unknown as { readonly visibilityState?: string };
@@ -641,10 +673,7 @@ export function isSharedArrayBufferView(view: ArrayBufferView): boolean {
       // Symbol.toStringTag spoofing.
       const hasSpoofTag = (() => {
         try {
-          return Object.prototype.hasOwnProperty.call(
-            bufferValue,
-            Symbol.toStringTag,
-          );
+          return Object.hasOwn(bufferValue, Symbol.toStringTag);
         } catch {
           return true; // be conservative
         }
@@ -779,8 +808,8 @@ function tryBigIntWipe(typedArray: ArrayBufferView): boolean {
 
     // eslint-disable-next-line functional/no-let -- loop counter required for BigInt wipe
     for (let index = 0; index < ta.length; index++) {
-      // eslint-disable-next-line functional/immutable-data,functional/prefer-readonly-type -- intentional in-place wipe of BigInt typed array for security
-      (ta as unknown as { [index: number]: bigint })[index] = 0n;
+      // eslint-disable-next-line functional/immutable-data,security/detect-object-injection -- intentional in-place BigInt array wipe for security with bounds-checked access
+      (ta as unknown as { readonly [index: number]: bigint })[index] = 0n;
     }
     safeEmitMetric("secureWipe.ok", 1, { strategy: "bigint" });
     return true;
@@ -828,7 +857,7 @@ function tryByteWiseWipe(typedArray: ArrayBufferView): boolean {
 
   // eslint-disable-next-line functional/no-let -- loop counter and in-place wipe required for secure zeroing
   for (let index = 0; index < u8.length; index++) {
-    // eslint-disable-next-line functional/immutable-data -- intentional secure wipe
+    // eslint-disable-next-line functional/immutable-data,security/detect-object-injection -- intentional secure memory wipe with bounds-checked Uint8Array zeroing
     u8[index] = 0;
   }
   safeEmitMetric("secureWipe.ok", 1, { strategy: "u8-loop" });
@@ -990,15 +1019,15 @@ function validateAndNormalizeInputs(
     throw new InvalidParameterError("Both inputs must be strings.");
   }
 
-  const aString = String(a);
-  const bString = String(b);
+  const aString = a;
+  const bString = b;
 
   if (
     aString.length > MAX_RAW_INPUT_LENGTH ||
     bString.length > MAX_RAW_INPUT_LENGTH
   ) {
     throw new InvalidParameterError(
-      `Input length cannot exceed ${MAX_RAW_INPUT_LENGTH} characters.`,
+      `Input length cannot exceed ${String(MAX_RAW_INPUT_LENGTH)} characters.`,
     );
   }
 
@@ -1007,7 +1036,7 @@ function validateAndNormalizeInputs(
 
   if (sa.length > MAX_COMPARISON_LENGTH || sb.length > MAX_COMPARISON_LENGTH) {
     throw new InvalidParameterError(
-      `Input length cannot exceed ${MAX_COMPARISON_LENGTH} characters.`,
+      `Input length cannot exceed ${String(MAX_COMPARISON_LENGTH)} characters.`,
     );
   }
 
@@ -1049,7 +1078,7 @@ export function secureCompare(
 
     if (ua.length > MAX_COMPARISON_BYTES || ub.length > MAX_COMPARISON_BYTES) {
       throw new InvalidParameterError(
-        `Byte input length cannot exceed ${MAX_COMPARISON_BYTES} bytes.`,
+        `Byte input length cannot exceed ${String(MAX_COMPARISON_BYTES)} bytes.`,
       );
     }
 
@@ -1061,8 +1090,8 @@ export function secureCompare(
     );
     // eslint-disable-next-line functional/no-let -- loop counter for fixed-length compare
     for (let index = 0; index < loopLength; index++) {
-      const ca = ua[index] ?? 0;
-      const codeByte = ub[index] ?? 0;
+      const ca = index < ua.length ? (ua.at(index) ?? 0) : 0;
+      const codeByte = index < ub.length ? (ub.at(index) ?? 0) : 0;
       diff |= ca ^ codeByte;
     }
     const equal = diff === 0 && ua.length === ub.length;
@@ -1134,8 +1163,9 @@ async function checkCryptoAvailability(options?: {
       throw new CryptoUnavailableError("SubtleCrypto.digest is unavailable.");
     }
     safeEmitMetric("secureCompare.fallback", 1, {
-      requireCrypto: String(!!options?.requireCrypto),
+      requireCrypto: String(options?.requireCrypto === true),
       subtlePresent: "0",
+      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- strict is runtime boolean, retain explicit mapping
       strict: strict ? "1" : "0",
     });
     throw new CryptoUnavailableError("SubtleCrypto.digest is unavailable.");
@@ -1154,8 +1184,8 @@ function compareUint8Arrays(ua: Uint8Array, ub: Uint8Array): boolean {
   const length = Math.max(ua.length, ub.length, MIN_COMPARE_BYTES);
   // eslint-disable-next-line functional/no-let -- loop counter for array comparison
   for (let index = 0; index < length; index++) {
-    const ca = ua[index] ?? 0;
-    const codeByte = ub[index] ?? 0;
+    const ca = index < ua.length ? (ua.at(index) ?? 0) : 0;
+    const codeByte = index < ub.length ? (ub.at(index) ?? 0) : 0;
     diff |= ca ^ codeByte;
   }
   return diff === 0 && ua.length === ub.length;
@@ -1186,7 +1216,7 @@ export function secureCompareBytes(
     b.byteLength > MAX_COMPARISON_BYTES
   ) {
     throw new InvalidParameterError(
-      `Byte input length cannot exceed ${MAX_COMPARISON_BYTES} bytes.`,
+      `Byte input length cannot exceed ${String(MAX_COMPARISON_BYTES)} bytes.`,
     );
   }
   const ua = new Uint8Array(a.buffer, a.byteOffset, a.byteLength);
@@ -1213,7 +1243,7 @@ export function secureCompareBytesOrThrow(
     b.byteLength > MAX_COMPARISON_BYTES
   ) {
     throw new InvalidParameterError(
-      `Byte input length cannot exceed ${MAX_COMPARISON_BYTES} bytes.`,
+      `Byte input length cannot exceed ${String(MAX_COMPARISON_BYTES)} bytes.`,
     );
   }
   const ua = new Uint8Array(a.buffer, a.byteOffset, a.byteLength);
@@ -1280,11 +1310,14 @@ export async function secureCompareAsync(
       // tiny arithmetic to avoid being optimized away
       t = now() + (((t ^ 0x9e3779b9) + ((t << 5) | (t >>> 2))) & 0);
     }
-    // Final micro-spin to reduce sub-millisecond drift
-    const fudge = 4; // ms
+    // Enhanced micro-spin to reduce sub-millisecond drift with better fudge factor
+    const fudge = 8; // Increased from 4 to 8ms for better CI stability
     while (t < target + fudge) {
       t = now() + (((t * 2654435761) ^ ((t << 7) | (t >>> 3))) & 0);
     }
+    // Additional stabilization: multiple yields to ensure consistent timing
+    await Promise.resolve();
+    await Promise.resolve();
   };
 
   // Emit telemetry for near-limit inputs to detect DoS probing
@@ -1316,28 +1349,28 @@ function handleCompareAsyncError(
 ): boolean {
   const strict = options?.requireCrypto === true || isSecurityStrict();
   if (error instanceof CryptoUnavailableError) {
-    const message = String((error as Error).message || "").toLowerCase();
+    const message = ((error as Error).message || "").toLowerCase();
     const isAvailabilityIssue =
       message.includes("subtlecrypto.digest is unavailable") ||
       message.includes("crypto is not available") ||
       message.includes("unavailable");
     if (!strict && isAvailabilityIssue) {
       safeEmitMetric("secureCompare.fallback", 1, {
-        requireCrypto: String(!!options?.requireCrypto),
+        requireCrypto: String(options?.requireCrypto === true),
         subtlePresent: "0",
-        strict: strict ? "1" : "0",
+        strict: String(Number(strict)),
       });
       return secureCompare(sa, sb);
     }
     safeEmitMetric("secureCompare.error", 1, {
-      requireCrypto: String(!!options?.requireCrypto),
-      strict: strict ? "1" : "0",
+      requireCrypto: String(options?.requireCrypto === true),
+      strict: String(Number(strict)),
     });
     throw error;
   }
   safeEmitMetric("secureCompare.error", 1, {
-    requireCrypto: String(!!options?.requireCrypto),
-    strict: strict ? "1" : "0",
+    requireCrypto: String(options?.requireCrypto === true),
+    strict: String(Number(strict)),
   });
   throw new CryptoUnavailableError(
     "Crypto compare failed due to unexpected error (no fallback).",
@@ -1362,10 +1395,18 @@ async function compareWithCrypto(
   const isSoftAvailabilityReason = (reason: unknown): boolean => {
     try {
       if (reason instanceof CryptoUnavailableError) return true;
-      const message =
-        reason instanceof Error
-          ? String(reason.message || "")
-          : String(reason || "");
+      const message = (() => {
+        if (reason instanceof Error) {
+          return reason.message || "";
+        }
+        if (typeof reason === "string") {
+          return reason;
+        }
+        if (typeof reason === "number" || typeof reason === "boolean") {
+          return String(reason);
+        }
+        return ""; // avoid leaking object via [object Object]
+      })();
       const normalized = message.trim().toLowerCase();
       const allowlist = [
         "no crypto",
@@ -1488,7 +1529,7 @@ async function compareWithCrypto(
     try {
       const okA = ua ? __wipeImpl(ua) : true;
       const okB = ub ? __wipeImpl(ub) : true;
-      wipeOk = !!(okA && okB);
+      wipeOk = okA && okB;
     } catch (wipeError) {
       wipeOk = false;
       if (isDevelopment()) {
@@ -1506,7 +1547,7 @@ async function compareWithCrypto(
   if (__wipeFailedAfterFinally) {
     throw new CryptoUnavailableError("Secure wipe failed after hashing.");
   }
-  return result === true;
+  return result;
 }
 
 // (handleCompareError removed: logic inlined in secureCompareAsync)
@@ -1522,9 +1563,9 @@ export const MAX_LOG_STRING = 8192;
 export const MAX_KEYS_PER_OBJECT = 64;
 export const MAX_ITEMS_PER_ARRAY = 128;
 
-const JWT_LIKE_REGEX = /^eyJ[\w-]{5,}\.[\w-]{5,}\.[\w-]{5,}$/;
+const JWT_LIKE_REGEX = /^eyJ[\w-]{5,}\.[\w-]{5,}\.[\w-]{5,}$/u;
 const REDACTED_VALUE = "[REDACTED]";
-const SAFE_KEY_REGEX = /^[\w.-]{1,64}$/;
+const SAFE_KEY_REGEX = /^[\w.-]{1,64}$/u;
 
 // Central scalar-string redactor used by multiple sinks; extracted to avoid
 // duplicate logic and reduce complexity in callers.
@@ -1533,15 +1574,18 @@ function redactScalarString(input: string): string {
   const truncated = _truncateIfLong(input);
   // Early numeric-secret detection: full redaction when PAN-like or very long numeric tokens appear
   try {
-    const digits = truncated.replace(/\D+/g, "");
+    const digits = truncated.replace(/\D+/gu, "");
     if (digits.length >= 12 && digits.length <= 19 && luhnCheck(digits)) {
       return REDACTED_VALUE;
     }
-    const { redactLongNumericMinLength = 24 } =
-      (getCanonicalConfig() as unknown as {
-        readonly redactLongNumericMinLength?: number;
-      }) ?? {};
-    if (digits.length >= (redactLongNumericMinLength || 24)) {
+    const cfg1 = getCanonicalConfig() as unknown as {
+      readonly redactLongNumericMinLength?: number;
+    };
+    const redactLongNumericMinLength =
+      typeof cfg1.redactLongNumericMinLength === "number"
+        ? cfg1.redactLongNumericMinLength
+        : 24;
+    if (digits.length >= redactLongNumericMinLength) {
       return REDACTED_VALUE;
     }
   } catch {
@@ -1551,39 +1595,45 @@ function redactScalarString(input: string): string {
   return truncated
     .replace(JWT_LIKE_REGEX, REDACTED_VALUE)
     .replace(
-      /\b(?:password|pass|token|secret|jwt|authorization)\s*[:=]\s*[^\s,;&]{1,2048}/gi,
-      (m) => `${m.split(/[:=]/, 1)[0]}=[REDACTED]`,
+      /\b(?:password|pass|token|secret|jwt|authorization)\s*[:=]\s*[^\s,;&]{1,2048}/giu,
+      (m) => {
+        const head = m.split(/[:=]/u, 1)[0] ?? "";
+        return `${head}=[REDACTED]`;
+      },
     )
     .replace(
-      /\b(?:api[_-]?key|x[_-]?api[_-]?key|secret[_-]?token)\s*[:=]\s*[^\s,;&]{1,2048}/gi,
-      (m) => `${m.split(/[:=]/, 1)[0]}=[REDACTED]`,
+      /\b(?:api[_-]?key|x[_-]?api[_-]?key|secret[_-]?token)\s*[:=]\s*[^\s,;&]{1,2048}/giu,
+      (m) => {
+        const head = m.split(/[:=]/u, 1)[0] ?? "";
+        return `${head}=[REDACTED]`;
+      },
     )
     .replace(
-      /\bauthorization\s*[:=]\s*[^\r\n]{1,2048}/gi,
+      /\bauthorization\s*[:=]\s*[^\r\n]{1,2048}/giu,
       () => "Authorization=[REDACTED]",
     )
-    .replace(/\bbearer\s+\S{1,2048}/gi, "bearer [REDACTED]");
+    .replace(/\bbearer\s+\S{1,2048}/giu, "bearer [REDACTED]");
 }
 
 /**
  * Checks if a key contains sensitive API-related terms.
  */
 function isApiKey(key: string): boolean {
-  return /\b(?:api[_-]?key|x[_-]?api[_-]?key)\b/i.test(key);
+  return /\b(?:api[_-]?key|x[_-]?api[_-]?key)\b/iu.test(key);
 }
 
 /**
  * Checks if a key contains sensitive token-related terms.
  */
 function isTokenKey(key: string): boolean {
-  return /\b(?:access[_-]?token|refresh[_-]?token|bearer|token)\b/i.test(key);
+  return /\b(?:access[_-]?token|refresh[_-]?token|bearer|token)\b/iu.test(key);
 }
 
 /**
  * Checks if a key contains sensitive authentication terms.
  */
 function isAuthKey(key: string): boolean {
-  return /\b(?:password|passphrase|secret|credential|private[_-]?key|authorization)\b/i.test(
+  return /\b(?:password|passphrase|secret|credential|private[_-]?key|authorization)\b/iu.test(
     key,
   );
 }
@@ -1592,7 +1642,7 @@ function isAuthKey(key: string): boolean {
  * Checks if a key contains other sensitive terms.
  */
 function isOtherSensitiveKey(key: string): boolean {
-  return /\b(?:jwt|session|cert|signature)\b/i.test(key);
+  return /\b(?:jwt|session|cert|signature)\b/iu.test(key);
 }
 
 /**
@@ -1608,7 +1658,7 @@ function isSensitiveKey(key: string): boolean {
 }
 
 function isOtpLikeKey(key: string): boolean {
-  return /\b(?:otp|mfa|2fa|code|pin|one[_-]?time)\b/i.test(key);
+  return /\b(?:otp|mfa|2fa|code|pin|one[_-]?time)\b/iu.test(key);
 }
 
 function _truncateIfLong(s: string): string {
@@ -1622,12 +1672,12 @@ function _truncateIfLong(s: string): string {
     const cap = Math.max(0, capBytes);
     const slice = bytes.slice(0, cap);
     const truncated = new TextDecoder().decode(slice);
-    return truncated + `...[TRUNCATED ${bytes.length - cap} bytes]`;
+    return truncated + `...[TRUNCATED ${String(bytes.length - cap)} bytes]`;
   } catch {
     // Fallback to legacy char-based truncation
     return s.length > MAX_LOG_STRING
       ? s.slice(0, MAX_LOG_STRING) +
-          `...[TRUNCATED ${s.length - MAX_LOG_STRING} chars]`
+          `...[TRUNCATED ${String(s.length - MAX_LOG_STRING)} chars]`
       : s;
   }
 }
@@ -1636,24 +1686,27 @@ function _redactPrimitive(value: unknown): unknown {
   if (typeof value !== "string") return value;
   if (JWT_LIKE_REGEX.test(value)) return REDACTED_VALUE;
   if (
-    /(?:^|[\s,&])(?:password|pass|token|secret|bearer|jwt|authorization)\s*[=:]/i.test(
+    /(?:^|[\s,&])(?:password|pass|token|secret|bearer|jwt|authorization)\s*[=:]/iu.test(
       value,
     )
   ) {
     return REDACTED_VALUE;
   }
   // Numeric secret redaction: PAN detection via Luhn and long digit tokens
-  const digits = value.replace(/\D+/g, "");
+  const digits = value.replace(/\D+/gu, "");
   if (digits.length >= 12 && digits.length <= 19 && luhnCheck(digits)) {
     return REDACTED_VALUE;
   }
   // Very long numeric tokens (e.g., IDs/secrets) — redact in strict mode
   try {
-    const { redactLongNumericMinLength = 24 } =
-      getCanonicalConfig() as unknown as {
-        readonly redactLongNumericMinLength?: number;
-      };
-    if (digits.length >= (redactLongNumericMinLength || 24)) {
+    const cfg2 = getCanonicalConfig() as unknown as {
+      readonly redactLongNumericMinLength?: number;
+    };
+    const redactLongNumericMinLength =
+      typeof cfg2.redactLongNumericMinLength === "number"
+        ? cfg2.redactLongNumericMinLength
+        : 24;
+    if (digits.length >= redactLongNumericMinLength) {
       return REDACTED_VALUE;
     }
   } catch {
@@ -1704,7 +1757,11 @@ function computeDevelopmentUnsafeKeyHash(
 
 function normalizeValueForRedaction(rawValue: unknown, depth: number): unknown {
   if (typeof rawValue === "string") return _redactPrimitive(rawValue);
-  if (rawValue && typeof rawValue === "object")
+  if (
+    rawValue !== null &&
+    rawValue !== undefined &&
+    typeof rawValue === "object"
+  )
     return _redact(rawValue, depth + 1);
   return rawValue;
 }
@@ -1759,9 +1816,10 @@ function buildRedactedObjectEntries(
         return {
           entries: accumulator.entries,
           unsafeCount: accumulator.unsafeCount + 1,
-          unsafeHashes: hash
-            ? [...accumulator.unsafeHashes, hash]
-            : accumulator.unsafeHashes,
+          unsafeHashes:
+            typeof hash === "string"
+              ? [...accumulator.unsafeHashes, hash]
+              : accumulator.unsafeHashes,
         } as const;
       }
       if (isSensitiveKey(key)) {
@@ -1773,8 +1831,8 @@ function buildRedactedObjectEntries(
       // OTP/PIN heuristic: redact short numeric strings when key context is sensitive
       const preNormalized: unknown = (() => {
         if (isOtpLikeKey(key) && typeof rawValue === "string") {
-          const digitsOnly = rawValue.replace(/\D+/g, "");
-          if (/^\d{4,10}$/.test(digitsOnly)) {
+          const digitsOnly = rawValue.replace(/\D+/gu, "");
+          if (/^\d{4,10}$/u.test(digitsOnly)) {
             return REDACTED_VALUE;
           }
         }
@@ -1790,7 +1848,7 @@ function buildRedactedObjectEntries(
       entries: [] as readonly (readonly [string, unknown])[],
       unsafeCount: 0,
       unsafeHashes: [] as readonly string[],
-    } as const,
+    },
   );
 
   const metaEntries: readonly (readonly [string, unknown])[] =
@@ -1907,8 +1965,8 @@ function handleSpecialObjectTypes(
 function handleTypedArray(data: ArrayBufferView): unknown {
   const ctor = ((): string => {
     try {
-      const c = (data as { readonly constructor?: { readonly name?: string } })
-        ?.constructor?.name;
+      const c = (data as { readonly constructor: { readonly name?: string } })
+        .constructor.name;
       if (typeof c === "string" && c.length <= 64) return c;
     } catch {
       /* ignore */
@@ -1935,7 +1993,15 @@ function handleArray(
   // eslint-disable-next-line functional/no-let -- intentional loop counter for array breadth processing
   for (let index = 0; index < limit; index++) {
     /* eslint-disable functional/immutable-data -- intentional push to build array */
-    out.push(_cloneAndNormalizeForLogging(data[index], depth + 1, visited));
+    out.push(
+      _cloneAndNormalizeForLogging(
+        Object.hasOwn(data, index)
+          ? Object.getOwnPropertyDescriptor(data, index)?.value
+          : undefined,
+        depth + 1,
+        visited,
+      ),
+    );
     /* eslint-enable functional/immutable-data */
   }
   if (data.length > limit) {
@@ -1968,7 +2034,8 @@ function handlePlainObject(
 
   // NEW: count symbol keys without exposing them
   try {
-    const symCount = Object.getOwnPropertySymbols?.(data)?.length ?? 0;
+    const syms = Object.getOwnPropertySymbols(data);
+    const symCount = syms.length;
     if (symCount > 0) {
       // eslint-disable-next-line functional/immutable-data
       result["__symbol_key_count__"] = symCount;
@@ -1984,17 +2051,28 @@ function handlePlainObject(
   const limit = Math.min(MAX_KEYS_PER_OBJECT, Math.max(0, allKeys.length));
   /* eslint-disable functional/no-let -- loop counter for key processing */
   for (let index = 0; index < limit; index++) {
-    const key = allKeys[index]!;
+    const key = allKeys[index] as string;
     try {
       const v = _cloneAndNormalizeForLogging(
-        (data as Record<string, unknown>)[key],
+        Object.hasOwn(data as Record<string, unknown>, key)
+          ? Object.getOwnPropertyDescriptor(
+              data as Record<string, unknown>,
+              key,
+            )?.value
+          : undefined,
         depth + 1,
         visited,
       );
       // eslint-disable-next-line functional/immutable-data
-      result[key] = v;
+      Object.defineProperty(result, key, {
+        value: v,
+        writable: true,
+        enumerable: true,
+        configurable: true,
+      });
       if (
-        v &&
+        v !== null &&
+        v !== undefined &&
         typeof v === "object" &&
         (v as { readonly __redacted?: unknown; readonly reason?: unknown })
           .__redacted === true &&
@@ -2004,25 +2082,45 @@ function handlePlainObject(
       }
     } catch {
       // eslint-disable-next-line functional/immutable-data
-      result[key] = { __redacted: true, reason: "getter-threw" };
+      Object.defineProperty(result, key, {
+        value: { __redacted: true, reason: "getter-threw" },
+        writable: true,
+        enumerable: true,
+        configurable: true,
+      });
     }
   }
   /* eslint-enable functional/no-let */
   if (allKeys.length > limit) {
     // eslint-disable-next-line functional/immutable-data
-    result["__additional_keys__"] = {
-      __truncated: true,
-      originalCount: allKeys.length,
-      displayedCount: limit,
-    };
+    Object.defineProperty(result, "__additional_keys__", {
+      value: {
+        __truncated: true,
+        originalCount: allKeys.length,
+        displayedCount: limit,
+      },
+      writable: true,
+      enumerable: true,
+      configurable: true,
+    });
   }
 
   if (descendantMaxDepthRedacted) {
     // Surface a summary at this level without leaking structure
     // eslint-disable-next-line functional/immutable-data
-    result["__redacted"] = true;
+    Object.defineProperty(result, "__redacted", {
+      value: true,
+      writable: true,
+      enumerable: true,
+      configurable: true,
+    });
     // eslint-disable-next-line functional/immutable-data
-    result["reason"] = "max-depth";
+    Object.defineProperty(result, "reason", {
+      value: "max-depth",
+      writable: true,
+      enumerable: true,
+      configurable: true,
+    });
   }
 
   return result;
@@ -2097,11 +2195,16 @@ function stringifyArrayTopLevel(array: readonly unknown[]): string | undefined {
 }
 
 function tryCustomToString(object: unknown): string | undefined {
-  if (!object || typeof object !== "object") return undefined;
+  if (object === null || object === undefined || typeof object !== "object")
+    return undefined;
   try {
-    const toString_ = (object as Record<string, unknown>).toString;
-    if (!toString_ || toString_ === Object.prototype.toString) return undefined;
-    const string_ = (object as { readonly toString: () => unknown }).toString();
+    const hasOwnToString = Object.hasOwn(object, "toString");
+    if (!hasOwnToString) return undefined;
+    // Call toString with the correct receiver to avoid unbound method issues
+    const string_ = Function.prototype.call.call(
+      (object as { readonly toString: () => unknown }).toString,
+      object,
+    ) as unknown;
     if (typeof string_ === "string")
       return _truncateIfLong(redactScalarString(string_));
     return undefined;
@@ -2111,10 +2214,12 @@ function tryCustomToString(object: unknown): string | undefined {
 }
 
 function handleToJSONFirst(object: unknown): string | undefined {
-  if (!object || typeof object !== "object") return undefined;
+  if (object === null || object === undefined || typeof object !== "object")
+    return undefined;
   if (
-    !Object.prototype.hasOwnProperty.call(object, "toJSON") ||
-    typeof (object as { readonly toJSON?: unknown }).toJSON !== "function"
+    !Object.hasOwn(object, "toJSON") ||
+    typeof Object.getOwnPropertyDescriptor(object, "toJSON")?.value !==
+      "function"
   ) {
     return undefined;
   }
@@ -2134,10 +2239,15 @@ function handleToJSONFirst(object: unknown): string | undefined {
         .filter(
           (k) => k !== "__proto__" && k !== "prototype" && k !== "constructor",
         )
-        .map((k) => [k, tObject[k]] as const) as readonly (readonly [
-        string,
-        unknown,
-      ])[];
+        .map(
+          (k) =>
+            [
+              k,
+              Object.hasOwn(tObject, k)
+                ? Object.getOwnPropertyDescriptor(tObject, k)?.value
+                : undefined,
+            ] as const,
+        ) as readonly (readonly [string, unknown])[];
       const messageObject = object as Record<string, unknown>;
       const messageEntries = Object.keys(messageObject)
         .filter(
@@ -2147,10 +2257,15 @@ function handleToJSONFirst(object: unknown): string | undefined {
             k !== "prototype" &&
             k !== "constructor",
         )
-        .map((k) => [k, messageObject[k]] as const) as readonly (readonly [
-        string,
-        unknown,
-      ])[];
+        .map(
+          (k) =>
+            [
+              k,
+              Object.hasOwn(messageObject, k)
+                ? Object.getOwnPropertyDescriptor(messageObject, k)?.value
+                : undefined,
+            ] as const,
+        ) as readonly (readonly [string, unknown])[];
       const mergedEntries = messageEntries.reduce(
         (accumulator: ReadonlyArray<readonly [string, unknown]>, entry) =>
           accumulator.some((me) => me[0] === entry[0])
@@ -2206,7 +2321,7 @@ function normalizeSetForSanitizer(
 ): readonly string[] {
   try {
     // Avoid expanding Set contents: provide opaque metadata only
-    return [`[Set size=${value.size}]`];
+    return [`[Set size=${String(value.size)}]`];
   } catch {
     return [] as const;
   }
@@ -2230,7 +2345,15 @@ function normalizeObjectForSanitizer(
     )
     .map((k) => {
       try {
-        const raw = (value as Record<string, unknown>)[k];
+        const raw = Object.hasOwn(value as Record<string, unknown>, k)
+          ? ((): unknown => {
+              const descriptor = Object.getOwnPropertyDescriptor(
+                value as Record<string, unknown>,
+                k,
+              );
+              return descriptor?.value;
+            })()
+          : undefined;
         // Apply sensitive key redaction to mirror _redactObject semantics
         if (SAFE_KEY_REGEX.test(k) && isSensitiveKey(k)) {
           return [k, REDACTED_VALUE] as const;
@@ -2241,8 +2364,8 @@ function normalizeObjectForSanitizer(
           isOtpLikeKey(k) &&
           typeof raw === "string"
         ) {
-          const digitsOnly = raw.replace(/\D+/g, "");
-          if (/^\d{4,10}$/.test(digitsOnly)) {
+          const digitsOnly = raw.replace(/\D+/gu, "");
+          if (/^\d{4,10}$/u.test(digitsOnly)) {
             return [k, REDACTED_VALUE] as const;
           }
         }
@@ -2276,7 +2399,9 @@ function normalizeForSanitizer(
   // Try to use toJSON first if present
   try {
     const object = value as Record<string, unknown>;
-    const toJSON = object["toJSON"];
+    const toJSON = Object.hasOwn(object, "toJSON")
+      ? object["toJSON"]
+      : undefined;
     if (typeof toJSON === "function") {
       try {
         const jsonValue = (toJSON as () => unknown).call(object);

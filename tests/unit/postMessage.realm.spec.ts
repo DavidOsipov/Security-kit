@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import loadPostMessageInternals from "../helpers/vmPostMessageHelper";
+import loadPostMessageInternals from "../helpers/vmPostMessageHelper.ts";
 
 /**
  * Cross-realm tests for postMessage functionality.
@@ -22,7 +22,7 @@ describe("postMessage cross-realm security", () => {
   });
 
   it("safeCtorName correctly identifies cross-realm objects", async () => {
-    const pm = loadPostMessageInternals();
+  const pm = loadPostMessageInternals({ allowTestApisFlag: true });
     // Diagnostic: expose exported keys and last-run metadata to help debug VM shape
     // (temporary during debugging)
     // eslint-disable-next-line no-console
@@ -43,7 +43,7 @@ describe("postMessage cross-realm security", () => {
   }, 30_000);
 
   it("validateTransferables rejects cross-realm MessagePort-like objects", async () => {
-    const pm = loadPostMessageInternals();
+  const pm = loadPostMessageInternals({ allowTestApisFlag: true });
 
     // Create a VM-realm object with MessagePort constructor name and ask VM to
     // tell us whether validateTransferables would reject it (run inside VM).
@@ -57,7 +57,7 @@ describe("postMessage cross-realm security", () => {
   }, 30_000);
 
   it("toNullProto works correctly with cross-realm objects", async () => {
-    const pm = loadPostMessageInternals();
+  const pm = loadPostMessageInternals({ allowTestApisFlag: true });
 
     // Create an object in VM realm with prototype pollution and run toNullProto
     // inside the VM, returning a JSON-serializable sanitized object.
@@ -88,7 +88,7 @@ describe("postMessage cross-realm security", () => {
   }, 30_000);
 
   it("cross-realm ArrayBuffer.isView compatibility", async () => {
-    const pm = loadPostMessageInternals();
+  const pm = loadPostMessageInternals({ allowTestApisFlag: true });
 
     // Create a Uint8Array in VM realm and ask VM to confirm it's an ArrayBuffer view
     const arrInfo = pm.__runInVmJson(`
@@ -101,7 +101,7 @@ describe("postMessage cross-realm security", () => {
   }, 30_000);
 
   it("structured clone works with cross-realm typed arrays", async () => {
-    const pm = loadPostMessageInternals();
+  const pm = loadPostMessageInternals({ allowTestApisFlag: true });
 
     // Create typed array in VM and test structured serialization
     const result = pm.__runInVmJson(`

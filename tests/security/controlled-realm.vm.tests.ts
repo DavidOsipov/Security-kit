@@ -2,14 +2,14 @@
 // RULE-ID: controlled-realm-testing
 
 import { test, expect } from "vitest";
-import loadPostMessageInternals from "../helpers/vmPostMessageHelper";
+import loadPostMessageInternals from "../helpers/vmPostMessageHelper.ts";
 
 // This test verifies cross-realm behavior by executing code inside the
 // project's VM helper and asserting JSON-serializable results, per the
 // QA constitution's Controlled Realm Runner Usage rule.
 
 test("safeCtorName works across realms (vm)", () => {
-  const pm = loadPostMessageInternals();
+  const pm = loadPostMessageInternals({ allowTestApisFlag: true });
   const result = pm.__runInVmJson(`
     const a = new Uint8Array([1,2,3]);
     const m = globalThis.__vm_module_exports || (globalThis.module && globalThis.module.exports);
@@ -20,7 +20,7 @@ test("safeCtorName works across realms (vm)", () => {
 });
 
 test("structuredClone of typed arrays inside VM returns equal values", () => {
-  const pm = loadPostMessageInternals();
+  const pm = loadPostMessageInternals({ allowTestApisFlag: true });
   const result = pm.__runInVmJson(`
     const src = new Uint8Array([5,6,7,8]);
     const cloned = typeof structuredClone === 'function' ? structuredClone(src) : src.slice();
@@ -34,7 +34,7 @@ test("structuredClone of typed arrays inside VM returns equal values", () => {
 });
 
 test("ArrayBuffer.isView and DataView/TypedArray detection works inside VM", () => {
-  const pm = loadPostMessageInternals();
+  const pm = loadPostMessageInternals({ allowTestApisFlag: true });
   const result = pm.__runInVmJson(`
     const arr = new Uint8Array(4);
     const dv = new DataView(new ArrayBuffer(8));

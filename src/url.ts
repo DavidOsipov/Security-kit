@@ -14,29 +14,30 @@
  * - clearer allowedSchemes intersection failure - explicit error
  *
  * This file assumes the following imports exist in your project:
- *  - InvalidParameterError from "./errors"
- *  - isForbiddenKey, getForbiddenKeys from "./constants"
- *  - getSafeSchemes from "./url-policy"
- *  - environment from "./environment"
- *  - secureDevLog as secureDevelopmentLog from "./utils"
+ *  - InvalidParameterError from "./errors.ts"
+ *  - isForbiddenKey, getForbiddenKeys from "./constants.ts"
+ *  - getSafeSchemes from "./url-policy.ts"
+ *  - environment from "./environment.ts"
+ *  - secureDevLog as secureDevelopmentLog from "./utils.ts"
  *
  * The module is written to satisfy strict TypeScript + your lint rules.
  */
 
-import { InvalidParameterError } from "./errors";
+import { InvalidParameterError } from "./errors.ts";
 // Use Node's built-in punycode for IDNA conversion when available.
 // This keeps the project dependency-free for production while enabling
 // deterministic hostname normalization in test and Node environments.
-import { isForbiddenKey, getForbiddenKeys } from "./constants";
+import { isForbiddenKey, getForbiddenKeys } from "./constants.ts";
 import {
   getSafeSchemes,
   getRuntimePolicy,
   getUrlHardeningConfig,
   getDangerousSchemes,
-} from "./config";
-import type { UrlHardeningConfig } from "./config";
-import { environment } from "./environment";
-import { secureDevLog as secureDevelopmentLog } from "./utils";
+  MAX_URL_INPUT_LENGTH,
+  type UrlHardeningConfig,
+} from "./config.ts";
+import { environment } from "./environment.ts";
+import { secureDevLog as secureDevelopmentLog } from "./utils.ts";
 
 // This file contains deliberate, policy-driven branching that increases
 // cognitive complexity. We allow the sonarjs cognitive-complexity rule to
@@ -121,7 +122,31 @@ const MAX_SINGLE_LABEL_CHARS_PRE_IDNA = 255;
  * Convert unknown to safe string. Collapses undefined (and previously null)
  * to empty string. Avoids using literal `null`.
  */
-const _toString = (v: unknown): string => String(v ?? "");
+const _toString = (v: unknown): string => {
+  // Only allow primitive types to convert. Reject objects/functions to avoid
+  // implicit "[object Object]" stringification which can hide unsafe inputs.
+  if (v === undefined || v === null) return "";
+  const t = typeof v;
+  switch (t) {
+    case "string":
+      return v as string;
+    case "number": {
+      const n = v as number;
+      if (!Number.isFinite(n))
+        throw new InvalidParameterError("Non-finite numbers are not allowed.");
+      return String(n);
+    }
+    case "boolean":
+      return (v as boolean) ? "true" : "false";
+    case "bigint":
+      return (v as bigint).toString();
+    // symbol, object, function -> reject
+    default:
+      throw new InvalidParameterError(
+        "Object values are not allowed; provide a primitive (string/number/boolean/bigint).",
+      );
+  }
+};
 
 /**
  * Normalize string input using NFKC to prevent Unicode normalization attacks.
@@ -140,7 +165,17 @@ function normalizeInputString(input: unknown): string {
  */
 function makeSafeError(publicMessage: string, error: unknown): string {
   if (!environment.isProduction) {
-    return `${publicMessage}: ${error instanceof Error ? error.message : String(error)}`;
+    const detail =
+      error instanceof Error
+        ? error.message
+        : (() => {
+            try {
+              return _toString(error);
+            } catch {
+              return "unknown";
+            }
+          })();
+    return `${publicMessage}: ${detail}`;
   }
   return publicMessage;
 }
@@ -149,7 +184,7 @@ function makeSafeError(publicMessage: string, error: unknown): string {
  * Determine canonical scheme (ensures trailing ':').
  */
 function canonicalizeScheme(s: string): string {
-  const sString = String(s).trim();
+  const sString = s.trim();
   return sString.endsWith(":")
     ? sString.toLowerCase()
     : `${sString.toLowerCase()}:`;
@@ -173,7 +208,7 @@ const MAX_FQDN_LENGTH = 253; // Excludes optional trailing dot
 
 function canonicalizeHostname(hostname: string): string {
   // Lowercase and strip a single trailing dot to canonicalize FQDNs.
-  const lower = String(hostname).toLowerCase();
+  const lower = hostname.toLowerCase();
   return lower.endsWith(".") ? lower.slice(0, -1) : lower;
 }
 
@@ -228,8 +263,12 @@ function isValidHostLabelRFC1123(label: string): boolean {
 }
 
 function parseIPv4Octet(s: string): number | undefined {
-  if (s.length < 1 || s.length > 3) return undefined;
-  if (![...s].every((ch) => isDigit(ch.charCodeAt(0)))) return undefined;
+  if (s.length === 0 || s.length > 3) return undefined;
+  // Avoid spreading strings (Unicode pitfalls). Iterate over code units.
+  for (const ch of s) {
+    const code = ch.charCodeAt(0);
+    if (!isDigit(code)) return undefined;
+  }
   const value = Number(s);
   return Number.isNaN(value) || value > 255 ? undefined : value;
 }
@@ -293,6 +332,13 @@ function parseAndValidateURLInternal(
     if (typeof urlString !== "string") {
       throw new InvalidParameterError(`${context}: URL must be a string.`);
     }
+    // Defense in depth: enforce an absolute maximum input length to bound processing.
+    // Extremely large strings are likely malicious or erroneous; reject early.
+    if (urlString.length > MAX_URL_INPUT_LENGTH) {
+      throw new InvalidParameterError(
+        `${context}: URL exceeds maximum allowed length (${String(MAX_URL_INPUT_LENGTH)}).`,
+      );
+    }
     // Read runtime toggles for URL hardening
     const urlHardening = getUrlHardeningConfig();
 
@@ -342,8 +388,10 @@ function parseAndValidateURLInternal(
         throw new InvalidParameterError(`${context}: Missing authority.`);
       }
       // Determine if a path follows the authority and enforce origin-only when required
-      const hasPath =
-        authorityEnd < urlString.length && urlString[authorityEnd] === "/";
+      const hasPath = (() => {
+        if (authorityEnd < 0 || authorityEnd >= urlString.length) return false;
+        return urlString.charCodeAt(authorityEnd) === 0x2f; // '/'
+      })();
       const isOnlyTrailingSlash =
         hasPath && authorityEnd + 1 === urlString.length;
       if (!allowPaths && hasPath && !isOnlyTrailingSlash) {
@@ -353,7 +401,8 @@ function parseAndValidateURLInternal(
       }
       if (allowPaths && hasPath) {
         const rawPathAndAfter = urlString.slice(authorityEnd);
-        const rawPathOnly = rawPathAndAfter.split(/[?#]/)[0] ?? "";
+        // Add Unicode flag to character class regex (ASCII only but /u enforces syntax correctness)
+        const rawPathOnly = rawPathAndAfter.split(/[?#]/u)[0] ?? "";
         preValidatePath(rawPathOnly, context, urlHardening, allowPaths);
       }
       const pre = preValidateAuthority(authorityRaw, context, urlHardening);
@@ -383,7 +432,7 @@ function parseAndValidateURLInternal(
         const hostForValidation = authorityForIPv4Check;
         const parts = hostForValidation.split(".");
         const allNumericDots =
-          parts.length > 0 && parts.every((p) => /^\d+$/.test(p));
+          parts.length > 0 && parts.every((p) => /^\d+$/u.test(p)); // /u for future-proof digit matching
         if (allNumericDots) {
           // Always reject shorthand (not exactly 4 parts) regardless of toggle
           if (parts.length !== 4) {
@@ -459,7 +508,7 @@ function parseAndValidateURLInternal(
         // Optionally apply IDNA A-label conversion post-parse (defense-in-depth)
         const { enableIdnaToAscii, idnaProvider } = getUrlHardeningConfig();
         const canonical = (() => {
-          if (enableIdnaToAscii && idnaProvider && lower.length > 0) {
+          if (enableIdnaToAscii === true && idnaProvider && lower.length > 0) {
             try {
               const converted = idnaProvider.toASCII(lower);
               // Validate that provider returned ASCII-only with no forbidden code points
@@ -501,7 +550,7 @@ function parseAndValidateURLInternal(
     // via runtime configuration to allow callers to opt-out in special cases.
     if (allowPaths && getUrlHardeningConfig().validatePathPercentEncoding) {
       const path = url.pathname;
-      const malformedPercent = /%(?![0-9A-F]{2})/i;
+      const malformedPercent = /%(?![0-9A-F]{2})/iu; // already /u
       if (malformedPercent.test(path)) {
         throw new InvalidParameterError(
           `${context}: URL pathname contains malformed percent-encoding.`,
@@ -570,11 +619,14 @@ export function normalizeOrigin(o: string): string {
     const proto = u.protocol; // includes trailing ':'
     const hostname = canonicalizeHostname(u.hostname);
     const port = u.port;
-    const defaultPorts: Record<string, string> = {
+    const defaultPorts: Readonly<Record<"http:" | "https:", string>> = {
       "http:": "80",
       "https:": "443",
-    };
-    const includePort = port !== "" && port !== defaultPorts[proto];
+    } as const;
+    const isStandardPort =
+      (proto === "http:" && port === defaultPorts["http:"]) ||
+      (proto === "https:" && port === defaultPorts["https:"]);
+    const includePort = port !== "" && !isStandardPort;
     const portPart = includePort ? `:${port}` : "";
     // Return canonical origin form WITHOUT trailing slash.
     return `${proto}//${hostname}${portPart}`;
@@ -625,22 +677,37 @@ export function getEffectiveSchemes(
   // Use an explicit arrow wrapper to avoid passing function reference directly
   // which some eslint rules flag (unicorn/no-array-callback-reference).
   const SAFE_SCHEMES = new Set(
-    getSafeSchemes().map((c) => canonicalizeScheme(c)),
+    (() => {
+      const raw = getSafeSchemes();
+      for (const sch of raw) {
+        if (typeof sch !== "string") {
+          throw new InvalidParameterError(
+            "Runtime policy safe schemes must be strings.",
+          );
+        }
+      }
+      return raw.map((c) => canonicalizeScheme(c));
+    })(),
   );
   if (allowedSchemes === undefined) return SAFE_SCHEMES;
   if (Array.isArray(allowedSchemes) && allowedSchemes.length === 0)
     return new Set<string>(); // explicit deny-all
 
   // Same explicit wrapper for user-provided list.
+  // Guard elements are strings to satisfy strict typing and avoid unsafe-argument
   const userSet = new Set(
-    Array.from(allowedSchemes).map((s) => canonicalizeScheme(s)),
+    Array.from(allowedSchemes)
+      .filter((s): s is string => typeof s === "string")
+      .map((s) => canonicalizeScheme(s)),
   );
-  const intersection = new Set([...userSet].filter((s) => SAFE_SCHEMES.has(s)));
+  const intersection = new Set(
+    Array.from(userSet).filter((s) => SAFE_SCHEMES.has(s)),
+  );
   if (userSet.size > 0 && intersection.size === 0) {
     // Check runtime policy toggle to optionally allow permissive behavior.
     // `getRuntimePolicy()` is strongly typed; access the flag directly without `any` casts.
     const rp = getRuntimePolicy();
-    if (rp.allowCallerSchemesOutsidePolicy === true) {
+    if (rp.allowCallerSchemesOutsidePolicy) {
       return userSet;
     }
     throw new InvalidParameterError(
@@ -696,9 +763,6 @@ function _checkForDangerousKeys(
           base: baseReference,
           dangerous,
         });
-        if (onUnsafeKey === "warn" || onUnsafeKey === "skip") continue; // Allow processing to continue for warn and skip modes
-        // This should never be reached, but kept for safety
-        throw new InvalidParameterError(message);
       }
     }
     return;
@@ -715,9 +779,6 @@ function _checkForDangerousKeys(
         secureDevelopmentLog("warn", componentName, message, {
           base: baseReference,
         });
-        if (onUnsafeKey === "warn" || onUnsafeKey === "skip") continue; // Allow processing to continue for warn and skip modes
-        // This should never be reached, but kept for safety
-        throw new InvalidParameterError(message);
       }
       continue;
     }
@@ -728,9 +789,6 @@ function _checkForDangerousKeys(
         base: baseReference,
         dangerous,
       });
-      if (onUnsafeKey === "warn" || onUnsafeKey === "skip") continue; // Allow processing to continue for warn and skip modes
-      // This should never be reached, but kept for safety
-      throw new InvalidParameterError(message);
     }
   }
 
@@ -823,13 +881,13 @@ function processQueryParameters(
     }
     if (key.length > maxName) {
       throw new InvalidParameterError(
-        `Query parameter name exceeds maximum length (${maxName}).`,
+        `Query parameter name exceeds maximum length (${String(maxName)}).`,
       );
     }
-    const stringValue = value === undefined ? "" : String(value ?? "");
+    const stringValue = value === undefined ? "" : _toString(value);
     if (stringValue.length > maxValue) {
       throw new InvalidParameterError(
-        `Query parameter value exceeds maximum length (${maxValue}).`,
+        `Query parameter value exceeds maximum length (${String(maxValue)}).`,
       );
     }
     if (hasControlChars(stringValue)) {
@@ -839,7 +897,7 @@ function processQueryParameters(
     }
     // Validate percent-encoding in query values to prevent mixed/malformed encodings.
     // Reject stray '%' not followed by two hex digits; also ensure decodeURIComponent wouldn't throw.
-    if (/%(?![0-9A-F]{2})/i.test(stringValue)) {
+    if (/%(?![0-9A-F]{2})/iu.test(stringValue)) {
       throw new InvalidParameterError(
         "Query parameter values contain malformed percent-encoding.",
       );
@@ -890,7 +948,7 @@ function processUpdateParameters(
     }
     if (key.length > maxName) {
       throw new InvalidParameterError(
-        `Query parameter name exceeds maximum length (${maxName}).`,
+        `Query parameter name exceeds maximum length (${String(maxName)}).`,
       );
     }
 
@@ -900,10 +958,10 @@ function processUpdateParameters(
     }
 
     // Treat nullish as empty string for updates (preserving prior behavior); avoid null literal.
-    const stringValue = String(value ?? "");
+    const stringValue = _toString(value);
     if (stringValue.length > maxValue) {
       throw new InvalidParameterError(
-        `Query parameter value exceeds maximum length (${maxValue}).`,
+        `Query parameter value exceeds maximum length (${String(maxValue)}).`,
       );
     }
     if (hasControlChars(stringValue)) {
@@ -912,7 +970,7 @@ function processUpdateParameters(
       );
     }
     // Enforce malformed percent-encoding parity with create path.
-    if (/%(?![0-9A-F]{2})/i.test(stringValue)) {
+    if (/%(?![0-9A-F]{2})/iu.test(stringValue)) {
       throw new InvalidParameterError(
         "Query parameter values contain malformed percent-encoding.",
       );
@@ -933,7 +991,7 @@ function processUpdateParameters(
    Path segments & encoding
    ------------------------- */
 
-const ENCODE_SUBDELIMS_RE = /[!'()*]/g;
+const ENCODE_SUBDELIMS_RE = /[!'()*]/gu; // Add 'u' flag for lint compliance (ASCII set)
 
 function hasControlChars(s: string): boolean {
   for (const ch of s) {
@@ -962,7 +1020,7 @@ export const encodeQueryValue = _rfc3986EncodeURIComponentImpl;
 export const encodeMailtoValue = _rfc3986EncodeURIComponentImpl;
 
 export function encodeFormValue(value: unknown): string {
-  return _rfc3986EncodeURIComponentImpl(value).replace(/%20/g, "+");
+  return _rfc3986EncodeURIComponentImpl(value).replace(/%20/gu, "+");
 }
 
 /**
@@ -994,14 +1052,25 @@ function _rebuildURL(components: {
    Dangerous key helper + safe key regex
    ------------------------- */
 
-const SAFE_KEY_REGEX = /^[\w.-]{1,128}$/;
+// Explicit key validation instead of regex to avoid any ReDoS lint timeouts and
+// to keep behavior auditable. Accepts [A-Za-z0-9_.-] and length 1..128.
 function isSafeKey(key: string): boolean {
-  return (
-    SAFE_KEY_REGEX.test(key) &&
-    key !== "__proto__" &&
-    key !== "constructor" &&
-    key !== "prototype"
-  );
+  if (key.length === 0 || key.length > 128) return false;
+  if (isForbiddenKey(key)) return false;
+
+  for (const ch of key) {
+    const codePoint = ch.charCodeAt(0);
+    const isAZ = codePoint >= 65 && codePoint <= 90;
+    const isaz = codePoint >= 97 && codePoint <= 122;
+    const is09 = codePoint >= 48 && codePoint <= 57;
+    const isDot = codePoint === 46; // '.'
+    const isDash = codePoint === 45; // '-'
+    const isUnderscore = codePoint === 95; // '_'
+    if (!(isAZ || isaz || is09 || isDot || isDash || isUnderscore)) {
+      return false;
+    }
+  }
+  return true;
 }
 
 /* -------------------------
@@ -1120,12 +1189,16 @@ function preValidateAuthority(
       );
     }
   }
-  // Ensure no internal whitespace/control characters in trimmed value.
-  // eslint-disable-next-line sonarjs/prefer-regexp-exec, no-control-regex, sonarjs/no-control-regex, sonarjs/duplicates-in-character-class -- security hardening: control character validation is intentional
-  if (authorityTrimmed.match(/[\s\u0000-\u001f\u007f-\u009f]/)) {
-    throw new InvalidParameterError(
-      `${context}: Authority contains control characters or internal whitespace.`,
-    );
+  // Ensure no internal whitespace/control characters in trimmed value (manual scan to avoid complex regex & lint suppression).
+  for (const ch of authorityTrimmed) {
+    const cc = ch.charCodeAt(0);
+    const isWhitespace = cc === 32 || cc === 9 || cc === 10 || cc === 13; // space, tab, LF, CR
+    const isControl = cc < 32 || (cc >= 127 && cc <= 159);
+    if (isWhitespace || isControl) {
+      throw new InvalidParameterError(
+        `${context}: Authority contains control characters or internal whitespace.`,
+      );
+    }
   }
 
   const isBracketedIPv6 =
@@ -1164,7 +1237,13 @@ function preValidateAuthority(
     const isAllDigits =
       portPart.length > 0 &&
       portPart.length <= 5 &&
-      [...portPart].every((c) => c >= "0" && c <= "9");
+      (() => {
+        for (const ch of portPart) {
+          const code = ch.charCodeAt(0);
+          if (code < 48 || code > 57) return false;
+        }
+        return true;
+      })();
     const validPortForm = hostPart.length > 0 && !hasSecondColon && isAllDigits;
     if (!validPortForm) {
       throw new InvalidParameterError(
@@ -1190,16 +1269,19 @@ function preValidateAuthority(
       changedByIdna: normalizationChanged,
     } as const;
     // Non-ASCII handling: Option A (reject) vs Option B (convert)
-    const containsNonASCII = [...authorityTrimmed].some(
-      (ch) => ch.charCodeAt(0) > 127,
-    );
+    const containsNonASCII = (() => {
+      for (const ch of authorityTrimmed) {
+        if (ch.charCodeAt(0) > 127) return true;
+      }
+      return false;
+    })();
     if (!containsNonASCII) return unchanged;
     if (BIDI_CONTROL_CHAR_REGEX.test(authorityTrimmed)) {
       throw new InvalidParameterError(
         `${context}: Authority contains disallowed bidirectional control characters.`,
       );
     }
-    if (!cfg.enableIdnaToAscii) {
+    if (cfg.enableIdnaToAscii !== true) {
       throw new InvalidParameterError(
         `${context}: Raw non-ASCII characters in authority are not allowed (provide IDNA A-label).`,
       );
@@ -1216,7 +1298,7 @@ function preValidateAuthority(
         `${context}: Authority length exceeds safe pre-IDNA maximum.`,
       );
     }
-    const rawHostOnly = authorityTrimmed.replace(/:\d+$/, "");
+    const rawHostOnly = authorityTrimmed.replace(/:\d+$/u, "");
     const rawLabels = rawHostOnly.split(".");
     if (rawLabels.length > MAX_HOST_LABELS_PRE_IDNA) {
       throw new InvalidParameterError(
@@ -1306,7 +1388,7 @@ function preValidateAuthority(
     );
   }
 
-  const authorityForIPv4Check = authorityTrimmed.replace(/:\d+$/, "");
+  const authorityForIPv4Check = authorityTrimmed.replace(/:\d+$/u, "");
   return {
     effectiveAuthority,
     authorityForIPv4Check,
@@ -1325,8 +1407,8 @@ function preValidatePath(
   allowPaths: boolean,
 ): void {
   if (!allowPaths) return;
-  const traversalToken = /(?:^|[\\/])\.\.?(?:[\\/]|$)/.test(rawPath);
-  const doubleSlash = /[\\/]{2,}/.test(rawPath);
+  const traversalToken = /(?:^|[\\/])\.\.?(?:[\\/]|$)/u.test(rawPath);
+  const doubleSlash = /[\\/]{2,}/u.test(rawPath);
   const hasTraversal = traversalToken || doubleSlash;
   if (!hasTraversal) return;
   const isValidationContext = context === "validateURL";
@@ -1396,7 +1478,7 @@ export function createSecureURL(
     // HARDENING: Resource limiting for DoS protection
     if (pathSegments.length > maxPathSegments) {
       throw new InvalidParameterError(
-        `Path segments exceed maximum allowed (${maxPathSegments}).`,
+        `Path segments exceed maximum allowed (${String(maxPathSegments)}).`,
       );
     }
 
@@ -1406,7 +1488,7 @@ export function createSecureURL(
         : Object.keys(queryParameters).length;
     if (parameterCount > maxQueryParameters) {
       throw new InvalidParameterError(
-        `Query parameters exceed maximum allowed (${maxQueryParameters}).`,
+        `Query parameters exceed maximum allowed (${String(maxQueryParameters)}).`,
       );
     }
 
@@ -1438,7 +1520,7 @@ export function createSecureURL(
       );
       if (typeof maxLengthOpt === "number" && opaque.length > maxLengthOpt) {
         throw new InvalidParameterError(
-          `Resulting URL exceeds maxLength ${maxLengthOpt}.`,
+          `Resulting URL exceeds maxLength ${String(maxLengthOpt)}.`,
         );
       }
       return opaque;
@@ -1459,7 +1541,7 @@ export function createSecureURL(
         // Validate on raw segment first to catch encoded navigation
         // sequences prior to any decoding.
         // Reject '%2e', '%2f', '%5c' (case-insensitive) in raw form.
-        if (/%2e|%2f|%5c/i.test(segment)) {
+        if (/%2e|%2f|%5c/iu.test(segment)) {
           throw new InvalidParameterError(
             "Path segments must not contain encoded navigation.",
           );
@@ -1470,7 +1552,7 @@ export function createSecureURL(
           if (s === "." || s === "..") return true;
           // Reject segments that resolve to only dots of length 3 as a conservative guard
           // against obfuscated parent/current directory traversal (e.g., '..%252e' -> '...').
-          if (/^\.+$/.test(s) && s.length <= 3) return true;
+          if (/^\.+$/u.test(s) && s.length <= 3) return true;
           return false;
         };
         // Also guard against double-encoded traversal (e.g., '%252e' -> '%2e' -> '.')
@@ -1504,7 +1586,7 @@ export function createSecureURL(
       .filter((s) => s.length > 0).length;
     if (totalSegments > maxPathSegments) {
       throw new InvalidParameterError(
-        `Path segments exceed maximum allowed (${maxPathSegments}).`,
+        `Path segments exceed maximum allowed (${String(maxPathSegments)}).`,
       );
     }
 
@@ -1520,7 +1602,7 @@ export function createSecureURL(
     // to ensure DoS limits account for existing parameters.
     if (finalSearchParameters.size > maxQueryParameters) {
       throw new InvalidParameterError(
-        `Final query parameters exceed maximum allowed (${maxQueryParameters}).`,
+        `Final query parameters exceed maximum allowed (${String(maxQueryParameters)}).`,
       );
     }
 
@@ -1612,7 +1694,7 @@ function buildOpaqueURL(
   );
   if (searchParameters.size > maxQueryParameters) {
     throw new InvalidParameterError(
-      `Final query parameters exceed maximum allowed (${maxQueryParameters}).`,
+      `Final query parameters exceed maximum allowed (${String(maxQueryParameters)}).`,
     );
   }
 
@@ -1685,13 +1767,13 @@ function normalizePhoneNumber(raw: string): string {
   if (trimmed.length === 0) {
     throw new InvalidParameterError("Phone number must not be empty");
   }
-  if (!/^[+\d()\-\s]+$/.test(trimmed)) {
+  if (!/^[+\d()\-\s]+$/u.test(trimmed)) {
     throw new InvalidParameterError("Phone number contains invalid characters");
   }
   // Strip spaces, hyphens, parentheses; keep a single leading '+' if present
   const leadingPlus = trimmed.startsWith("+");
-  const digitsOnly = trimmed.replace(/[()\-\s]/g, "").replace(/^\+/, "");
-  if (!/^\d{3,20}$/.test(digitsOnly)) {
+  const digitsOnly = trimmed.replace(/[()\-\s]/gu, "").replace(/^\+/u, "");
+  if (!/^\d{3,20}$/u.test(digitsOnly)) {
     throw new InvalidParameterError("Phone number must contain 3-20 digits");
   }
   return (leadingPlus ? "+" : "") + digitsOnly;
@@ -1744,7 +1826,7 @@ export function updateURLParams(
       (updates instanceof Map ? updates.size : Object.keys(updates).length);
     if (finalParameterCount > maxQueryParameters) {
       throw new InvalidParameterError(
-        `Final query parameters would exceed maximum allowed (${maxQueryParameters}).`,
+        `Final query parameters would exceed maximum allowed (${String(maxQueryParameters)}).`,
       );
     }
 
@@ -1760,7 +1842,7 @@ export function updateURLParams(
     // deletes/overwrites and prevent DoS via excessive parameters.
     if (url.searchParams.size > maxQueryParameters) {
       throw new InvalidParameterError(
-        `Final query parameters exceed maximum allowed (${maxQueryParameters}).`,
+        `Final query parameters exceed maximum allowed (${String(maxQueryParameters)}).`,
       );
     }
 
@@ -1772,7 +1854,7 @@ export function updateURLParams(
 
     if (typeof maxLengthOpt === "number" && url.href.length > maxLengthOpt) {
       throw new InvalidParameterError(
-        `Resulting URL exceeds maxLength ${maxLengthOpt}.`,
+        `Resulting URL exceeds maxLength ${String(maxLengthOpt)}.`,
       );
     }
 
@@ -1802,7 +1884,10 @@ export function validateURLStrict(
     ...(options.allowedOrigins
       ? { allowedOrigins: options.allowedOrigins }
       : {}),
-    ...(options.maxLength ? { maxLength: options.maxLength } : {}),
+    ...(typeof options.maxLength === "number" &&
+    Number.isFinite(options.maxLength)
+      ? { maxLength: options.maxLength }
+      : {}),
   } as const;
   return validateURL(
     urlString,
@@ -1835,7 +1920,16 @@ export function validateURL(
   | { readonly ok: true; readonly url: URL }
   | { readonly ok: false; readonly error: Error } {
   // HARDENING: Apply NFKC normalization to input URL
-  const normalizedUrlString = normalizeInputString(urlString);
+  // Be resilient to hostile non-string inputs (objects/functions) by
+  // catching normalization errors and treating them as empty strings,
+  // allowing this API to return { ok: false } instead of throwing.
+  const normalizedUrlString = (() => {
+    try {
+      return normalizeInputString(urlString);
+    } catch {
+      return "";
+    }
+  })();
 
   const {
     allowedOrigins,
@@ -1855,7 +1949,9 @@ export function validateURL(
   if (normalizedUrlString.length > maxLength) {
     return {
       ok: false,
-      error: new InvalidParameterError(`URL length exceeds ${maxLength}.`),
+      error: new InvalidParameterError(
+        `URL length exceeds ${String(maxLength)}.`,
+      ),
     };
   }
 
@@ -1880,7 +1976,7 @@ export function validateURL(
       const path = url.pathname;
       // Validate percent-encoding using a regex: ensure every '%' is followed by two hex digits.
       // This is equivalent to scanning for malformed percent-encodings but avoids mutable loop counters.
-      const malformedPercent = /%(?![0-9A-F]{2})/i;
+      const malformedPercent = /%(?![0-9A-F]{2})/iu;
       if (malformedPercent.test(path)) {
         return {
           ok: false,
@@ -1935,7 +2031,7 @@ export function validateURL(
       return {
         ok: false,
         error: new InvalidParameterError(
-          `URL query parameters exceed maximum allowed (${maxQueryParameters}).`,
+          `URL query parameters exceed maximum allowed (${String(maxQueryParameters)}).`,
         ),
       };
     }
@@ -1985,8 +2081,7 @@ export function parseURLParams(
   // HARDENING: Apply NFKC normalization to input URL
   const normalizedUrlString = normalizeInputString(urlString);
 
-  if (typeof normalizedUrlString !== "string")
-    throw new InvalidParameterError("URL must be a string.");
+  // Note: normalizeInputString always returns a string; no additional typeof check required.
 
   const parseUrlOrThrow = (s: string): URL => {
     try {
@@ -2014,12 +2109,29 @@ export function parseURLParams(
 
   // Freeze and return a POJO with a null prototype created from the map so
   // callers can assert the prototype is null to detect tampering.
-  const object = Object.create(null) as Record<string, string>;
-  // Intentionally creating a plain POJO from the Map for return; this requires
-  // assigning properties on the newly-created object. It's safe and intentional.
-  // eslint-disable-next-line functional/immutable-data -- creating return POJO from map
-  for (const [k, v] of parameterMap.entries()) object[k] = v;
-  return Object.freeze(object);
+  // Build immutable result without in-place mutation of existing objects.
+  // We intentionally materialize a new object with null prototype using a reducer
+  // to satisfy functional/immutable-data while ensuring prototype pollution resistance.
+  if (parameterMap.size === 0) {
+    return Object.freeze(Object.create(null) as Record<string, string>);
+  }
+  const safeEntries = Array.from(parameterMap.entries()).map(
+    ([k, v]): readonly [string, PropertyDescriptor] => [
+      k,
+      {
+        value: v,
+        enumerable: true,
+        configurable: false,
+        writable: false,
+      } as const,
+    ],
+  );
+  // Create object with null prototype and define all properties atomically.
+  const target = Object.create(null) as Record<string, string>;
+  for (const [k, desc] of safeEntries) {
+    Object.defineProperty(target, k, desc);
+  }
+  return Object.freeze(target);
 }
 
 function _logParameterWarn(
@@ -2031,7 +2143,11 @@ function _logParameterWarn(
   secureDevelopmentLog(
     "warn",
     "parseURLParams",
-    extra ? `${kind} '${key}': ${extra}` : `${kind} '${key}'`,
+    ((): string => {
+      if (typeof extra === "string" && extra.length > 0)
+        return `${kind} '${key}': ${extra}`;
+      return `${kind} '${key}'`;
+    })(),
     { url: urlString },
   );
 }
@@ -2107,16 +2223,26 @@ export function strictDecodeURIComponentOrThrow(string_: string): string {
    IDNA helper
    ------------------------- */
 
-export function encodeHostLabel(
-  label: string,
-  idnaLibrary: { readonly toASCII: (s: string) => string },
-): string {
-  if (!idnaLibrary?.toASCII)
-    throw new InvalidParameterError(
-      "An IDNA-compliant library must be provided.",
-    );
+export function encodeHostLabel(label: unknown, idnaLibrary: unknown): string {
+  // Runtime shape validation: callers may pass untyped inputs at runtime; enforce presence of toASCII.
+  const toASCII = ((): ((s: string) => string) => {
+    const maybe: { readonly toASCII?: unknown } | null | undefined =
+      idnaLibrary as { readonly toASCII?: unknown } | null | undefined;
+    if (!maybe || typeof maybe.toASCII !== "function") {
+      throw new InvalidParameterError(
+        "An IDNA-compliant library must be provided.",
+      );
+    }
+    return maybe.toASCII as (s: string) => string;
+  })();
   try {
-    return idnaLibrary.toASCII(_toString(label));
+    // Strict validation: label must be a string per API contract. Reject other primitives to avoid
+    // ambiguous coercions in security-sensitive hostname processing.
+    if (typeof label !== "string") {
+      throw new InvalidParameterError("IDNA label must be a string");
+    }
+    const normalized = label.normalize("NFKC");
+    return toASCII(normalized);
   } catch (error: unknown) {
     throw new InvalidParameterError(
       `IDNA encoding failed: ${error instanceof Error ? error.message : "Unknown error"}`,
@@ -2140,7 +2266,12 @@ function isOriginAllowed(
   if (!allowlist) return true;
   if (Array.isArray(allowlist) && allowlist.length === 0) return false;
 
-  const normalized = new Set(allowlist.map((a) => normalizeOrigin(a)));
+  // Build the normalized allowlist immutably to satisfy functional/immutable-data.
+  const normalized = new Set(
+    Array.from(allowlist)
+      .filter((a): a is string => typeof a === "string")
+      .map((a) => normalizeOrigin(a)),
+  );
   const originNorm = normalizeOrigin(origin);
   return normalized.has(originNorm);
 }
@@ -2173,7 +2304,7 @@ function enforceSchemeAndLength(
 
   if (typeof maxLengthOpt === "number" && url.href.length > maxLengthOpt) {
     throw new InvalidParameterError(
-      `Resulting URL exceeds maxLength ${maxLengthOpt}.`,
+      `Resulting URL exceeds maxLength ${String(maxLengthOpt)}.`,
     );
   }
 }

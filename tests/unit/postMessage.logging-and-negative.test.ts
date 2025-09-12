@@ -1,8 +1,6 @@
 import { test, expect, vi, beforeEach, afterEach } from "vitest";
-import {
-  createSecurePostMessageListener,
-  POSTMESSAGE_MAX_PAYLOAD_BYTES,
-} from "../../src/postMessage";
+import { createSecurePostMessageListener } from "../../src/postMessage";
+import { getPostMessageConfig } from "../../src/config";
 import { InvalidParameterError } from "../../src/errors";
 
 const mockAddEventListener = vi.fn();
@@ -157,7 +155,7 @@ test("createSecurePostMessageListener throws for invalid allowedOrigins", () => 
 import { sendSecurePostMessage } from "../../src/postMessage";
 
 test("sendSecurePostMessage rejects oversized JSON payload", () => {
-  const big = "x".repeat(POSTMESSAGE_MAX_PAYLOAD_BYTES + 1);
+  const big = "x".repeat(getPostMessageConfig().maxPayloadBytes + 1);
   const payload = { p: big };
   const mockTarget = { postMessage: vi.fn() } as any;
   expect(() =>

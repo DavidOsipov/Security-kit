@@ -144,7 +144,8 @@ describe("postMessage utilities", () => {
     const win = {
       postMessage: (_: unknown, __: string) => {},
     } as unknown as Window;
-    const big = "x".repeat(postMessage.POSTMESSAGE_MAX_PAYLOAD_BYTES + 10);
+    const cfg = postMessage.getPostMessageConfig();
+    const big = "x".repeat(cfg.maxPayloadBytes + 10);
     try {
       postMessage.sendSecurePostMessage({
         targetWindow: win,

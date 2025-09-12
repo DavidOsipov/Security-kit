@@ -4,8 +4,8 @@ import {
   sendSecurePostMessage,
   createSecurePostMessageListener,
   __test_toNullProto,
-  POSTMESSAGE_MAX_PAYLOAD_BYTES,
 } from "../../src/postMessage";
+import { getPostMessageConfig } from "../../src/config";
 import { environment } from "../../src/environment";
 import {
   TransferableNotAllowedError,
@@ -65,7 +65,7 @@ test("sendSecurePostMessage JSON path sends serialized string and enforces size"
   expect(posted[0].origin).toBe(location.origin);
 
   // oversized payload should throw
-  const big = "x".repeat(POSTMESSAGE_MAX_PAYLOAD_BYTES + 10);
+  const big = "x".repeat(getPostMessageConfig().maxPayloadBytes + 10);
   expect(() =>
     sendSecurePostMessage({
       targetWindow: fakeWin,

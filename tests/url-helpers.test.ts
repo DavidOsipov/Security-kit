@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: LGPL-3.0-or-later
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { InvalidParameterError } from '../src/errors';
-import type { UrlHardeningConfig } from '../src/config';
+import { InvalidParameterError } from '../src/errors.ts';
+import type { UrlHardeningConfig } from '../src/config.ts';
 import {
   getUrlHardeningConfig,
   setUrlHardeningConfig,

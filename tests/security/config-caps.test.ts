@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: LGPL-3.0-or-later
 import { describe, it, expect } from 'vitest';
-import { setPostMessageConfig } from '../src/config';
-import { InvalidParameterError } from '../src/errors';
+import { setPostMessageConfig } from '../../src/config.ts';
+import { InvalidParameterError } from '../../src/errors.ts';
 
 describe('PostMessage config hard caps', () => {
   it('rejects values that exceed hard caps', () => {

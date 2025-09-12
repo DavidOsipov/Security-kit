@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import { InvalidParameterError } from "../../src/errors";
 import {
   createSecureURL,
   updateURLParams,
@@ -620,9 +621,10 @@ describe("comprehensive unit tests for URL module", () => {
       expect(() => encodeHostLabel("test", badLibrary)).toThrow();
     });
 
-    it("should convert input to string", () => {
-      const result = encodeHostLabel(123, mockIdnaLibrary);
-      expect(result).toBe("123.ascii");
+    it("should reject non-string input", () => {
+      expect(() => encodeHostLabel(123 as unknown as string, mockIdnaLibrary)).toThrow(
+        InvalidParameterError,
+      );
     });
   });
 

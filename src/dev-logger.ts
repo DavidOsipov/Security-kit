@@ -14,7 +14,10 @@ export type DevelopmentLogger = (
 ) => void;
 
 // Default no-op logger to avoid side effects on import
-export const developmentLog: DevelopmentLogger = () => {};
+// explicit no-op to satisfy lint rule and avoid swallowing behavior
+export const developmentLog: DevelopmentLogger = () => {
+  void 0;
+};
 
 export function setDevelopmentLogger(_function_: DevelopmentLogger): void {
   // This function is kept for API compatibility

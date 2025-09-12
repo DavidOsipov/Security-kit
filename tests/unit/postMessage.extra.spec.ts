@@ -1,9 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import {
-  sendSecurePostMessage,
-  createSecurePostMessageListener,
-  POSTMESSAGE_MAX_PAYLOAD_BYTES,
-} from "../../src/postMessage";
+import { sendSecurePostMessage, createSecurePostMessageListener } from "../../src/postMessage";
+import { getPostMessageConfig } from "../../src/config";
 import {
   InvalidParameterError,
   InvalidConfigurationError,
@@ -86,7 +83,7 @@ describe("sendSecurePostMessage validations", () => {
     ).toThrow(InvalidParameterError);
 
     // Oversized payload
-    const big = "x".repeat(POSTMESSAGE_MAX_PAYLOAD_BYTES + 10);
+  const big = "x".repeat(getPostMessageConfig().maxPayloadBytes + 10);
     expect(() =>
       sendSecurePostMessage({
         targetWindow: fakeWin,

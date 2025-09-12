@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: LGPL-3.0-or-later
 // SPDX-FileCopyrightText: © 2025 David Osipov <personal@david-osipov.vision>
+/// <reference types="./dnt-globals.d.ts" />
 
 /**
  * Manages the internal state and lifecycle of the crypto provider.
@@ -10,13 +11,31 @@ import {
   CryptoUnavailableError,
   InvalidConfigurationError,
   InvalidParameterError,
-} from "./errors";
-import { environment, isDevelopment } from "./environment";
-import { reportProdError as reportProductionError } from "./reporting";
+} from "./errors.ts";
+import { environment, isDevelopment } from "./environment.ts";
+// Use explicit process import to satisfy Deno/Node hybrid linting rules
+import process from "node:process";
+import { Buffer } from "node:buffer";
+
+// Safe environment accessor to avoid unsafe member access on process.env
+function getEnvironmentVariableSafe(key: string): string | undefined {
+  const environment_ = (
+    process as unknown as {
+      readonly env?: Record<string, string | undefined>;
+    }
+  ).env;
+  if (environment_ && typeof environment_ === "object") {
+    // Only allow string|undefined values
+    const v = environment_[key];
+    return typeof v === "string" ? v : undefined;
+  }
+  return undefined;
+}
+import { reportProdError as reportProductionError } from "./reporting.ts";
 import {
   developmentLog_ as secureDevelopmentLog,
   setDevelopmentLogger_,
-} from "./dev-logger";
+} from "./dev-logger.ts";
 
 // --- State Machine ---
 export const CryptoState = Object.freeze({
@@ -36,10 +55,14 @@ function isCryptoLike(v: unknown): v is Crypto {
   );
 }
 
+/* eslint-disable sonarjs/cognitive-complexity */
 /**
  * Securely detects Node.js crypto implementation with strict validation.
  * Protected against cache poisoning via generation-based invalidation.
  * ASVS L3 compliant: validates all crypto interfaces before trusting.
+ *
+ * Justification: Security validation requires several guarded branches and
+ * early-exit paths to remain explicit and auditable (Pillar #1: Verifiable Security).
  */
 async function detectNodeCrypto(
   generation: number,
@@ -54,8 +77,10 @@ async function detectNodeCrypto(
     }
 
     // ASVS L3: Strict validation of Node webcrypto interface
-    if (nodeModule?.webcrypto && isCryptoLike(nodeModule.webcrypto)) {
-      const webcrypto = nodeModule.webcrypto as Crypto;
+    // Use index access to avoid relying on ambient types claiming presence
+    const maybeWebcrypto = (nodeModule as Record<string, unknown>)["webcrypto"];
+    if (isCryptoLike(maybeWebcrypto)) {
+      const webcrypto = maybeWebcrypto;
       // Additional validation for SubtleCrypto if present
       const subtle = (webcrypto as { readonly subtle?: unknown }).subtle;
       if (subtle && typeof subtle === "object") {
@@ -70,12 +95,20 @@ async function detectNodeCrypto(
     }
 
     // Fallback: Check if Node crypto.randomBytes can be adapted
-    if (typeof nodeModule?.randomBytes === "function") {
+    if (typeof nodeModule.randomBytes === "function") {
       const randomBytesFunction = nodeModule.randomBytes as (
         size: number,
       ) => Buffer;
 
       // Create a Crypto-compatible interface using Node's randomBytes
+      // Provide a safe randomUUID fallback without optional chaining
+      const adaptedRandomUUID: Crypto["randomUUID"] =
+        typeof nodeModule.randomUUID === "function"
+          ? nodeModule.randomUUID.bind(nodeModule)
+          : () => {
+              throw new Error("randomUUID not available");
+            };
+
       const adaptedCrypto: Crypto = {
         getRandomValues: <T extends ArrayBufferView | null>(array: T): T => {
           if (!array || typeof array !== "object" || !("byteLength" in array)) {
@@ -89,11 +122,7 @@ async function detectNodeCrypto(
         },
         // Note: subtle may not be available in this fallback
         subtle: undefined as unknown as SubtleCrypto,
-        randomUUID:
-          nodeModule.randomUUID?.bind(nodeModule) ??
-          (() => {
-            throw new Error("randomUUID not available");
-          }),
+        randomUUID: adaptedRandomUUID,
       };
 
       return adaptedCrypto;
@@ -104,7 +133,7 @@ async function detectNodeCrypto(
     // Secure logging: don't expose internal error details
     if (isDevelopment()) {
       // Initialize logger on first use to avoid side effects on import
-      import("./utils")
+      import("./utils.ts")
         .then(({ secureDevLog }) => {
           setDevelopmentLogger_(secureDevLog);
         })
@@ -122,13 +151,14 @@ async function detectNodeCrypto(
     return undefined;
   }
 }
+/* eslint-enable sonarjs/cognitive-complexity */
 
 /* Deliberate mutable module-level state for lifecycle management. These
   variables must be mutable so the module can manage crypto provider
   initialization, caching and sealing. Narrowly disable the rule here. */
 /* eslint-disable functional/no-let -- deliberate mutable lifecycle state */
-let _cachedCrypto: Crypto | undefined = undefined;
-let _cryptoPromise: Promise<Crypto> | undefined = undefined;
+let _cachedCrypto: Crypto | undefined;
+let _cryptoPromise: Promise<Crypto> | undefined;
 let _cryptoState: CryptoState = CryptoState.Unconfigured;
 let _cryptoInitGeneration = 0;
 /* eslint-enable functional/no-let */
@@ -163,7 +193,8 @@ export function _setCrypto(
   if (environment.isProduction && cryptoLike && allowInProduction) {
     const environmentAllow =
       typeof process !== "undefined" &&
-      process?.env?.["SECURITY_KIT_ALLOW_SET_CRYPTO_IN_PROD"] === "true";
+      getEnvironmentVariableSafe("SECURITY_KIT_ALLOW_SET_CRYPTO_IN_PROD") ===
+        "true";
     const globalAllow = !!(globalThis as unknown as Record<string, unknown>)[
       "__SECURITY_KIT_ALLOW_SET_CRYPTO_IN_PROD"
     ];
@@ -231,10 +262,10 @@ export async function ensureCrypto(): Promise<Crypto> {
       throw new CryptoUnavailableError(
         "Security kit is sealed, but no crypto provider was configured.",
       );
-    return _cachedCrypto!;
+    return _cachedCrypto;
   }
   if (_cryptoState === CryptoState.Configured && _cachedCrypto) {
-    return _cachedCrypto!;
+    return _cachedCrypto;
   }
   if (_cryptoPromise) {
     return _cryptoPromise;
@@ -248,7 +279,7 @@ export async function ensureCrypto(): Promise<Crypto> {
       if (myGeneration !== _cryptoInitGeneration) {
         if (_cachedCrypto) {
           _cryptoState = CryptoState.Configured;
-          return _cachedCrypto!;
+          return _cachedCrypto;
         }
         _cryptoState = CryptoState.Unconfigured;
         throw new CryptoUnavailableError(
@@ -257,7 +288,7 @@ export async function ensureCrypto(): Promise<Crypto> {
       }
       if (_cachedCrypto) {
         _cryptoState = CryptoState.Configured;
-        return _cachedCrypto!;
+        return _cachedCrypto;
       }
       // First, try globalThis.crypto (browser or Node 20+)
       const globalCrypto = (globalThis as { readonly crypto?: Crypto }).crypto;
@@ -266,7 +297,7 @@ export async function ensureCrypto(): Promise<Crypto> {
           _cachedCrypto = globalCrypto;
           _cryptoState = CryptoState.Configured;
         }
-        return _cachedCrypto!;
+        return globalCrypto;
       }
 
       // ASVS L3 Enhancement: Auto-detect Node.js crypto with security validation
@@ -278,7 +309,7 @@ export async function ensureCrypto(): Promise<Crypto> {
         // Log successful Node crypto detection in development
         if (isDevelopment()) {
           // Initialize logger on first use to avoid side effects on import
-          import("./utils")
+          import("./utils.ts")
             .then(({ secureDevLog }) => {
               setDevelopmentLogger_(secureDevLog);
             })
@@ -296,7 +327,7 @@ export async function ensureCrypto(): Promise<Crypto> {
           );
         }
 
-        return _cachedCrypto!;
+        return _cachedCrypto;
       }
 
       // Validation: Ensure generation hasn't changed during Node detection
@@ -331,7 +362,7 @@ export async function ensureCrypto(): Promise<Crypto> {
         reportProductionError(safeError, safeContext);
       } else if (isDevelopment()) {
         // Initialize logger on first use to avoid side effects on import
-        import("./utils")
+        import("./utils.ts")
           .then(({ secureDevLog }) => {
             setDevelopmentLogger_(secureDevLog);
           })
@@ -448,7 +479,7 @@ export const __test_resetCryptoStateForUnitTests: undefined | (() => void) =
 // This is intentionally guarded so it only works in test runs. It helps test
 // harnesses that don't set __TEST__ at compile-time to reset global state.
 export function __resetCryptoStateForTests(): void {
-  if (process.env["NODE_ENV"] !== "test") {
+  if (getEnvironmentVariableSafe("NODE_ENV") !== "test") {
     throw new Error(
       "__resetCryptoStateForTests is test-only and cannot be used outside tests.",
     );
@@ -484,7 +515,7 @@ export const getInternalTestUtilities = getInternalTestUtils;
 // Small test helper to inspect cached crypto in unit tests when allowed.
 export function __test_getCachedCrypto(): Crypto | null | undefined {
   // For test environment, always return cached crypto
-  if (process.env["NODE_ENV"] === "test") {
+  if (getEnvironmentVariableSafe("NODE_ENV") === "test") {
     return _cachedCrypto;
   }
   // Check compile-time flag
@@ -502,7 +533,7 @@ export function __test_getCachedCrypto(): Crypto | null | undefined {
 
 // Test helper to set cached crypto for testing
 export function __test_setCachedCrypto(crypto: Crypto | undefined): void {
-  if (process.env["NODE_ENV"] === "test") {
+  if (getEnvironmentVariableSafe("NODE_ENV") === "test") {
     _cachedCrypto = crypto;
     if (crypto) {
       _cryptoState = CryptoState.Configured;
@@ -514,7 +545,7 @@ export function __test_setCachedCrypto(crypto: Crypto | undefined): void {
 
 // Test helper to set crypto state for testing edge cases
 export function __test_setCryptoState(state: CryptoState): void {
-  if (process.env["NODE_ENV"] === "test") {
+  if (getEnvironmentVariableSafe("NODE_ENV") === "test") {
     _cryptoState = state;
   }
 }

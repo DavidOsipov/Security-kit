@@ -50,11 +50,9 @@ export const environment = (() => {
       // Authoritative: NODE_ENV if present (case-insensitive)
       if (
         typeof process !== "undefined" &&
-        typeof process.env?.["NODE_ENV"] === "string"
+        typeof process.env["NODE_ENV"] === "string"
       ) {
-        const environmentValue = String(process.env["NODE_ENV"])
-          .trim()
-          .toLowerCase();
+        const environmentValue = process.env["NODE_ENV"].trim().toLowerCase();
         const isNodeDevelopment =
           environmentValue === "development" || environmentValue === "test";
         // Cache node-derived environment for subsequent calls.
@@ -92,7 +90,7 @@ export const environment = (() => {
 
       // Do NOT trim whitespace: treat leading/trailing spaces as malformed input
       // to avoid accidentally accepting ambiguous hostnames.
-      const hostname = String(rawHost).toLowerCase();
+      const hostname = rawHost.toLowerCase();
       const developmentHostnames = ["localhost", "127.0.0.1", "[::1]", ""];
       const developmentSuffixes = [".local", ".test"];
       const developmentPrefixes = ["192.168.", "10."];

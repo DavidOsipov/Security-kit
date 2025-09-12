@@ -7,8 +7,22 @@
  * __TEST__ flag is true during build-time but runtime still ends up in
  * a production environment (e.g., misconfiguration).
  */
-import { environment } from "./environment";
-import { InvalidConfigurationError } from "./errors";
+import { environment } from "./environment.ts";
+import { InvalidConfigurationError } from "./errors.ts";
+
+// Safe environment accessor to avoid unsafe member access on process.env
+function getEnvironmentVariableSafe(key: string): string | undefined {
+  // Resolve process from globalThis to allow tests to override it safely.
+  const g = globalThis as unknown as {
+    readonly process?: { readonly env?: Record<string, unknown> };
+  };
+  const environment_ = g.process?.env;
+  if (environment_ && typeof environment_ === "object") {
+    const raw = environment_[key];
+    return typeof raw === "string" ? raw : undefined;
+  }
+  return undefined;
+}
 
 export function assertTestApiAllowed(): void {
   // If we're not in production, it's always allowed.
@@ -16,8 +30,7 @@ export function assertTestApiAllowed(): void {
 
   // Allow explicit opt-in via env var or a global token.
   const environmentAllow =
-    typeof process !== "undefined" &&
-    process?.env?.["SECURITY_KIT_ALLOW_TEST_APIS"] === "true";
+    getEnvironmentVariableSafe("SECURITY_KIT_ALLOW_TEST_APIS") === "true";
   const globalAllow = !!(globalThis as unknown as Record<string, unknown>)[
     "__SECURITY_KIT_ALLOW_TEST_APIS"
   ];

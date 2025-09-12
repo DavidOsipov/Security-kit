@@ -4,7 +4,7 @@ import {
   __test_resetCryptoStateForUnitTests,
   _setCrypto,
 } from "../../src/state";
-import { POSTMESSAGE_MAX_PAYLOAD_DEPTH } from "../../src/postMessage";
+import { getPostMessageConfig } from "../../src/config";
 
 test("stableStringify depth overflow triggers fingerprint fallback", async () => {
   (globalThis as any).__SECURITY_KIT_ALLOW_TEST_APIS = true;
@@ -19,8 +19,9 @@ test("stableStringify depth overflow triggers fingerprint fallback", async () =>
     } catch {}
 
     // Build a deep, non-circular object that exceeds POSTMESSAGE_MAX_PAYLOAD_DEPTH
-    let deep: any = { leaf: "end" };
-    for (let i = 0; i < POSTMESSAGE_MAX_PAYLOAD_DEPTH + 3; i++) {
+    let deep: Record<string, unknown> = { leaf: "end" };
+    const limit = getPostMessageConfig().maxPayloadDepth + 3;
+    for (let i = 0; i < limit; i++) {
       deep = { child: deep };
     }
 

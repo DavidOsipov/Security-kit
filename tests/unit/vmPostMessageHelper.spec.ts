@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import loadPostMessageInternals from "../helpers/vmPostMessageHelper";
+import loadPostMessageInternals from "../helpers/vmPostMessageHelper.ts";
 
 describe("vmPostMessageHelper.__runInVmJson", () => {
   it("returns arrays from VM code", { timeout: 20000 }, () => {

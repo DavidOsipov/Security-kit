@@ -177,6 +177,20 @@ createSecureURL("https://example.test", [], { q: "value" }, undefined, {
 - We use multiple methods to enumerate own keys to detect non-enumerable properties and historically-problematic `__proto__` entries.
 - We purposely err on the side of caution: objects with odd prototypes or with `__proto__` explicitly present will be rejected unless the caller explicitly opts for `onUnsafeKey: "skip"`.
 
+### Hostname and IDNA Handling
+
+The library enforces strict validation and encoding of hostnames to prevent homograph attacks and ensure consistent behavior across environments.
+
+- Non-ASCII host labels must be converted to ASCII using an IDNA provider (punycode) via `encodeHostLabel`.
+- Hostnames are lowercased and trailing dots are removed during normalization.
+- Unicode inputs are normalized (NFKC) before processing.
+
+Important API contract: `encodeHostLabel` requires a string input only. Passing non-string values (numbers, objects, functions, symbols, etc.) will throw an `InvalidParameterError`. This is intentional to preserve fail-closed semantics and avoid accidental coercions that could change the security meaning of a host label.
+
+Notes:
+- If you have a value that may not be a string, explicitly coerce it at the boundary you control (e.g., `String(value)`) and validate before calling `encodeHostLabel`.
+- The IDNA provider must implement `toASCII(string): string`. Errors thrown by the provider are wrapped and rethrown as `InvalidParameterError`.
+
 ## Migration / Compatibility
 
 - Default behavior is stricter than some legacy libraries that silently ignore unsafe keys. If your code depends on silent-skipping, update callers to pass `{ onUnsafeKey: "skip" }` or update to sanitize input objects before calling.

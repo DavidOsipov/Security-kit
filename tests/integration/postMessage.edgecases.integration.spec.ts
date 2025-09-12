@@ -1,10 +1,6 @@
 import { test, expect, vi, beforeEach, afterEach } from "vitest";
-import {
-  sendSecurePostMessage,
-  createSecurePostMessageListener,
-  POSTMESSAGE_MAX_PAYLOAD_BYTES,
-  POSTMESSAGE_MAX_PAYLOAD_DEPTH,
-} from "../../src/postMessage";
+import { sendSecurePostMessage, createSecurePostMessageListener } from "../../src/postMessage";
+import { getPostMessageConfig } from "../../src/config";
 
 const mockPostMessage = vi.fn();
 const mockAddEventListener = vi.fn();
@@ -28,7 +24,7 @@ afterEach(() => {
 });
 
 test("oversized JSON payload is rejected when using json wireFormat", () => {
-  const big = "x".repeat(POSTMESSAGE_MAX_PAYLOAD_BYTES + 10);
+  const big = "x".repeat(getPostMessageConfig().maxPayloadBytes + 10);
   const payload = { a: big };
 
   expect(() =>
@@ -42,12 +38,13 @@ test("oversized JSON payload is rejected when using json wireFormat", () => {
 });
 
 test("deeply nested payload exceeds depth limit", () => {
-  // Build nested object of depth POSTMESSAGE_MAX_PAYLOAD_DEPTH + 2
-  let obj: any = { v: 0 };
-  let current = obj;
-  for (let i = 0; i < POSTMESSAGE_MAX_PAYLOAD_DEPTH + 2; i++) {
+  // Build nested object exceeding configured depth limit
+  let obj: Record<string, unknown> = { v: 0 };
+  let current: Record<string, unknown> = obj;
+  const depthLimit = getPostMessageConfig().maxPayloadDepth + 2;
+  for (let i = 0; i < depthLimit; i++) {
     current.next = { i };
-    current = current.next;
+    current = current.next as Record<string, unknown>;
   }
 
   // Guard: structured path needed to avoid JSON string requirement; create listener with structured

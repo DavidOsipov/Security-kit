@@ -1,8 +1,8 @@
 import { test, expect } from "vitest";
-import loadPostMessageInternals from "../../tests/helpers/vmPostMessageHelper";
+import loadPostMessageInternals from "../../tests/helpers/vmPostMessageHelper.ts";
 
 test("validateTransferables rejects MessagePort and typed arrays when disallowed", () => {
-  const pm = loadPostMessageInternals();
+  const pm = loadPostMessageInternals({ allowTestApisFlag: true });
   // Define a constructor named 'MessagePort' so safeCtorName detects it.
   // Note: the exact prototype identity isn't required; constructor name is used.
   // Use the test-only helper toNullProto to deterministically assert typed-array rejection
@@ -37,7 +37,7 @@ test("validateTransferables rejects MessagePort and typed arrays when disallowed
 }, 20000);
 
 test("stableStringify failure causes fingerprint fallback or throws a controlled error", async () => {
-  const pm = loadPostMessageInternals();
+  const pm = loadPostMessageInternals({ allowTestApisFlag: true });
   const internals = pm.__test_internals ?? pm;
   // budget: create a very nested object to exhaust budget quickly
   const deep: any = {};
@@ -66,6 +66,7 @@ test("fingerprint fallback works when crypto unavailable (dev)", async () => {
       },
     },
     production: false,
+    allowTestApisFlag: true,
   });
   // if environment helper exported, set explicit env
   if (pm.environment && typeof pm.environment.setExplicitEnv === "function") {
@@ -80,7 +81,7 @@ test("fingerprint fallback works when crypto unavailable (dev)", async () => {
 }, 20000);
 
 test("sendSecurePostMessage errors on invalid targetOrigin and oversized payload", () => {
-  const pm = loadPostMessageInternals();
+  const pm = loadPostMessageInternals({ allowTestApisFlag: true });
   const internals = pm.__test_internals ?? pm;
   // sendSecurePostMessage is exported at top-level; call with invalid origin
   const fakeWindow = { postMessage: () => {} } as any;
@@ -92,7 +93,7 @@ test("sendSecurePostMessage errors on invalid targetOrigin and oversized payload
     }),
   ).toThrow();
   // oversized payload
-  const big = "x".repeat(pm.POSTMESSAGE_MAX_PAYLOAD_BYTES + 10);
+  const big = "x".repeat(pm.getPostMessageConfig().maxPayloadBytes + 10);
   expect(() =>
     pm.sendSecurePostMessage({
       targetWindow: fakeWindow,

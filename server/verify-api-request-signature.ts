@@ -22,12 +22,12 @@ import {
   ReplayAttackError,
   SignatureVerificationError,
   InvalidConfigurationError,
-} from "../src/errors.js";
-import { SHARED_ENCODER } from "../src/encoding.js";
-import { safeStableStringify } from "../src/canonical.js";
-import { base64ToBytes, isLikelyBase64 } from "../src/encoding-utils.js";
-import { getHandshakeConfig } from "../src/config.js";
-import { secureCompareBytes } from "../src/utils.js";
+} from "../src/errors.ts";
+import { SHARED_ENCODER } from "../src/encoding.ts";
+import { safeStableStringify } from "../src/canonical.ts";
+import { base64ToBytes, isLikelyBase64 } from "../src/encoding-utils.ts";
+import { getHandshakeConfig } from "../src/config.ts";
+import { secureCompareBytes } from "../src/utils.ts";
 
 /** Input shape expected by verification with positive validation */
 export type VerifyExtendedInput = {
@@ -66,6 +66,8 @@ const MAX_CANONICAL_BYTES = 64 * 1024; // 64 KiB
  * SECURITY REQUIREMENT: Implementations MUST be atomic and distributed-safe
  * for production deployments with multiple server instances.
  */
+export type MaybePromise<T> = T | Promise<T>;
+
 export interface INonceStore {
   /**
    * Check if a nonce has been used before.
@@ -77,7 +79,7 @@ export interface INonceStore {
    * @param nonce - The nonce value to check
    * @returns Promise resolving to true if nonce exists (already used)
    */
-  has(kid: string, nonce: string): Promise<boolean>;
+  has?(kid: string, nonce: string): MaybePromise<boolean>;
 
   /**
    * Store a nonce with expiration.
@@ -89,7 +91,7 @@ export interface INonceStore {
    * @param nonce - The nonce value to store
    * @param ttlMs - Time-to-live in milliseconds
    */
-  store(kid: string, nonce: string, ttlMs: number): Promise<void>;
+  store?(kid: string, nonce: string, ttlMs: number): MaybePromise<void>;
 
   /**
    * Atomically store nonce if it does not exist (e.g., Redis SET NX PX).
@@ -102,34 +104,38 @@ export interface INonceStore {
    * @param ttlMs - Time-to-live in milliseconds
    * @returns Promise resolving to true if nonce was stored, false if already exists
    */
-  storeIfNotExists?(
+  storeIfNotExists(
     kid: string,
     nonce: string,
     ttlMs: number,
-  ): Promise<boolean>;
+  ): MaybePromise<boolean>;
 
   /**
    * Optional: reserve a nonce with a short TTL to mitigate DoS from bogus signatures.
    * Returns true if reserved, false if already exists.
    */
-  reserve?(kid: string, nonce: string, reserveTtlMs: number): Promise<boolean>;
+  reserve?(
+    kid: string,
+    nonce: string,
+    reserveTtlMs: number,
+  ): MaybePromise<boolean>;
   /**
    * Optional: finalize a reserved nonce by extending TTL to the full window.
    */
-  finalize?(kid: string, nonce: string, ttlMs: number): Promise<void>;
+  finalize?(kid: string, nonce: string, ttlMs: number): MaybePromise<void>;
   /**
    * Optional: delete a reserved nonce (for cleanup on failed verifications).
    *
    * @param kid - Key identifier for namespacing
    * @param nonce - The nonce value to delete
    */
-  delete?(kid: string, nonce: string): Promise<void>;
+  delete?(kid: string, nonce: string): MaybePromise<void>;
 
   /**
    * Optional cleanup method for expired entries.
    * Implementations should call this periodically to prevent unbounded growth.
    */
-  cleanup?(): Promise<void>;
+  cleanup?(): MaybePromise<void>;
 }
 
 /**
@@ -147,6 +153,8 @@ export class InMemoryNonceStore implements INonceStore {
   #map = new Map<string, number>(); // key = `${kid}:${nonce}`, value = expiry unix ms
 
   async has(kid: string, nonce: string): Promise<boolean> {
+    // Ensure async behavior for consistent interface and tests
+    await Promise.resolve();
     this.#validateStoreParams(kid, nonce);
     const key = `${kid}:${nonce}`;
     const now = Date.now();
@@ -157,6 +165,7 @@ export class InMemoryNonceStore implements INonceStore {
   }
 
   async store(kid: string, nonce: string, ttlMs: number): Promise<void> {
+    await Promise.resolve();
     this.#validateStoreParams(kid, nonce);
     if (typeof ttlMs !== "number" || ttlMs < 1 || ttlMs > 86400000) {
       throw new InvalidParameterError("ttlMs must be between 1 and 86400000");
@@ -171,6 +180,7 @@ export class InMemoryNonceStore implements INonceStore {
     nonce: string,
     ttlMs: number,
   ): Promise<boolean> {
+    await Promise.resolve();
     this.#validateStoreParams(kid, nonce);
     if (typeof ttlMs !== "number" || ttlMs < 1 || ttlMs > 86400000) {
       throw new InvalidParameterError("ttlMs must be between 1 and 86400000");
@@ -178,19 +188,23 @@ export class InMemoryNonceStore implements INonceStore {
     const key = `${kid}:${nonce}`;
     const now = Date.now();
     const existing = this.#map.get(key);
-    if (typeof existing === "number" && existing > now) return false;
+    if (typeof existing === "number" && existing > now) {
+      return false;
+    }
     const exp = now + Math.max(0, Math.floor(ttlMs));
     this.#map.set(key, exp);
     return true;
   }
 
   async delete(kid: string, nonce: string): Promise<void> {
+    await Promise.resolve();
     this.#validateStoreParams(kid, nonce);
     const key = `${kid}:${nonce}`;
     this.#map.delete(key);
   }
 
   async cleanup(): Promise<void> {
+    await Promise.resolve();
     const now = Date.now();
     for (const [k, exp] of this.#map.entries()) {
       if (exp <= now) this.#map.delete(k);
@@ -198,8 +212,11 @@ export class InMemoryNonceStore implements INonceStore {
   }
 
   #validateStoreParams(kid: string, nonce: string): void {
-    if (typeof kid !== "string" || kid.length === 0 || kid.length > 128) {
+    if (typeof kid !== "string" || kid.length === 0) {
       throw new InvalidParameterError("kid must be a non-empty string");
+    }
+    if (kid.length > 128) {
+      throw new InvalidParameterError("kid too long");
     }
     if (typeof nonce !== "string" || nonce.length === 0) {
       throw new InvalidParameterError("nonce must be a non-empty string");
@@ -217,7 +234,7 @@ export class InMemoryNonceStore implements INonceStore {
         : ["base64", "base64url"];
 
     if (nonce.length > maxLen) {
-      throw new InvalidParameterError("nonce must be a non-empty string");
+      throw new InvalidParameterError("nonce too long");
     }
 
     const allowed = (() => {
@@ -227,7 +244,7 @@ export class InMemoryNonceStore implements INonceStore {
         isLikelyBase64(nonce)
       )
         return true;
-      if (allowedFormats.includes("hex") && /^[0-9a-f]+$/i.test(nonce))
+      if (allowedFormats.includes("hex") && /^[\da-f]+$/i.test(nonce))
         return true;
       return false;
     })();
@@ -242,19 +259,24 @@ export class InMemoryNonceStore implements INonceStore {
 /* eslint-enable functional/immutable-data */
 
 // Input validation with positive validation (allowlist approach)
-function validateVerifyInput(input: VerifyExtendedInput): void {
-  if (!input || typeof input !== "object") {
+function isPlainObject(v: unknown): v is Record<string, unknown> {
+  return typeof v === "object" && v !== null && !Array.isArray(v);
+}
+
+function validateVerifyInput(input: unknown): void {
+  if (!isPlainObject(input)) {
     throw new InvalidParameterError("Invalid input object");
   }
-  validateSecret(input.secret);
-  validateNonce(input.nonce);
-  validateTimestamp(input.timestamp);
-  validatePayload(input.payload);
-  validateSignature(input.signatureBase64);
-  if (input.method !== undefined) validateMethod(input.method);
-  if (input.path !== undefined) validatePath(input.path);
-  if (input.bodyHash !== undefined) validateBodyHash(input.bodyHash);
-  if (input.kid !== undefined) validateKid(input.kid);
+  const obj = input as VerifyExtendedInput;
+  validateSecret(obj.secret);
+  validateNonce(obj.nonce);
+  validateTimestamp(obj.timestamp);
+  validatePayload(obj.payload);
+  validateSignature(obj.signatureBase64);
+  if (obj.method !== undefined) validateMethod(obj.method);
+  if (obj.path !== undefined) validatePath(obj.path);
+  if (obj.bodyHash !== undefined) validateBodyHash(obj.bodyHash);
+  if (obj.kid !== undefined) validateKid(obj.kid);
 }
 
 function validateSecret(
@@ -308,7 +330,7 @@ function validateNonce(nonce: unknown): void {
       ((allowedFormats.includes("base64") ||
         allowedFormats.includes("base64url")) &&
         isLikelyBase64(nonce)) ||
-      (allowedFormats.includes("hex") && /^[0-9a-f]+$/i.test(nonce));
+      (allowedFormats.includes("hex") && /^[\da-f]+$/i.test(nonce));
 
     if (!isAllowed) {
       throw new InvalidParameterError("nonce is not in an allowed format");
@@ -502,13 +524,13 @@ async function computeHmacSha256(
  * @returns Promise resolving to true if signature is valid (otherwise throws)
  */
 export async function verifyApiRequestSignature(
-  input: VerifyExtendedInput,
-  nonceStore: INonceStore,
+  input: unknown,
+  nonceStore: unknown,
   options?: { maxSkewMs?: number; nonceTtlMs?: number },
 ): Promise<boolean> {
   // Validate inputs (throws InvalidParameterError on bad inputs)
   validateVerifyInput(input);
-  if (!nonceStore) {
+  if (nonceStore === null || nonceStore === undefined) {
     throw new InvalidParameterError("nonceStore is required");
   }
 
@@ -522,7 +544,7 @@ export async function verifyApiRequestSignature(
     method,
     path,
     bodyHash,
-  } = input;
+  } = input as VerifyExtendedInput;
   const maxSkew = options?.maxSkewMs ?? DEFAULT_SKEW_MS;
   const nonceTtl = options?.nonceTtlMs ?? NONCE_TTL_MS;
 
@@ -544,11 +566,14 @@ export async function verifyApiRequestSignature(
 
   // Pre-validate nonce store capability without performing any stateful operation.
   // This surfaces configuration errors deterministically and does not leak signature validity.
-  if (typeof nonceStore.storeIfNotExists !== "function") {
+  // runtime guard: ensure storeIfNotExists is present and callable
+  if (typeof (nonceStore as INonceStore).storeIfNotExists !== "function") {
     throw new InvalidConfigurationError(
       "NonceStore must implement storeIfNotExists() for atomic replay protection",
     );
   }
+
+  const store = nonceStore as INonceStore;
 
   // Shared canonicalization for payload (match client behaviour)
   const payloadString = safeStableStringify(payload);
@@ -569,7 +594,7 @@ export async function verifyApiRequestSignature(
   // DoS hardening: bail out early on excessive canonical size
   if (messageBytes.byteLength > MAX_CANONICAL_BYTES) {
     throw new InvalidParameterError(
-      `Canonical message too large (${messageBytes.byteLength} bytes)` as const,
+      `Canonical message too large (${String(messageBytes.byteLength)} bytes)`,
     );
   }
 
@@ -584,11 +609,7 @@ export async function verifyApiRequestSignature(
 
   // After signature verification succeeds, atomically store the nonce with full TTL
   const kidForStore = kid ?? "default";
-  const stored = await nonceStore.storeIfNotExists(
-    kidForStore,
-    nonce,
-    nonceTtl,
-  );
+  const stored = await store.storeIfNotExists(kidForStore, nonce, nonceTtl);
   if (!stored) {
     // Nonce already present indicates replay
     throw new ReplayAttackError("Nonce already used or reserved");

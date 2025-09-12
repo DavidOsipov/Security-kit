@@ -73,51 +73,49 @@ test("worker validates handshake nonce formats and length", async () => {
   }
   if (!capturedMessageListener) throw new Error("listener not captured");
 
-  // Initialize worker
-  const initEvent = new MessageEvent("message", {
-    data: {
-      type: "init",
-      secretBuffer: new ArrayBuffer(32),
-      workerOptions: {
-        allowedNonceFormats: ["base64"],
-        handshakeMaxNonceLength: 16,
-      },
+  // Initialize worker (avoid constructing MessageEvent with ports in Node)
+  const initData = {
+    type: "init",
+    secretBuffer: new ArrayBuffer(32),
+    workerOptions: {
+      allowedNonceFormats: ["base64"],
+      handshakeMaxNonceLength: 16,
     },
-    origin: "https://example.com",
-  } as any);
-  await capturedMessageListener(initEvent);
+  } as const;
+  const initEventLike = { data: initData, origin: "https://example.com", ports: [] } as unknown as MessageEvent;
+  await capturedMessageListener(initEventLike);
 
-  // Create a reply port
-  const mockPort = { postMessage: vi.fn() } as any;
+  // Create a reply port (duck-typed MessagePort)
+  const mockPort = { postMessage: vi.fn() } as unknown as MessagePort;
 
   // Valid nonce (base64-like)
-  const good = new MessageEvent("message", {
+  const goodEventLike = {
     data: { type: "handshake", nonce: "YWJj" },
     ports: [mockPort],
-  } as any);
-  await capturedMessageListener(good);
-  expect(mockPort.postMessage).toHaveBeenCalled();
+  } as unknown as MessageEvent;
+  await capturedMessageListener(goodEventLike);
+  expect((mockPort as any).postMessage).toHaveBeenCalled();
 
   // Invalid format
-  const badFormat = new MessageEvent("message", {
+  const badFormatEventLike = {
     data: { type: "handshake", nonce: "not-base64!" },
     ports: [mockPort],
-  } as any);
-  mockPort.postMessage.mockClear();
-  await capturedMessageListener(badFormat);
-  expect(mockPort.postMessage).toHaveBeenCalledWith({
+  } as unknown as MessageEvent;
+  (mockPort as any).postMessage.mockClear();
+  await capturedMessageListener(badFormatEventLike);
+  expect((mockPort as any).postMessage).toHaveBeenCalledWith({
     type: "error",
     reason: "nonce-format-invalid",
   });
 
   // Too long
-  const tooLong = new MessageEvent("message", {
+  const tooLongEventLike = {
     data: { type: "handshake", nonce: "Y".repeat(100) },
     ports: [mockPort],
-  } as any);
-  mockPort.postMessage.mockClear();
-  await capturedMessageListener(tooLong);
-  expect(mockPort.postMessage).toHaveBeenCalledWith({
+  } as unknown as MessageEvent;
+  (mockPort as any).postMessage.mockClear();
+  await capturedMessageListener(tooLongEventLike);
+  expect((mockPort as any).postMessage).toHaveBeenCalledWith({
     type: "error",
     reason: "nonce-too-large",
   });

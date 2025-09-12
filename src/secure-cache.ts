@@ -8,9 +8,31 @@
 // which is licensed under the ISC License.
 // -----------------------------------------------------------------------------
 
-import { InvalidParameterError } from "./errors";
-import { secureWipe, isSharedArrayBufferView } from "./utils";
-import { resolveSecureLRUOptions } from "./config";
+import { InvalidParameterError } from "./errors.ts";
+import { secureWipe, isSharedArrayBufferView } from "./utils.ts";
+import { resolveSecureLRUOptions } from "./config.ts";
+
+/*
+ * SECURITY NOTE / LINT JUSTIFICATION
+ * ---------------------------------------------------------------------------
+ * We perform numerous indexed accesses like arr[index] against internal fixed-size
+ * arrays (#keyList, #valList, #next, #prev, #ttls, #starts, #gen, #sieveRef).
+ * ESLint's security/detect-object-injection rule flags ANY bracket notation as a
+ * potential object injection sink. In this module these indices are never derived
+ * from untrusted user-controlled object property names; they originate exclusively
+ * from:
+ *   - Map lookups of previously validated string keys
+ *   - Internal freelist management (#free) maintaining integer indices
+ *   - Controlled traversal of doubly-linked list pointers (#next/#prev)
+ *   - Monotonic counters (#currentGen, #head/#tail) bounded by #maxEntries
+ * All indices are integers within [0, #maxEntries). Prototype pollution is impossible
+ * because we never use attacker-controlled strings as property names; we access only
+ * numeric indices on plain arrays or typed arrays. To further harden against silent
+ * state corruption we add explicit bounds/integrity checks before mutating structures.
+ * Disabling the rule here eliminates noisy false positives while maintaining ASVS L3
+ * assurances via explicit runtime validation.
+ */
+/* eslint-disable security/detect-object-injection */
 
 /**
  * Represents the reason why a cache entry was evicted.
@@ -211,8 +233,13 @@ function scheduleMicrotask(callback: () => void): void {
  */
 function tryUnref(t: unknown): void {
   try {
-    const maybe = t as { readonly unref?: () => void };
-    if (maybe && typeof maybe.unref === "function") maybe.unref();
+    // Treat input as possibly nullish at runtime to avoid unsafe assumptions
+    if (t && typeof t === "object" && "unref" in t) {
+      const maybeUnref = (t as { readonly unref?: unknown }).unref;
+      if (typeof maybeUnref === "function") {
+        (maybeUnref as () => void)();
+      }
+    }
   } catch {
     /* noop */
   }
@@ -360,10 +387,12 @@ export class SecureLRUCache<K extends string, V extends Uint8Array> {
     this.#onWipeError = options.onWipeError;
     // Minimal, namespaced default logger to discourage sensitive payload logging
     const safeDefaultLogger: Logger = {
-      warn: (...data: readonly unknown[]) =>
-        console.warn("[security-kit:cache]", ...data),
-      error: (...data: readonly unknown[]) =>
-        console.error("[security-kit:cache]", ...data),
+      warn: (...data: readonly unknown[]) => {
+        console.warn("[security-kit:cache]", ...data);
+      },
+      error: (...data: readonly unknown[]) => {
+        console.error("[security-kit:cache]", ...data);
+      },
     };
     this.#logger = options.logger ?? safeDefaultLogger;
     this.#onEvictKeyMapper = options.onEvictKeyMapper;
@@ -418,8 +447,8 @@ export class SecureLRUCache<K extends string, V extends Uint8Array> {
 
     const max = this.#maxEntries;
     this.#keyMap = new Map<K, number>();
-    this.#keyList = new Array<K | undefined>(max).fill(undefined);
-    this.#valList = new Array<V | undefined>(max).fill(undefined);
+    this.#keyList = new Array<K | undefined>(max).fill();
+    this.#valList = new Array<V | undefined>(max).fill();
     this.#next = new Array<number>(max).fill(NO_INDEX);
     this.#prev = new Array<number>(max).fill(NO_INDEX);
     this.#head = NO_INDEX;
@@ -462,7 +491,7 @@ export class SecureLRUCache<K extends string, V extends Uint8Array> {
 
     if (typeof url !== "string" || url.length > this.#maxUrlLength)
       throw new InvalidParameterError(
-        `Invalid URL: must be a string shorter than ${this.#maxUrlLength} characters.`,
+        `Invalid URL: must be a string shorter than ${String(this.#maxUrlLength)} characters.`,
       );
     if (!(bytes instanceof Uint8Array))
       throw new InvalidParameterError("Invalid value: must be a Uint8Array.");
@@ -474,11 +503,11 @@ export class SecureLRUCache<K extends string, V extends Uint8Array> {
     const maxEntrySize = options.maxEntryBytes ?? this.#maxEntryBytes;
     if (bytes.length > maxEntrySize)
       throw new InvalidParameterError(
-        `Entry too large: ${bytes.length} bytes exceeds max of ${maxEntrySize}.`,
+        `Entry too large: ${String(bytes.length)} bytes exceeds max of ${String(maxEntrySize)}.`,
       );
     if (bytes.length > this.#maxBytes)
       throw new InvalidParameterError(
-        `Entry too large: ${bytes.length} bytes exceeds cache max of ${this.#maxBytes}.`,
+        `Entry too large: ${String(bytes.length)} bytes exceeds cache max of ${String(this.#maxBytes)}.`,
       );
 
     const valueToStore = this.#copyOnSet ? (new Uint8Array(bytes) as V) : bytes;
@@ -505,6 +534,13 @@ export class SecureLRUCache<K extends string, V extends Uint8Array> {
           if (this.#sieveRef[existingIndex] !== 1)
             this.#sieveRef[existingIndex] = 1;
           break;
+        default: {
+          // Exhaustive check (should be unreachable). If triggered, recencyMode union changed.
+          const _exhaustive: never = this.#recencyMode;
+          throw new Error(
+            `Unhandled recencyMode (set existing): ${String(_exhaustive)}`,
+          );
+        }
       }
       if (ttl > 0) this.#maybeScheduleExpiry(this.#starts[existingIndex] + ttl);
       if (
@@ -524,7 +560,7 @@ export class SecureLRUCache<K extends string, V extends Uint8Array> {
       this.#evict();
       if (++evictions >= this.#maxSyncEvictions) {
         throw new InvalidParameterError(
-          `Insufficient capacity after ${this.#maxSyncEvictions} evictions; reduce payload or retry later.`,
+          `Insufficient capacity after ${String(this.#maxSyncEvictions)} evictions; reduce payload or retry later.`,
         );
       }
     }
@@ -546,8 +582,15 @@ export class SecureLRUCache<K extends string, V extends Uint8Array> {
         // New entries start unreferenced to evict one-hit-wonders quickly; no pointer moves on set
         if (this.#sieveRef[index] !== 0) this.#sieveRef[index] = 0;
         break;
-      default:
+      case "lru":
+        // No additional bookkeeping needed for classic LRU
         break;
+      default: {
+        const _exhaustive: never = this.#recencyMode;
+        throw new Error(
+          `Unhandled recencyMode (set new): ${String(_exhaustive)}`,
+        );
+      }
     }
 
     if (this.#size === 0) {
@@ -584,6 +627,7 @@ export class SecureLRUCache<K extends string, V extends Uint8Array> {
    * ```
    */
   // Hot path with deliberate branching; safe refactor deferred to avoid behavior changes.
+  // eslint-disable-next-line sonarjs/cognitive-complexity -- Intentional structure for performance and clarity; refactoring risks changing eviction and promotion semantics.
   public get(url: K): V | undefined {
     this.#getOps++;
     if (!this.#enableByteCache) {
@@ -610,10 +654,13 @@ export class SecureLRUCache<K extends string, V extends Uint8Array> {
     this.#hits++;
     switch (this.#recencyMode) {
       case "lru": {
-        const shouldPromote =
-          this.#promoteOnGet === "always" ||
-          (this.#promoteOnGet === "sampled" &&
-            this.#getOps % this.#promoteOnGetSampleRate === 0);
+        let shouldPromote = false;
+        if (this.#promoteOnGet === "always") {
+          shouldPromote = true;
+        } else {
+          // Only promote on the configured sampling boundary
+          shouldPromote = this.#getOps % this.#promoteOnGetSampleRate === 0;
+        }
         if (shouldPromote) this.#moveToTail(index);
         break;
       }
@@ -628,6 +675,10 @@ export class SecureLRUCache<K extends string, V extends Uint8Array> {
         // Mark referenced; canonical SIEVE avoids pointer churn
         if (this.#sieveRef[index] !== 1) this.#sieveRef[index] = 1;
         break;
+      default: {
+        const _exhaustive: never = this.#recencyMode;
+        throw new Error(`Unhandled recencyMode (get): ${String(_exhaustive)}`);
+      }
     }
     let value = this.#valList[index] as V;
 
@@ -675,7 +726,7 @@ export class SecureLRUCache<K extends string, V extends Uint8Array> {
 
     if (typeof url !== "string" || url.length > this.#maxUrlLength)
       throw new InvalidParameterError(
-        `Invalid URL: must be a string shorter than ${this.#maxUrlLength} characters.`,
+        `Invalid URL: must be a string shorter than ${String(this.#maxUrlLength)} characters.`,
       );
     if (!(bytes instanceof Uint8Array))
       throw new InvalidParameterError("Invalid value: must be a Uint8Array.");
@@ -687,11 +738,11 @@ export class SecureLRUCache<K extends string, V extends Uint8Array> {
     const maxEntrySize = options.maxEntryBytes ?? this.#maxEntryBytes;
     if (bytes.length > maxEntrySize)
       throw new InvalidParameterError(
-        `Entry too large: ${bytes.length} bytes exceeds max of ${maxEntrySize}.`,
+        `Entry too large: ${String(bytes.length)} bytes exceeds max of ${String(maxEntrySize)}.`,
       );
     if (bytes.length > this.#maxBytes)
       throw new InvalidParameterError(
-        `Entry too large: ${bytes.length} bytes exceeds cache max of ${this.#maxBytes}.`,
+        `Entry too large: ${String(bytes.length)} bytes exceeds cache max of ${String(this.#maxBytes)}.`,
       );
 
     const valueToStore = this.#copyOnSet ? (new Uint8Array(bytes) as V) : bytes;
@@ -718,6 +769,12 @@ export class SecureLRUCache<K extends string, V extends Uint8Array> {
           if (this.#sieveRef[existingIndex] !== 1)
             this.#sieveRef[existingIndex] = 1;
           break;
+        default: {
+          const _exhaustive: never = this.#recencyMode;
+          throw new Error(
+            `Unhandled recencyMode (setAsync existing): ${String(_exhaustive)}`,
+          );
+        }
       }
       if (ttl > 0) this.#maybeScheduleExpiry(this.#starts[existingIndex] + ttl);
       if (
@@ -741,7 +798,9 @@ export class SecureLRUCache<K extends string, V extends Uint8Array> {
         this.#evict();
       }
       if (needsCapacity()) {
-        await new Promise<void>((resolve) => scheduleMicrotask(resolve));
+        await new Promise<void>((resolve) => {
+          scheduleMicrotask(resolve);
+        });
       }
     }
 
@@ -854,6 +913,16 @@ export class SecureLRUCache<K extends string, V extends Uint8Array> {
   }
 
   #moveToTail(index: number): void {
+    // Integrity check: defend against corrupted internal pointers (should never trigger in correct usage)
+    if (
+      !Number.isInteger(index) ||
+      index < 0 ||
+      index >= this.#keyList.length
+    ) {
+      throw new Error(
+        `Corrupted cache state: moveToTail index out of bounds (${String(index)})`,
+      );
+    }
     if (index === this.#tail) return;
     const p = this.#prev[index] ?? NO_INDEX;
     const n = this.#next[index] ?? NO_INDEX;
@@ -952,7 +1021,7 @@ export class SecureLRUCache<K extends string, V extends Uint8Array> {
             this.#wipeFallbackLogScheduled = false;
             if (count > 1) {
               this.#logger.warn(
-                `Deferred wipe caps exceeded; performed synchronous wipes (${count}x).`,
+                `Deferred wipe caps exceeded; performed synchronous wipes (${String(count)}x).`,
                 {
                   queueEntries: this.#wipeQueue.length,
                   queueBytes: this.#wipeQueueBytes,
@@ -981,7 +1050,8 @@ export class SecureLRUCache<K extends string, V extends Uint8Array> {
 
   #isStale(index: number): boolean {
     const ttl = this.#ttls[index];
-    if (!ttl || ttl <= 0) return false;
+    // Explicit numeric comparison (avoid relying on truthiness of 0) for clarity & lint compliance
+    if (ttl <= 0) return false;
     const start = this.#starts[index] ?? 0;
     return this.#tickNow() - start > ttl;
   }
@@ -1078,6 +1148,16 @@ export class SecureLRUCache<K extends string, V extends Uint8Array> {
   #deleteInternal(key: K, reason: EvictionReason): boolean {
     const index = this.#keyMap.get(key);
     if (index === undefined) return false;
+    if (
+      !Number.isInteger(index) ||
+      index < 0 ||
+      index >= this.#keyList.length
+    ) {
+      // Defensive: corrupted internal map -> reject to prevent potential memory safety issues
+      throw new Error(
+        `Corrupted cache state: index out of bounds during delete (${String(index)})`,
+      );
+    }
 
     const value = this.#valList[index] as V;
     const bytesLength = value.length; // capture before wiping
@@ -1222,13 +1302,14 @@ export class SecureLRUCache<K extends string, V extends Uint8Array> {
 
     if (useTimeout) {
       if (this.#wipeTimer) return;
-      this.#wipeTimer = setTimeout(
-        () => this.#flushWipeQueue(),
-        this.#deferredWipeTimeoutMs,
-      );
+      this.#wipeTimer = setTimeout(() => {
+        this.#flushWipeQueue();
+      }, this.#deferredWipeTimeoutMs);
       tryUnref(this.#wipeTimer);
     } else {
-      scheduleMicrotask(() => this.#flushWipeQueue());
+      scheduleMicrotask(() => {
+        this.#flushWipeQueue();
+      });
     }
   }
 
@@ -1467,6 +1548,8 @@ export class SecureLRUCache<K extends string, V extends Uint8Array> {
  * console.log(`Cache size: ${stats.size} entries`);
  * ```
  */
+// This facade intentionally has only static members to enforce a singleton capability.
+// eslint-disable-next-line @typescript-eslint/no-extraneous-class
 export class VerifiedByteCache {
   /**
    * Private singleton instance with optimized configuration for security applications.

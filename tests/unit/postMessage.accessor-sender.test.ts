@@ -25,7 +25,8 @@ describe("postMessage sender-side accessor tests", () => {
       postMessage.sendSecurePostMessage({
         targetWindow: window,
         payload: o,
-        targetOrigin: "http://localhost",
+        // Use the actual environment origin to avoid mismatches across DOM envs
+        targetOrigin: location.origin,
       } as any);
     }).not.toThrow();
     // Current implementation skips accessor properties silently; no dev warning expected.

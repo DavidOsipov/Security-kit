@@ -26,7 +26,10 @@
     "typescript",
     "constant-time",
     "csp",
-    "owasp"
+    "owasp",
+    "cache",
+    "sanitization",
+    "worker"
   ],
   "type": "module",
   "sideEffects": false,
@@ -81,6 +84,13 @@
   "scripts": {
     "build": "tsup --config tsup.config.ts",
     "test": "vitest run",
+    "test:fast": "VITEST_MAX_THREADS=7 vitest run",
+    "test:node": "VITEST_MAX_THREADS=7 vitest run --project node",
+    "test:jsdom": "VITEST_MAX_THREADS=7 vitest run --project jsdom",
+    "test:no-isolate:node": "VITEST_MAX_THREADS=7 vitest run --project node --no-isolate",
+    "test:2shards:1": "VITEST_MAX_THREADS=7 vitest run --reporter=blob --shard=1/2",
+    "test:2shards:2": "VITEST_MAX_THREADS=7 vitest run --reporter=blob --shard=2/2",
+    "test:merge-reports": "vitest run --merge-reports",
     "test:watch": "vitest",
     "test:unit": "vitest run --include '**/unit/**'",
     "test:integration": "vitest run --include '**/integration/**'",
@@ -92,7 +102,7 @@
     "coverage": "vitest run --coverage",
     "lint": "eslint . --ext .ts,.tsx,.js,.mjs --max-warnings=0",
     "lint:fix": "eslint . --ext .ts,.tsx,.js,.mjs --fix",
-    "lint:ci": "HUSKY=0 eslint 'src/**/*.{ts,tsx}' --max-warnings=0",
+    "lint:ci": "HUSKY=0 eslint 'src/**/*.{ts,tsx}' 'server/**/*.{ts,tsx,js}' --max-warnings=0",
     "gitleaks": "gitleaks detect --source . --config .gitleaks.toml --verbose || true",
     "gitleaks:ci": "gitleaks detect --source . --config .gitleaks.toml --exit-code 1",
     "knip": "knip",
@@ -129,6 +139,8 @@
   },
   "devDependencies": {
     "@djankies/vitest-mcp": "^0.5.1",
+    "@eslint/js": "^9.35.0",
+    "@microsoft/eslint-plugin-sdl": "^1.1.0",
     "@stryker-mutator/typescript-checker": "^9.1.1",
     "@stryker-mutator/vitest-runner": "^9.1.1",
     "@types/eslint-plugin-security": "^3.0.0",
@@ -144,14 +156,18 @@
     "eslint-plugin-import": "^2.32.0",
     "eslint-plugin-jsx-a11y": "^6.10.2",
     "eslint-plugin-n": "^17.21.3",
+    "eslint-plugin-no-secrets": "^2.2.1",
     "eslint-plugin-no-unsanitized": "^4.1.4",
     "eslint-plugin-prettier": "^5.5.4",
+    "eslint-plugin-promise": "^7.2.1",
+    "eslint-plugin-redos": "^4.5.0",
     "eslint-plugin-regexp": "^2.10.0",
     "eslint-plugin-security": "^3.0.1",
     "eslint-plugin-security-node": "^1.1.4",
     "eslint-plugin-sonarjs": "^3.0.5",
     "eslint-plugin-unicorn": "^61.0.2",
     "fast-check": "^4.3.0",
+    "happy-dom": "^18.0.1",
     "husky": "^9.1.7",
     "isomorphic-dompurify": "^2.26.0",
     "js-sieve": "^0.0.4",
@@ -167,8 +183,10 @@
     "ts-node": "^10.9.2",
     "tsup": "^8.5.0",
     "typescript": "^5.9.2",
+    "typescript-eslint": "^8.43.0",
     "vitest": "^3.2.4"
   },
+  "eslint-plugin-no-secrets": "^1.0.0",
   "lint-staged": {
     "**/*.{ts,tsx}": [
       "eslint --fix"

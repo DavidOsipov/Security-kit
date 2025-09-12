@@ -16,7 +16,10 @@ import {
   setCrypto,
 } from "../../src/config";
 import { environment } from "../../src/environment";
-import { __test_resetCryptoStateForUnitTests } from "../../src/state";
+import {
+  __test_resetCryptoStateForUnitTests,
+  __resetCryptoStateForTests,
+} from "../../src/state";
 import {
   InvalidConfigurationError,
   InvalidParameterError,
@@ -28,6 +31,9 @@ describe("config - uncovered branches", () => {
   beforeEach(() => {
     if (typeof __test_resetCryptoStateForUnitTests === "function") {
       __test_resetCryptoStateForUnitTests();
+    } else {
+      // Fallback for environments where the compile-time test flag isn't applied
+      __resetCryptoStateForTests();
     }
     // Reset environment
     environment.setExplicitEnv(savedEnv ? "production" : "development");
@@ -36,6 +42,8 @@ describe("config - uncovered branches", () => {
   afterEach(() => {
     if (typeof __test_resetCryptoStateForUnitTests === "function") {
       __test_resetCryptoStateForUnitTests();
+    } else {
+      __resetCryptoStateForTests();
     }
   });
 

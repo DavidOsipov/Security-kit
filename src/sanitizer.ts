@@ -2,6 +2,7 @@
 
 // SPDX-License-Identifier: LGPL-3.0-or-later
 // SPDX-FileCopyrightText: © 2025 David Osipov <personal@david-osipov.vision>
+/// <reference types="./dnt-globals.d.ts" />
 
 /**
  * Provides a hardened wrapper around DOMPurify to create and manage
@@ -11,7 +12,7 @@
  */
 
 import type { Config as DOMPurifyConfig } from "dompurify";
-import { InvalidConfigurationError, InvalidParameterError } from "./errors";
+import { InvalidConfigurationError, InvalidParameterError } from "./errors.ts";
 
 // --- Pre-defined, Hardened Policies (as per Security Constitution Appendix C) ---
 
@@ -75,10 +76,21 @@ export class Sanitizer {
     },
     policies: SanitizerPolicies,
   ) {
-    if (
-      !dompurifyInstance ||
-      typeof dompurifyInstance.sanitize !== "function"
-    ) {
+    // At compile time `dompurifyInstance` is typed as a non-nullable object,
+    // so the explicit `!dompurifyInstance` check is flagged as unnecessary by
+    // the linter. For runtime safety (in case callers pass `undefined`),
+    // access the property in a try/catch and throw a typed error on any
+    // malformed input. This preserves a clear, typed failure mode while
+    // satisfying the lint rule.
+    try {
+      if (typeof dompurifyInstance.sanitize !== "function") {
+        throw new InvalidParameterError(
+          "A valid DOMPurify instance must be provided.",
+        );
+      }
+    } catch {
+      // Covers cases where `dompurifyInstance` is null/undefined and
+      // accessing `.sanitize` would throw; convert to a typed error.
       throw new InvalidParameterError(
         "A valid DOMPurify instance must be provided.",
       );

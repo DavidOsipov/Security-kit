@@ -27,15 +27,31 @@ import {
   TransferableNotAllowedError,
   EncodingError,
   sanitizeErrorForLogs,
-} from "./errors";
-import { ensureCrypto } from "./state";
-import { secureDevLog as secureDevelopmentLog } from "./utils";
-import { arrayBufferToBase64 } from "./encoding-utils";
-import { SHARED_ENCODER } from "./encoding";
-import { isForbiddenKey } from "./constants";
-import { environment } from "./environment";
-import { normalizeOrigin as normalizeUrlOrigin } from "./url";
-import { getPostMessageConfig } from "./config";
+} from "./errors.ts";
+import { ensureCrypto } from "./state.ts";
+import { secureDevLog as secureDevelopmentLog } from "./utils.ts";
+import { arrayBufferToBase64 } from "./encoding-utils.ts";
+import { SHARED_ENCODER } from "./encoding.ts";
+import { isForbiddenKey } from "./constants.ts";
+import { environment } from "./environment.ts";
+import { normalizeOrigin as normalizeUrlOrigin } from "./url.ts";
+import {
+  getPostMessageConfig as _getPostMessageConfig,
+  MAX_MESSAGE_EVENT_DATA_LENGTH,
+} from "./config.ts";
+
+// Re-export a small accessor so consumers/tests that import postMessage
+// can read runtime postMessage configuration without importing config.ts
+// directly. This preserves backward-compatible test usage like
+// `const pm = await import('../../src/postMessage'); pm.getPostMessageConfig()`.
+export function getPostMessageConfig() {
+  return _getPostMessageConfig();
+}
+
+// Allow referencing a build-time macro safely even when not defined in some transforms
+// (e.g., manual transpile in VM tests). Using typeof guards avoids ReferenceError at runtime.
+
+declare const __TEST__: boolean | undefined;
 
 // Internal helpers for controlled mutable operations on otherwise readonly types
 // Remove readonly from all properties in T
@@ -74,7 +90,10 @@ export type MessageListenerContext = {
 
 export type CreateSecurePostMessageListenerOptions = {
   readonly allowedOrigins: readonly string[];
-  readonly onMessage: (data: unknown, context?: MessageListenerContext) => void;
+  readonly onMessage: (
+    data: unknown,
+    context?: MessageListenerContext,
+  ) => void | Promise<void>; // Handler is not awaited; errors/rejections are captured
   readonly validate?: ((d: unknown) => boolean) | Record<string, SchemaValue>;
   // New hardening options
   readonly allowOpaqueOrigin?: boolean; // default false
@@ -94,8 +113,8 @@ export { validateTransferables };
 
 // --- Constants ---
 
-export const POSTMESSAGE_MAX_PAYLOAD_BYTES = 32 * 1024;
-export const POSTMESSAGE_MAX_PAYLOAD_DEPTH = 8;
+// Legacy POSTMESSAGE_MAX_* constants removed. Use getPostMessageConfig() for
+// all runtime decisions; callers must not rely on static numeric exports.
 
 // Small default limits for diagnostics to prevent DoS via expensive hashing
 const DEFAULT_DIAGNOSTIC_BUDGET = 5; // fingerprints per minute
@@ -133,9 +152,9 @@ function syncCryptoAvailable(): boolean {
     // This is a conservative check; ensureCrypto() may still be used for
     // full async work (e.g., subtle).
     const g = globalThis as unknown as { readonly crypto?: unknown };
-    if (!g || typeof g.crypto === "undefined") return false;
+    if (typeof g.crypto === "undefined") return false;
     const c = g.crypto as unknown as { readonly getRandomValues?: unknown };
-    return !!(c && typeof c.getRandomValues === "function");
+    return typeof c.getRandomValues === "function";
   } catch {
     return false;
   }
@@ -183,7 +202,7 @@ function checkCryptoAvailabilityForSecurityFeature(
 // Helper: call consumer and centralize async rejection/sync throw handling so
 // the main `handler` function stays small and easier to lint/verify.
 function invokeConsumerSafely(
-  consumer: (d: unknown, c?: MessageListenerContext) => void,
+  consumer: (d: unknown, c?: MessageListenerContext) => void | Promise<void>,
   data: unknown,
   contextOrOrigin: string | MessageListenerContext,
 ): void {
@@ -192,14 +211,14 @@ function invokeConsumerSafely(
   const originForLogs =
     typeof contextOrOrigin === "string"
       ? contextOrOrigin
-      : contextOrOrigin?.origin;
+      : contextOrOrigin.origin;
 
   try {
     const result = consumer(
       data,
       typeof contextOrOrigin === "string" ? undefined : contextOrOrigin,
     );
-    Promise.resolve(result).catch((asyncError) => {
+    Promise.resolve(result).catch((asyncError: unknown) => {
       try {
         secureDevelopmentLog("error", "postMessage", "Listener handler error", {
           origin: originForLogs,
@@ -219,6 +238,12 @@ function invokeConsumerSafely(
       /* best-effort logging */
     }
   }
+}
+
+function safeErrorMessage(error: unknown): string {
+  return error instanceof Error && typeof error.message === "string"
+    ? error.message
+    : String(error);
 }
 
 function isArrayBufferViewSafe(value: unknown): value is ArrayBufferView {
@@ -265,9 +290,7 @@ function getOwnDataPropertyEntries(
   if (object === null || typeof object !== "object") return [] as const;
   try {
     const names = Object.getOwnPropertyNames(object) as readonly string[];
-    const symbols = Object.getOwnPropertySymbols(
-      object as object,
-    ) as readonly symbol[];
+    const symbols = Object.getOwnPropertySymbols(object) as readonly symbol[];
     // Local accumulator; cast to readonly on return
     // eslint-disable-next-line functional/prefer-readonly-type
     const entries: Array<readonly [string | symbol, unknown]> = [];
@@ -281,7 +304,7 @@ function getOwnDataPropertyEntries(
           !desc ||
           typeof desc.get === "function" ||
           typeof desc.set === "function" ||
-          !Object.prototype.hasOwnProperty.call(desc, "value")
+          !Object.hasOwn(desc, "value")
         )
           continue;
         entries.push([key, desc.value as unknown]);
@@ -291,15 +314,15 @@ function getOwnDataPropertyEntries(
     }
     for (const sym of symbols) {
       try {
-        const desc = Object.getOwnPropertyDescriptor(object as object, sym);
+        const desc = Object.getOwnPropertyDescriptor(object, sym);
         if (
           !desc ||
           typeof desc.get === "function" ||
           typeof desc.set === "function" ||
-          !Object.prototype.hasOwnProperty.call(desc, "value")
+          !Object.hasOwn(desc, "value")
         )
           continue;
-        entries.push([sym, (desc as PropertyDescriptor).value as unknown]);
+        entries.push([sym, desc.value as unknown]);
       } catch {
         /* ignore faulty descriptor */
       }
@@ -322,7 +345,8 @@ function validateTransferables(
   allowTransferables: boolean,
   allowTypedArrays: boolean,
   depth = 0,
-  maxDepth = POSTMESSAGE_MAX_PAYLOAD_DEPTH,
+  // Use runtime config-driven depth limit; fall back to legacy constant if config missing
+  maxDepth = getPostMessageConfig().maxPayloadDepth,
   visited?: WeakSet<object>,
   state?: TraversalCounters,
 ): void {
@@ -343,16 +367,16 @@ function validateTransferables(
   const nodeBudget = _pmCfg().maxTraversalNodes;
   if (state.nodes > nodeBudget) {
     throw new InvalidParameterError(
-      `Payload traversal exceeds node budget of ${nodeBudget}.`,
+      `Payload traversal exceeds node budget of ${String(nodeBudget)}.`,
     );
   }
   // Helper to count a transferable and enforce cap
   const countTransferable = () => {
     const maxT = _pmCfg().maxTransferables;
     mut.transferables += 1;
-    if (state!.transferables > maxT) {
+    if (state.transferables > maxT) {
       throw new TransferableNotAllowedError(
-        `Too many transferable objects in payload (max ${maxT}).`,
+        `Too many transferable objects in payload (max ${String(maxT)}).`,
       );
     }
   };
@@ -385,7 +409,8 @@ function validateTransferables(
       );
     }
     // Count as a transferable when allowed and do not traverse further
-    if (allowTransferables || allowTypedArrays) countTransferable();
+    // At this point allowTypedArrays is guaranteed true; always count
+    countTransferable();
     return;
   }
 
@@ -397,7 +422,8 @@ function validateTransferables(
           "TypedArray/DataView is not allowed unless allowTypedArrays=true",
         );
       }
-      if (allowTransferables || allowTypedArrays) countTransferable();
+      // allowTypedArrays is guaranteed true here; always count
+      countTransferable();
       return; // do not traverse properties of typed arrays/views
     }
   } catch {
@@ -410,7 +436,7 @@ function validateTransferables(
     const maxItems = _pmCfg().maxArrayItems;
     if (payload.length > maxItems) {
       throw new InvalidParameterError(
-        `Array has too many items (max ${maxItems}).`,
+        `Array has too many items (max ${String(maxItems)}).`,
       );
     }
     for (const item of payload) {
@@ -425,7 +451,7 @@ function validateTransferables(
       );
     }
     // Also validate any additional own non-index properties on the array object itself
-    const includeSymbols = _pmCfg().includeSymbolKeysInSanitizer === true;
+    const includeSymbols = _pmCfg().includeSymbolKeysInSanitizer;
     const extraProperties = getOwnDataPropertyEntries(payload).filter(
       ([k]) =>
         (typeof k === "string" && k !== "length" && String(Number(k)) !== k) ||
@@ -435,7 +461,7 @@ function validateTransferables(
     const symbolAllowance = includeSymbols ? _pmCfg().maxSymbolKeys : 0;
     if (extraProperties.length > maxProperties + symbolAllowance) {
       throw new InvalidParameterError(
-        `Array object has too many own properties (max ${maxProperties}).`,
+        `Array object has too many own properties (max ${String(maxProperties)}).`,
       );
     }
     for (const [, v] of extraProperties) {
@@ -453,7 +479,7 @@ function validateTransferables(
   }
 
   // Validate all own data properties (including non-enumerable and symbols) without invoking getters
-  const includeSymbols = _pmCfg().includeSymbolKeysInSanitizer === true;
+  const includeSymbols = _pmCfg().includeSymbolKeysInSanitizer;
   const properties = getOwnDataPropertyEntries(payload).filter(([k]) =>
     typeof k === "symbol" ? includeSymbols : true,
   );
@@ -461,7 +487,7 @@ function validateTransferables(
     _pmCfg().maxObjectKeys + (includeSymbols ? _pmCfg().maxSymbolKeys : 0);
   if (properties.length > maxKeys) {
     throw new InvalidParameterError(
-      `Object has too many properties (max ${maxKeys}).`,
+      `Object has too many properties (max ${String(maxKeys)}).`,
     );
   }
   for (const [, v] of properties) {
@@ -485,14 +511,15 @@ function validateTransferables(
 function toNullProto(
   object: unknown,
   depth = 0,
-  maxDepth = POSTMESSAGE_MAX_PAYLOAD_DEPTH,
+  // Use runtime-configured depth (defense in depth). Accept override via param.
+  maxDepth = getPostMessageConfig().maxPayloadDepth,
   visited?: WeakSet<object>,
   nodesLeft?: number,
   state?: TraversalNodes,
 ): unknown {
   if (depth > maxDepth) {
     throw new InvalidParameterError(
-      `Payload depth exceeds limit of ${maxDepth}`,
+      `Payload depth exceeds limit of ${String(maxDepth)}`,
     );
   }
 
@@ -528,7 +555,8 @@ function toNullProto(
     ctorName === "URL"
   ) {
     throw new InvalidParameterError(
-      `Unsupported object type in payload: ${String(ctorName ?? "Unknown")}`,
+      // ctorName is narrowed to a string within this branch
+      `Unsupported object type in payload: ${ctorName}`,
     );
   }
 
@@ -541,7 +569,7 @@ function toNullProto(
   mut.nodes -= 1;
   if (state.nodes < 0) {
     throw new InvalidParameterError(
-      `Payload traversal exceeds node budget of ${cfg.maxTraversalNodes}.`,
+      `Payload traversal exceeds node budget of ${String(cfg.maxTraversalNodes)}.`,
     );
   }
   if (visited.has(object)) {
@@ -554,7 +582,7 @@ function toNullProto(
     const array = object as readonly unknown[];
     if (array.length > maxItems) {
       throw new InvalidParameterError(
-        `Array has too many items (max ${maxItems}).`,
+        `Array has too many items (max ${String(maxItems)}).`,
       );
     }
     // Map children using the same visited set so cycles across array/object are detected.
@@ -573,19 +601,19 @@ function toNullProto(
   // Iterate over both string and symbol own data properties while avoiding accessors
   const stringKeysAll = Object.getOwnPropertyNames(object);
   const symbolKeysAll = Object.getOwnPropertySymbols(
-    object as object,
+    object,
   ) as readonly symbol[];
   const maxStringKeys = cfg.maxObjectKeys;
   const maxSymbolKeys = cfg.maxSymbolKeys;
   if (stringKeysAll.length > maxStringKeys) {
     throw new InvalidParameterError(
-      `Object has too many string-keyed properties (max ${maxStringKeys}).`,
+      `Object has too many string-keyed properties (max ${String(maxStringKeys)}).`,
     );
   }
-  const includeSymbols = cfg.includeSymbolKeysInSanitizer === true;
+  const includeSymbols = cfg.includeSymbolKeysInSanitizer;
   if (includeSymbols && symbolKeysAll.length > maxSymbolKeys) {
     throw new InvalidParameterError(
-      `Object has too many symbol-keyed properties (max ${maxSymbolKeys}).`,
+      `Object has too many symbol-keyed properties (max ${String(maxSymbolKeys)}).`,
     );
   }
   const stringKeys = stringKeysAll;
@@ -602,7 +630,7 @@ function toNullProto(
       // Skip accessors to avoid invoking getters
       if (typeof desc.get === "function" || typeof desc.set === "function")
         continue;
-      if (!Object.prototype.hasOwnProperty.call(desc, "value")) continue;
+      if (!Object.hasOwn(desc, "value")) continue;
       value = desc.value as unknown;
     } catch (error: unknown) {
       try {
@@ -641,16 +669,16 @@ function toNullProto(
   try {
     for (const sym of symbolKeys) {
       try {
-        const desc = Object.getOwnPropertyDescriptor(object as object, sym);
+        const desc = Object.getOwnPropertyDescriptor(object, sym);
         if (
           !desc ||
           typeof desc.get === "function" ||
           typeof desc.set === "function" ||
-          !Object.prototype.hasOwnProperty.call(desc, "value")
+          !Object.hasOwn(desc, "value")
         )
           continue;
         (out as unknown as Record<symbol, unknown>)[sym] = toNullProto(
-          (desc as PropertyDescriptor).value as unknown,
+          desc.value as unknown,
           depth + 1,
           maxDepth,
           visited,
@@ -830,9 +858,9 @@ function sendJsonMessage(
 
   // Enforce max payload bytes before sending
   const bytes = SHARED_ENCODER.encode(serialized);
-  if (bytes.length > POSTMESSAGE_MAX_PAYLOAD_BYTES) {
+  if (bytes.length > _pmCfg().maxPayloadBytes) {
     throw new InvalidParameterError(
-      `Payload exceeds maximum size of ${POSTMESSAGE_MAX_PAYLOAD_BYTES} bytes.`,
+      `Payload exceeds maximum size of ${String(_pmCfg().maxPayloadBytes)} bytes.`,
     );
   }
 
@@ -878,7 +906,7 @@ function estimateStructuredPayloadSizeBytes(
     }
     const stable = stableStringify(
       value,
-      POSTMESSAGE_MAX_PAYLOAD_DEPTH,
+      _pmCfg().maxPayloadDepth,
       _pmCfg().maxTraversalNodes,
     );
     if (stable.ok) return SHARED_ENCODER.encode(stable.s).length;
@@ -898,7 +926,7 @@ function estimateApproximateSizeBytesBounded(
 ): number | undefined {
   try {
     const INF = Number.POSITIVE_INFINITY;
-    const DEPTH_LIMIT = POSTMESSAGE_MAX_PAYLOAD_DEPTH;
+    const DEPTH_LIMIT = _pmCfg().maxPayloadDepth;
     const cfg = _pmCfg();
     const NODE_BUDGET = cfg.maxTraversalNodes;
     const MAX_ARRAY_ITEMS = cfg.maxArrayItems;
@@ -926,7 +954,7 @@ function estimateApproximateSizeBytesBounded(
       // Treat typed arrays and ArrayBuffers as terminal nodes with byteLength
       try {
         if (isArrayBufferViewSafe(v)) {
-          const view = v as ArrayBufferView;
+          const view = v;
           return { bytes: 2 + view.byteLength, nodesLeft: nodesLeft - 1 };
         }
       } catch {
@@ -945,7 +973,7 @@ function estimateApproximateSizeBytesBounded(
       if (Array.isArray(v)) {
         const array = v as readonly unknown[];
         const lim = Math.min(array.length, MAX_ARRAY_ITEMS);
-        const result = (array as readonly unknown[]).slice(0, lim).reduce(
+        const result = array.slice(0, lim).reduce(
           (
             accumulator: { readonly bytes: number; readonly nodesLeft: number },
             item,
@@ -956,7 +984,7 @@ function estimateApproximateSizeBytesBounded(
               return { bytes: INF, nodesLeft: 0 } as const;
             return { bytes: sum, nodesLeft: next.nodesLeft } as const;
           },
-          { bytes: 2, nodesLeft: nodesLeft - 1 } as const,
+          { bytes: 2, nodesLeft: nodesLeft - 1 },
         );
         const extra = array.length > lim ? (array.length - lim) * 2 : 0;
         const total = result.bytes + extra;
@@ -978,7 +1006,7 @@ function estimateApproximateSizeBytesBounded(
             typeof d.get !== "function" &&
             typeof d.set !== "function" &&
             !!d.enumerable &&
-            Object.prototype.hasOwnProperty.call(d, "value"),
+            Object.hasOwn(d, "value"),
         )
         .map((d) => d.value as unknown);
       const result = values.reduce(
@@ -988,13 +1016,13 @@ function estimateApproximateSizeBytesBounded(
           index,
         ) => {
           const next = visit(item, depth + 1, accumulator.nodesLeft, seen);
-          const keyLength = names[index] ? names[index]!.length : 0;
+          const keyLength = names[index] ? names[index].length : 0;
           const sum = accumulator.bytes + next.bytes + keyLength;
           if (!Number.isFinite(sum))
             return { bytes: INF, nodesLeft: 0 } as const;
           return { bytes: sum, nodesLeft: next.nodesLeft } as const;
         },
-        { bytes: 2, nodesLeft: nodesLeft - 1 } as const,
+        { bytes: 2, nodesLeft: nodesLeft - 1 },
       );
       return result;
     };
@@ -1019,8 +1047,7 @@ function prepareStructuredPayload(
   } catch (error: unknown) {
     if (error instanceof TransferableNotAllowedError) throw error;
     throw new InvalidParameterError(
-      "Payload validation failed: " +
-        String((error as Error)?.message ?? String(error)),
+      "Payload validation failed: " + safeErrorMessage(error),
     );
   }
 
@@ -1064,7 +1091,7 @@ function processStructuredPayload(
   if (typeof estimated === "number") {
     if (!Number.isFinite(estimated) || estimated > _pmCfg().maxPayloadBytes) {
       throw new InvalidParameterError(
-        `Payload exceeds maximum size of ${_pmCfg().maxPayloadBytes} bytes.`,
+        `Payload exceeds maximum size of ${String(_pmCfg().maxPayloadBytes)} bytes.`,
       );
     }
   }
@@ -1080,7 +1107,7 @@ function processStructuredPayload(
       if (sanitizeOutgoing) {
         const stable = stableStringify(
           prepared,
-          POSTMESSAGE_MAX_PAYLOAD_DEPTH,
+          _pmCfg().maxPayloadDepth,
           _pmCfg().maxTraversalNodes,
         );
         if (stable.ok) return SHARED_ENCODER.encode(stable.s).length;
@@ -1091,7 +1118,7 @@ function processStructuredPayload(
     // Fallback: compute conservative upper bound without serialization.
     try {
       const INF = Number.POSITIVE_INFINITY;
-      const DEPTH_LIMIT = POSTMESSAGE_MAX_PAYLOAD_DEPTH;
+      const DEPTH_LIMIT = _pmCfg().maxPayloadDepth;
       const cfg = _pmCfg();
       const NODE_BUDGET = cfg.maxTraversalNodes;
       const MAX_ARRAY_ITEMS = cfg.maxArrayItems;
@@ -1119,7 +1146,7 @@ function processStructuredPayload(
         seen.add(object);
         try {
           if (isArrayBufferViewSafe(v)) {
-            const view = v as ArrayBufferView;
+            const view = v;
             return { bytes: view.byteLength, nodesLeft: nodesLeft - 1 };
           }
         } catch {
@@ -1138,7 +1165,7 @@ function processStructuredPayload(
         if (Array.isArray(v)) {
           const array = v as readonly unknown[];
           const lim = Math.min(array.length, MAX_ARRAY_ITEMS);
-          const reduction = (array as readonly unknown[]).slice(0, lim).reduce(
+          const reduction = array.slice(0, lim).reduce(
             (
               accumulator: {
                 readonly bytes: number;
@@ -1152,7 +1179,7 @@ function processStructuredPayload(
                 return { bytes: INF, nodesLeft: 0 } as const;
               return { bytes: sum, nodesLeft: next.nodesLeft } as const;
             },
-            { bytes: 0, nodesLeft: nodesLeft - 1 } as const,
+            { bytes: 0, nodesLeft: nodesLeft - 1 },
           );
           // Penalize truncated tail minimally
           const extra = array.length > lim ? (array.length - lim) * 1 : 0;
@@ -1181,7 +1208,7 @@ function processStructuredPayload(
               typeof desc.get === "function" ||
               typeof desc.set === "function" ||
               !desc.enumerable ||
-              !Object.prototype.hasOwnProperty.call(desc, "value")
+              !Object.hasOwn(desc, "value")
             )
               return accumulator;
             const keyBytes = SHARED_ENCODER.encode(name).length;
@@ -1196,7 +1223,7 @@ function processStructuredPayload(
               return { bytes: INF, nodesLeft: 0 } as const;
             return { bytes: sum, nodesLeft: next.nodesLeft } as const;
           },
-          { bytes: 0, nodesLeft: nodesLeft - 1 } as const,
+          { bytes: 0, nodesLeft: nodesLeft - 1 },
         );
         return { bytes: reduction.bytes, nodesLeft: reduction.nodesLeft };
       };
@@ -1213,7 +1240,7 @@ function processStructuredPayload(
       strictByteLength > _pmCfg().maxPayloadBytes)
   ) {
     throw new InvalidParameterError(
-      `Payload exceeds maximum size of ${_pmCfg().maxPayloadBytes} bytes.`,
+      `Payload exceeds maximum size of ${String(_pmCfg().maxPayloadBytes)} bytes.`,
     );
   }
   try {
@@ -1254,45 +1281,55 @@ export function sendSecurePostMessage(options: SecurePostMessageOptions): void {
   const { targetWindow, payload, targetOrigin } = options;
   const wireFormat = options.wireFormat ?? "json";
   const sanitizeOutgoing = options.sanitize !== false; // default true
+  // Runtime guard for defense-in-depth: ensure a real targetWindow is supplied
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- Defense-in-depth: runtime guard even if type says Window
   if (!targetWindow)
     throw new InvalidParameterError("targetWindow must be provided.");
   if (targetOrigin === "*")
     throw new InvalidParameterError("targetOrigin cannot be a wildcard ('*').");
+  // Runtime guard for defense-in-depth: validate explicit string targetOrigin
   if (!targetOrigin || typeof targetOrigin !== "string")
     throw new InvalidParameterError("targetOrigin must be a specific string.");
 
   // Validate target origin with security checks
   validateTargetOrigin(targetOrigin);
 
-  // Handle wire formats
-  if (wireFormat === "json") {
-    sendJsonMessage(targetWindow, payload, targetOrigin, sanitizeOutgoing);
-    return;
+  // Handle wire formats using a switch for clarity and lint friendliness
+  switch (wireFormat) {
+    case "json":
+      sendJsonMessage(targetWindow, payload, targetOrigin, sanitizeOutgoing);
+      return;
+    case "structured":
+    case "auto":
+      sendStructuredMessage(
+        options,
+        targetWindow,
+        payload,
+        targetOrigin,
+        sanitizeOutgoing,
+      );
+      return;
+    default:
+      throw new InvalidParameterError("Unsupported wireFormat");
   }
-
-  if (wireFormat === "structured" || wireFormat === "auto") {
-    sendStructuredMessage(
-      options,
-      targetWindow,
-      payload,
-      targetOrigin,
-      sanitizeOutgoing,
-    );
-    return;
-  }
-
-  throw new InvalidParameterError("Unsupported wireFormat");
 }
 
+/*
+  The following function coordinates multiple security checks and option normalizations.
+  Its control flow is intentionally explicit for auditability (OWASP ASVS L3). Further
+  refactoring would increase indirection and risk subtle security regressions. We disable
+  the cognitive-complexity rule for this function only, with a clear justification.
+*/
+/* eslint-disable sonarjs/cognitive-complexity */
 export function createSecurePostMessageListener(
   allowedOriginsOrOptions:
     | readonly string[]
     | CreateSecurePostMessageListenerOptions,
-  onMessageOptional?: (data: unknown) => void,
+  onMessageOptional?: (data: unknown) => void | Promise<void>,
 ): SecurePostMessageListener {
   /* eslint-disable functional/no-let -- Local parsing variables for parameter overloading; scoped to function */
   let allowedOrigins: readonly string[] | undefined,
-    onMessage: (data: unknown) => void,
+    onMessage: (data: unknown) => void | Promise<void>,
     validator:
       | ((d: unknown) => boolean)
       | Record<string, SchemaValue>
@@ -1341,11 +1378,14 @@ export function createSecurePostMessageListener(
 
   // Lock configuration at creation time to prevent TOCTOU attacks
   // Build canonical options object and freeze it to prevent mutation
+  const allowedOriginsNormalized = Array.isArray(allowedOrigins)
+    ? allowedOrigins
+    : ([] as readonly string[]);
   const finalOptions = (
     optionsObject
-      ? { ...optionsObject, allowedOrigins: optionsObject.allowedOrigins ?? [] }
+      ? { ...optionsObject, allowedOrigins: optionsObject.allowedOrigins }
       : {
-          allowedOrigins: allowedOrigins ?? [],
+          allowedOrigins: allowedOriginsNormalized,
           onMessage,
           validate: validator,
           allowOpaqueOrigin: false,
@@ -1420,7 +1460,7 @@ export function createSecurePostMessageListener(
     allowed: new Set<string>(),
     invalid: [],
   };
-  const originReduction = (allowedOrigins ?? []).reduce<{
+  const originReduction = finalOptions.allowedOrigins.reduce<{
     allowed: Set<string>;
     invalid: string[];
   }>((accumulator, o) => {
@@ -1571,14 +1611,14 @@ export function createSecurePostMessageListener(
       };
       // Call the consumer in a small helper so this handler stays simple.
       invokeConsumerSafely(
-        onMessage as (d: unknown, c?: unknown) => void,
+        onMessage as (d: unknown, c?: unknown) => void | Promise<void>,
         data,
         context,
       );
     } catch (unknownError: unknown) {
       const safeError = sanitizeErrorForLogs(unknownError);
       secureDevelopmentLog("error", "postMessage", "Listener handler error", {
-        origin: event?.origin,
+        origin: event.origin,
         error: safeError,
       });
     }
@@ -1654,7 +1694,7 @@ export function createSecurePostMessageListener(
             },
           );
         }
-        return Boolean(ok);
+        return ok;
       } catch (error: unknown) {
         secureDevelopmentLog(
           "warn",
@@ -1669,7 +1709,11 @@ export function createSecurePostMessageListener(
       }
     }
     // Otherwise do strict reference equality
-    if (expected && event.source !== expected) {
+    // Equal by identity; cast to unknown to avoid cross-realm type noise
+    if (
+      typeof expected !== "undefined" &&
+      (event.source as unknown) !== (expected as unknown)
+    ) {
       secureDevelopmentLog(
         "warn",
         "postMessage",
@@ -1756,9 +1800,16 @@ export function createSecurePostMessageListener(
     void computeAndLog();
   }
 
-  // eslint-disable-next-line sonarjs/cognitive-complexity -- Audited: wire-format parsing with multiple guarded branches; kept linear for auditability.
   function parseMessageEventData(event: MessageEvent): unknown {
     const wireFormat = wireFormatLocal;
+    if (
+      typeof event.data === "string" &&
+      event.data.length > MAX_MESSAGE_EVENT_DATA_LENGTH
+    ) {
+      throw new InvalidParameterError(
+        `postMessage payload exceeds maximum length (${String(MAX_MESSAGE_EVENT_DATA_LENGTH)}).`,
+      );
+    }
 
     // If structured/auto, allow non-string data when appropriate
     if (wireFormat === "structured") {
@@ -1776,7 +1827,7 @@ export function createSecurePostMessageListener(
           allowTransferablesLocal,
           allowTypedArraysLocal,
           0,
-          POSTMESSAGE_MAX_PAYLOAD_DEPTH,
+          getPostMessageConfig().maxPayloadDepth,
           undefined,
           { nodes: 0, transferables: 0 },
         );
@@ -1786,7 +1837,9 @@ export function createSecurePostMessageListener(
         }
         throw new InvalidParameterError(
           "Received payload validation failed: " +
-            String((error as Error)?.message ?? error),
+            (error instanceof Error && typeof error.message === "string"
+              ? error.message
+              : String(error)),
         );
       }
 
@@ -1796,7 +1849,7 @@ export function createSecurePostMessageListener(
       }
 
       // Convert to null-prototype and enforce depth/forbidden keys
-      return toNullProto(event.data, 0, POSTMESSAGE_MAX_PAYLOAD_DEPTH);
+      return toNullProto(event.data, 0, getPostMessageConfig().maxPayloadDepth);
     }
 
     if (wireFormat === "auto") {
@@ -1810,7 +1863,11 @@ export function createSecurePostMessageListener(
           event.data !== null &&
           typeof event.data === "object"
         ) {
-          return toNullProto(event.data, 0, POSTMESSAGE_MAX_PAYLOAD_DEPTH);
+          return toNullProto(
+            event.data,
+            0,
+            getPostMessageConfig().maxPayloadDepth,
+          );
         }
       } catch {
         // fall back to JSON handling below
@@ -1825,7 +1882,18 @@ export function createSecurePostMessageListener(
         "postMessage payload must be a JSON string",
       );
     }
+    if (event.data.length > MAX_MESSAGE_EVENT_DATA_LENGTH) {
+      throw new InvalidParameterError(
+        `JSON payload exceeds maximum length (${String(MAX_MESSAGE_EVENT_DATA_LENGTH)}).`,
+      );
+    }
     const byteLength = SHARED_ENCODER.encode(event.data).length;
+    // Enforce stricter textual JSON input guard (centralized constant) prior to parse
+    if (byteLength > getPostMessageConfig().maxJsonTextBytes) {
+      throw new InvalidParameterError(
+        `JSON payload exceeds textual byte limit (${String(getPostMessageConfig().maxJsonTextBytes)}).`,
+      );
+    }
     if (byteLength > _pmCfg().maxPayloadBytes) {
       secureDevelopmentLog("warn", "postMessage", "Dropped oversized payload", {
         origin: event.origin,
@@ -1840,7 +1908,7 @@ export function createSecurePostMessageListener(
       throw new InvalidParameterError("Invalid JSON in postMessage");
     }
     // Convert to null-prototype objects and enforce depth + forbidden keys
-    return toNullProto(parsed, 0, POSTMESSAGE_MAX_PAYLOAD_DEPTH);
+    return toNullProto(parsed, 0, getPostMessageConfig().maxPayloadDepth);
   }
 
   // Use globalThis.addEventListener so the listener works both on the main
@@ -1880,15 +1948,22 @@ export function createSecurePostMessageListener(
       "Global event target does not support addEventListener",
     );
   }
-  return { destroy: () => abortController.abort() };
+  return {
+    destroy: () => {
+      abortController.abort();
+    },
+  };
 }
+/* eslint-enable sonarjs/cognitive-complexity */
 
 // --- Internal Helpers ---
 
 // Deterministic, stable JSON serialization used for fingerprinting only.
+// The normalization routine is small but involves a couple of branches that trip cognitive-complexity.
+// We keep it together for auditability and determinism; splitting harms the guarantee.
 function stableStringify(
   object: unknown,
-  maxDepth = POSTMESSAGE_MAX_PAYLOAD_DEPTH,
+  maxDepth = getPostMessageConfig().maxPayloadDepth,
   nodeBudget = DEFAULT_DEEP_FREEZE_NODE_BUDGET,
 ):
   | { readonly ok: true; readonly s: string }
@@ -1921,7 +1996,13 @@ function stableStringify(
     const normalized = norm(object, 0);
     return { ok: true, s: JSON.stringify(normalized) };
   } catch (error: unknown) {
-    return { ok: false, reason: String((error as Error)?.message ?? "error") };
+    return {
+      ok: false,
+      reason:
+        error instanceof Error && typeof error.message === "string"
+          ? error.message
+          : "error",
+    };
   }
   /* eslint-enable functional/no-let */
 }
@@ -1936,7 +2017,7 @@ let _payloadFingerprintSaltPromise: Promise<Uint8Array> | undefined;
 const FINGERPRINT_SALT_LENGTH = 16;
 // Use `undefined` as the uninitialised sentinel to align with lint rules
 /* eslint-disable-next-line functional/no-let -- Controlled, file-local state for salt memoization; audited */
-let _payloadFingerprintSalt: Uint8Array | undefined = undefined;
+let _payloadFingerprintSalt: Uint8Array | undefined;
 // If secure crypto is not available in production, disable diagnostics that
 // rely on non-crypto fallbacks.
 /* eslint-disable-next-line functional/no-let -- Controlled, file-local state for diagnostics flag; audited */
@@ -1950,11 +2031,10 @@ const SALT_FAILURE_COOLDOWN_MS = 5_000;
 let _saltGenerationFailureTimestamp: number | undefined;
 
 async function ensureFingerprintSalt(): Promise<Uint8Array> {
-  if (typeof _payloadFingerprintSalt !== "undefined" && _payloadFingerprintSalt)
-    return _payloadFingerprintSalt;
+  if (_payloadFingerprintSalt !== undefined) return _payloadFingerprintSalt;
 
   // If a generation promise is already in-flight, reuse it to avoid races.
-  if (typeof _payloadFingerprintSaltPromise !== "undefined")
+  if (_payloadFingerprintSaltPromise !== undefined)
     return _payloadFingerprintSaltPromise;
 
   // If we recently observed a failure to generate a salt, fail-fast for a
@@ -2063,11 +2143,7 @@ export function computeInitialAllowedOrigin(
     const origin =
       event && typeof event.origin === "string" ? event.origin : "";
     if (origin) return origin;
-    if (
-      typeof location !== "undefined" &&
-      location &&
-      typeof location.origin === "string"
-    )
+    if (typeof location !== "undefined" && typeof location.origin === "string")
       return location.origin;
     return undefined;
   } catch {
@@ -2100,7 +2176,7 @@ export function isEventAllowedWithLock(
 
     // If we can't establish any origin information, only accept messages that
     // include a reply port — this avoids processing anonymous posts.
-    return !!(event?.ports && event.ports.length > 0);
+    return Array.isArray(event.ports) && event.ports.length > 0;
   } catch {
     return false;
   }
@@ -2110,7 +2186,7 @@ async function getPayloadFingerprint(data: unknown): Promise<string> {
   // Canonicalize sanitized payload for deterministic fingerprints
   const sanitized: unknown = (() => {
     try {
-      return toNullProto(data, 0, POSTMESSAGE_MAX_PAYLOAD_DEPTH);
+      return toNullProto(data, 0, _pmCfg().maxPayloadDepth);
     } catch {
       // If sanitization fails, fall back to raw representation for diagnostics only
       return data;
@@ -2118,7 +2194,7 @@ async function getPayloadFingerprint(data: unknown): Promise<string> {
   })();
   const stable = stableStringify(
     sanitized,
-    POSTMESSAGE_MAX_PAYLOAD_DEPTH,
+    _pmCfg().maxPayloadDepth,
     _pmCfg().maxTraversalNodes,
   );
   if (!stable.ok) {
@@ -2129,7 +2205,7 @@ async function getPayloadFingerprint(data: unknown): Promise<string> {
       );
     // dev/test fallback: use best-effort raw string truncated
 
-    const s = JSON.stringify(sanitized).slice(0, POSTMESSAGE_MAX_PAYLOAD_BYTES);
+    const s = JSON.stringify(sanitized).slice(0, _pmCfg().maxPayloadBytes);
     return computeFingerprintFromString(s);
   }
   // Encode as UTF-8 bytes and truncate by bytes to avoid splitting multi-byte chars
@@ -2153,13 +2229,15 @@ async function computeFingerprintFromBytes(
 
   try {
     const crypto = await ensureCrypto();
-    const subtle = (crypto as Crypto & { readonly subtle?: SubtleCrypto })
-      .subtle;
-    if (subtle && typeof subtle.digest === "function" && saltBuf) {
-      const saltArray = saltBuf;
-      const input = new Uint8Array(saltArray.length + payloadBytes.length);
-      input.set(saltArray, 0);
-      input.set(payloadBytes, saltArray.length);
+    const c = crypto as Crypto & {
+      readonly subtle?: { readonly digest?: unknown };
+    };
+    const hasDigest = typeof c.subtle.digest === "function";
+    if (hasDigest && saltBuf) {
+      const subtle = c.subtle as unknown as SubtleCrypto;
+      const input = new Uint8Array(saltBuf.length + payloadBytes.length);
+      input.set(saltBuf, 0);
+      input.set(payloadBytes, saltBuf.length);
       const digest = await subtle.digest("SHA-256", input.buffer);
       return arrayBufferToBase64(digest).slice(0, 12);
     }
@@ -2185,7 +2263,7 @@ async function computeFingerprintFromBytes(
 async function computeFingerprintFromString(s: string): Promise<string> {
   // Work with UTF-8 bytes and prefer crypto.subtle when available.
   const fullBytes = SHARED_ENCODER.encode(s);
-  const payloadBytes = fullBytes.slice(0, POSTMESSAGE_MAX_PAYLOAD_BYTES);
+  const payloadBytes = fullBytes.slice(0, _pmCfg().maxPayloadBytes);
 
   return computeFingerprintFromBytes(payloadBytes);
 }
@@ -2241,7 +2319,7 @@ export function _validatePayloadWithExtras(
   // Validator function path: execute safely and return boolean result.
   if (typeof validator === "function") {
     try {
-      return { valid: Boolean((validator as (d: unknown) => boolean)(data)) };
+      return { valid: (validator as (d: unknown) => boolean)(data) };
     } catch (error: unknown) {
       return {
         valid: false,
@@ -2272,6 +2350,7 @@ export function _validatePayloadWithExtras(
 // Test-only accessors for internal helpers. Guarded by a runtime check to avoid
 // leaking internals in production builds. These are only available when the
 // build defines `__TEST__` and the runtime allows test APIs via dev-guards.
+/* eslint-disable sonarjs/cognitive-complexity -- Audited: guarded test internals exposure with multiple environment gates; refactoring may obscure safety checks. */
 export const __test_internals:
   | {
       readonly toNullProto: (
@@ -2283,83 +2362,133 @@ export const __test_internals:
       readonly ensureFingerprintSalt: () => Promise<Uint8Array>;
       readonly deepFreeze: <T>(object: T) => T;
     }
-  | undefined =
-  typeof __TEST__ !== "undefined" && __TEST__
-    ? (() => {
-        // runtime guard for test-only API usage
-        // use require to avoid static circular imports in some bundlers
-        try {
-          // Enforce explicit opt-in in production at runtime.
-          const isProduction = (() => {
-            try {
-              return environment.isProduction;
-            } catch {
-              return false;
-            }
-          })();
-          const environmentAllow =
-            typeof process !== "undefined" &&
-            (process as unknown as { env?: Record<string, string | undefined> })
-              ?.env?.["SECURITY_KIT_ALLOW_TEST_APIS"] === "true";
-          const globalAllow = !!(
-            globalThis as unknown as Record<string, unknown>
-          )["__SECURITY_KIT_ALLOW_TEST_APIS"];
-          if (isProduction && !(environmentAllow || globalAllow)) {
-            throw new Error(
-              "Test-only APIs are disabled in production unless explicitly allowed.",
-            );
-          }
+  | undefined = (() => {
+  // Only expose internals when built explicitly for tests.
+  const isTestBuild = (() => {
+    try {
+      return typeof __TEST__ !== "undefined" && __TEST__;
+    } catch {
+      return false;
+    }
+  })();
 
-          const globalRecord = globalThis as unknown as Record<string, unknown>;
-          const request = globalRecord["require"];
-          if (typeof request !== "function") {
-            // Without CommonJS require, only allow exposure when an explicit flag is set.
-            if (!(environmentAllow || globalAllow)) {
-              throw new Error(
-                "Cannot load test internals: require() not available and no explicit allow flag set.",
-              );
-            }
-            // Explicitly allowed via flags: proceed without calling development guard.
-          } else {
-            const invoke = request as unknown as (id: string) => unknown;
-            const developmentGuards = invoke("./development-guards") as {
-              readonly assertTestApiAllowed: () => void;
-            };
-            developmentGuards.assertTestApiAllowed();
-          }
+  // Resolve environment and allow flags up-front for consistent decisions
+  const isProduction = (() => {
+    try {
+      return environment.isProduction;
+    } catch {
+      return false;
+    }
+  })();
+  const environmentAllow =
+    typeof process !== "undefined" &&
+    (process as unknown as { env?: Record<string, string | undefined> }).env?.[
+      "SECURITY_KIT_ALLOW_TEST_APIS"
+    ] === "true";
+  const globalAllow = !!(globalThis as unknown as Record<string, unknown>)[
+    "__SECURITY_KIT_ALLOW_TEST_APIS"
+  ];
 
-          const testExports = {
-            toNullProto: toNullProto as (
-              object: unknown,
-              depth?: number,
-              maxDepth?: number,
-            ) => unknown,
-            getPayloadFingerprint: getPayloadFingerprint as (
-              data: unknown,
-            ) => Promise<string>,
-            ensureFingerprintSalt:
-              ensureFingerprintSalt as () => Promise<Uint8Array>,
-            deepFreeze: deepFreeze as <T>(object: T) => T,
-          };
-          return testExports;
-        } catch (error: unknown) {
-          // If test internals cannot be exposed, return undefined to avoid exposing internals.
+  // If build-time macro is absent, allow exposure only when explicitly allowed in
+  // non-production via env/global flags. Otherwise, stay undefined.
+  if (!isTestBuild) {
+    if (!isProduction && (environmentAllow || globalAllow)) {
+      return {
+        toNullProto: toNullProto as (
+          object: unknown,
+          depth?: number,
+          maxDepth?: number,
+        ) => unknown,
+        getPayloadFingerprint: getPayloadFingerprint as (
+          data: unknown,
+        ) => Promise<string>,
+        ensureFingerprintSalt:
+          ensureFingerprintSalt as () => Promise<Uint8Array>,
+        deepFreeze: deepFreeze as <T>(object: T) => T,
+      };
+    }
+    return;
+  }
+
+  // Helper to construct the internals object.
+  const exportsObject = () => ({
+    toNullProto: toNullProto as (
+      object: unknown,
+      depth?: number,
+      maxDepth?: number,
+    ) => unknown,
+    getPayloadFingerprint: getPayloadFingerprint as (
+      data: unknown,
+    ) => Promise<string>,
+    ensureFingerprintSalt: ensureFingerprintSalt as () => Promise<Uint8Array>,
+    deepFreeze: deepFreeze as <T>(object: T) => T,
+  });
+
+  try {
+    // In production, require explicit allow; otherwise, do not expose.
+    if (isProduction && !(environmentAllow || globalAllow)) return;
+
+    const request = (globalThis as unknown as Record<string, unknown>)[
+      "require"
+    ];
+    if (typeof request === "function") {
+      try {
+        const invoke = request as unknown as (id: string) => unknown;
+        const developmentGuards = invoke("./development-guards") as {
+          readonly assertTestApiAllowed: () => void;
+        };
+        developmentGuards.assertTestApiAllowed();
+        return exportsObject();
+      } catch (guardError) {
+        // Fail-closed in production: if guard cannot be loaded or assertion fails,
+        // do NOT expose internals even when explicit flags are set.
+        if (!isProduction && (environmentAllow || globalAllow))
+          return exportsObject();
+        // In production, fail closed without logging underlying guard error details
+        // to reduce potential side-channel surface (e.g., timing/log content probing).
+        if (!isProduction) {
           try {
             secureDevelopmentLog(
               "warn",
               "postMessage",
-              "Test internals not exposed",
-              {
-                error: sanitizeErrorForLogs(error),
-              },
+              "Development guard prevented exposing test internals",
+              { error: sanitizeErrorForLogs(guardError) },
             );
           } catch {
-            /* best-effort */
+            /* ignore */
           }
-          return undefined;
         }
-      })()
-    : undefined;
+        return;
+      }
+    }
+    // If require is not available: allow exposure only in non-production
+    // when an explicit allow flag is set; otherwise, do not expose.
+    if (!isProduction && (environmentAllow || globalAllow))
+      return exportsObject();
+    return;
+  } catch (error: unknown) {
+    // On unexpected errors: do not expose in production; in non-production,
+    // expose only if explicitly allowed via env/global flag.
+    try {
+      const isProduction_ = environment.isProduction;
+      if (isProduction_) return;
+    } catch {
+      /* ignore */
+    }
+    try {
+      secureDevelopmentLog(
+        "warn",
+        "postMessage",
+        "Error while determining test internals exposure",
+        { error: sanitizeErrorForLogs(error) },
+      );
+    } catch {
+      /* ignore */
+    }
+    return environmentAllow || globalAllow ? exportsObject() : undefined;
+  }
+})();
+/* eslint-enable sonarjs/cognitive-complexity */
 
 // Runtime-guarded test helpers: these call a runtime dev-guard to ensure they
 // are not used in production by accident. Prefer these in unit tests instead
@@ -2373,7 +2502,9 @@ function _assertTestApiAllowedInline(): void {
   }
   const environmentAllow =
     typeof process !== "undefined" &&
-    process?.env?.["SECURITY_KIT_ALLOW_TEST_APIS"] === "true";
+    (process as unknown as { env?: Record<string, string | undefined> }).env?.[
+      "SECURITY_KIT_ALLOW_TEST_APIS"
+    ] === "true";
   const globalAllow = !!(globalThis as unknown as Record<string, unknown>)[
     "__SECURITY_KIT_ALLOW_TEST_APIS"
   ];
@@ -2399,11 +2530,7 @@ export function __test_toNullProto(
   maxDepth?: number,
 ): unknown {
   _assertTestApiAllowedInline();
-  return toNullProto(
-    object,
-    depth ?? 0,
-    maxDepth ?? POSTMESSAGE_MAX_PAYLOAD_DEPTH,
-  );
+  return toNullProto(object, depth ?? 0, maxDepth ?? _pmCfg().maxPayloadDepth);
 }
 
 export function __test_deepFreeze<T>(object: T): T {

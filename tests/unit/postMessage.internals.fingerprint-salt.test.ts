@@ -1,8 +1,8 @@
 import { test, expect } from "vitest";
-import loadPostMessageInternals from "../../tests/helpers/vmPostMessageHelper";
+import loadPostMessageInternals from "../../tests/helpers/vmPostMessageHelper.ts";
 
 test("ensureFingerprintSalt returns a Uint8Array and is stable under repeated calls", async () => {
-  const pm = loadPostMessageInternals();
+  const pm = loadPostMessageInternals({ allowTestApisFlag: true });
   const internals = pm.__test_internals ?? pm;
   expect(internals.ensureFingerprintSalt).toBeDefined();
   const aRaw = await internals.ensureFingerprintSalt();

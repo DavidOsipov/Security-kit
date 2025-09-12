@@ -1,5 +1,5 @@
 import { it, expect } from "vitest";
-import loadPostMessageInternals from "../helpers/vmPostMessageHelper";
+import loadPostMessageInternals from "../helpers/vmPostMessageHelper.ts";
 
 it("surfaces VM timeouts as explicit errors from __runInVmJson", () => {
   // Use an intentionally tiny timeout so the synchronous busy-loop inside the

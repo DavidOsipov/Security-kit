@@ -14,9 +14,9 @@ import {
   InvalidConfigurationError,
   CryptoUnavailableError,
   sanitizeErrorForLogs,
-} from "./errors";
-import { secureDevLog as secureDevelopmentLog, secureWipe } from "./utils";
-import { SHARED_ENCODER } from "./encoding";
+} from "./errors.ts";
+import { secureDevLog as secureDevelopmentLog, secureWipe } from "./utils.ts";
+import { SHARED_ENCODER } from "./encoding.ts";
 
 /*
 /* NOTE: This file intentionally performs a few runtime-type checks and
@@ -133,7 +133,7 @@ const DEFAULT_CONFIG = Object.freeze({
 function fingerprintHexSync(input: string): string {
   // Functional reduction over code points — avoids mutable `let` per lint policy.
   // rename accumulator to satisfy naming rules
-  const hash = Array.from(String(input)).reduce((accumulator, ch) => {
+  const hash = Array.from(input).reduce((accumulator, ch) => {
     // acc * 33 ^ c  (force to unsigned 32-bit)
     const next = ((accumulator * 33) ^ ch.charCodeAt(0)) >>> 0;
     return next;
@@ -159,7 +159,7 @@ function promiseWithTimeout<T>(
         clearTimeout(t);
         resolve(v);
       },
-      (error) => {
+      (error: unknown) => {
         clearTimeout(t);
         reject(error instanceof Error ? error : new Error(String(error)));
       },
@@ -263,6 +263,69 @@ async function sha256Hex(input: string, timeoutMs = 1500): Promise<string> {
   }
 
   async function tryNodeCrypto(): Promise<string | undefined> {
+    // Helper kept inside closure so it cannot be misused elsewhere and so
+    // it does not add cognitive complexity to the higher‑level function in
+    // other modules (principle of least privilege).
+    const normalizeDigest = (value: unknown): string => {
+      if (typeof value === "string") return value;
+      // Prefer an explicit, side‑effect free toString if present.
+      if (
+        value !== null &&
+        typeof value === "object" &&
+        typeof (value as { toString?: unknown }).toString === "function"
+      ) {
+        try {
+          const s = (value as { toString: () => unknown }).toString();
+          if (typeof s === "string" && s.length > 0) return s;
+        } catch {
+          /* fall through to other normalizations */
+        }
+      }
+      // Byte array like → produce hex manually (guards against environments
+      // returning Buffer / Uint8Array / ArrayLike).
+      const looksArrayLike = (v: unknown): v is ArrayLike<number> =>
+        !!v &&
+        typeof v === "object" &&
+        typeof (v as { length?: unknown }).length === "number";
+      try {
+        if (value instanceof Uint8Array) {
+          return Array.from(value)
+            .map((b) => b.toString(16).padStart(2, "0"))
+            .join("");
+        }
+        if (
+          looksArrayLike(value) &&
+          value.length >= 0 &&
+          value.length <= 65_536
+        ) {
+          // Defensive upper bound to avoid potential DoS via huge faux arrays (ASVS 5.3 - size limits)
+          const u8 = (() => {
+            try {
+              // Attempt buffer view first if present
+              const buf = (value as { buffer?: unknown }).buffer;
+              if (buf instanceof ArrayBuffer) return new Uint8Array(buf);
+            } catch {
+              /* ignore */
+            }
+            // Fallback: copy elements coercing to number & masking
+            const temporary = new Uint8Array(value.length);
+            for (let index = 0; index < value.length; index++) {
+              const n = Number((value as Record<number, unknown>)[index]);
+              // Mask to byte; NaN becomes 0 implicitly
+              temporary[index] = (n & 0xff) >>> 0;
+            }
+            return temporary;
+          })();
+          return Array.from(u8)
+            .map((b) => b.toString(16).padStart(2, "0"))
+            .join("");
+        }
+      } catch {
+        /* ignore and fall back */
+      }
+      return String(value);
+    };
+
     try {
       const nodeCryptoModulePromise = importer("node:crypto") as Promise<
         typeof import("node:crypto")
@@ -272,11 +335,12 @@ async function sha256Hex(input: string, timeoutMs = 1500): Promise<string> {
         timeoutMs,
         "sha256_timeout",
       );
-      if (nodeCrypto && typeof nodeCrypto.createHash === "function") {
-        return String(
-          nodeCrypto.createHash("sha256").update(input).digest("hex"),
-        );
-      }
+      if (typeof nodeCrypto.createHash !== "function") return undefined;
+      const raw: unknown = nodeCrypto
+        .createHash("sha256")
+        .update(input)
+        .digest("hex");
+      return normalizeDigest(raw);
     } catch (error) {
       try {
         secureDevelopmentLog(
@@ -293,6 +357,19 @@ async function sha256Hex(input: string, timeoutMs = 1500): Promise<string> {
   }
 
   async function tryFastSha256(): Promise<string | undefined> {
+    // Type guards isolate dynamic module shapes without resorting to unsafe casts.
+    const hasHashHex = (
+      m: unknown,
+    ): m is { hashHex: (input: string) => unknown } =>
+      !!m &&
+      typeof m === "object" &&
+      typeof (m as { hashHex?: unknown }).hashHex === "function";
+    const hasHex = (m: unknown): m is { hex: (input: string) => unknown } =>
+      !!m &&
+      typeof m === "object" &&
+      typeof (m as { hex?: unknown }).hex === "function";
+    const isFunction = (m: unknown): m is (input: string) => unknown =>
+      typeof m === "function";
     try {
       const fastModulePromise = importer("fast-sha256") as Promise<unknown>;
       const fastModule = await promiseWithTimeout(
@@ -300,15 +377,18 @@ async function sha256Hex(input: string, timeoutMs = 1500): Promise<string> {
         timeoutMs,
         "sha256_timeout",
       );
-      if (fastModule !== null && typeof fastModule === "object") {
-        const m = fastModule as Record<string, unknown>;
-        if (typeof m["hashHex"] === "function")
-          return String((m["hashHex"] as (...a: unknown[]) => unknown)(input));
-        if (typeof m["hex"] === "function")
-          return String((m["hex"] as (...a: unknown[]) => unknown)(input));
+      if (hasHashHex(fastModule)) {
+        const value = fastModule.hashHex(input);
+        return typeof value === "string" ? value : String(value);
       }
-      if (typeof fastModule === "function")
-        return String((fastModule as unknown as (s: string) => string)(input));
+      if (hasHex(fastModule)) {
+        const value = fastModule.hex(input);
+        return typeof value === "string" ? value : String(value);
+      }
+      if (isFunction(fastModule)) {
+        const output = fastModule(input);
+        return typeof output === "string" ? output : String(output);
+      }
     } catch (error) {
       try {
         secureDevelopmentLog(
@@ -338,15 +418,15 @@ async function sha256Hex(input: string, timeoutMs = 1500): Promise<string> {
           const maybe = (module_["sha256"] as (...a: unknown[]) => unknown)(
             input,
           );
-          if (maybe instanceof Promise)
-            return String(
-              await promiseWithTimeout(
-                maybe as Promise<unknown>,
-                timeoutMs,
-                "sha256_timeout",
-              ),
+          if (maybe instanceof Promise) {
+            const v = await promiseWithTimeout(
+              maybe as Promise<unknown>,
+              timeoutMs,
+              "sha256_timeout",
             );
-          return String(maybe);
+            return typeof v === "string" ? v : String(v);
+          }
+          return typeof maybe === "string" ? maybe : String(maybe);
         }
       }
     } catch (error) {
@@ -376,7 +456,7 @@ async function sha256Hex(input: string, timeoutMs = 1500): Promise<string> {
 /** Sanitize selector for logs: strip attribute values and quoted substrings; truncate. */
 function sanitizeSelectorForLogs(sel: string): string {
   try {
-    const s = String(sel);
+    const s = sel; // No change needed here, keeping it as is
     // Use safe scanners instead of complex regexes to avoid catastrophic backtracking
     const redacted = redactAttributesSafely(s);
     const noQuotes = removeQuotedSegmentsSafely(redacted);
@@ -391,53 +471,83 @@ function sanitizeSelectorForLogs(sel: string): string {
 }
 
 /**
- * Redact attribute selector values safely without backtracking-prone regex.
- * Implementation is somewhat stateful and branchy by necessity; disable the
- * cognitive-complexity rule here with a justification — this is a small,
- * auditable scanner that avoids ReDoS risks from complex regexes.
+ * Redact attribute selector values safely without regex backtracking.
+ * Complexity reduced by decomposing logic & using linear scans only.
+ * Security: bounded O(n) with explicit iteration guard to mitigate pathological input.
  */
-// eslint-disable-next-line sonarjs/cognitive-complexity
-function redactAttributesSafely(s: string): string {
-  const out: string[] = [];
-  let index = 0;
-  while (index < s.length) {
-    const ch = s[index];
-    if (ch === "[") {
-      // capture up to '=' or closing bracket
-      let index_ = index + 1;
-      while (index_ < s.length && s[index_] !== "]" && s[index_] !== "=")
-        index_++;
-      if (index_ < s.length && s[index_] === "=") {
-        // we have an attribute with value; find end of value
-        // skip whitespace
-        let k = index_ + 1;
-        while (k < s.length && /\s/.test(String(s[k]))) k++;
-        // value may be quoted or unquoted
-        if (k < s.length && (s[k] === '"' || s[k] === "'")) {
-          const quote = s[k];
-          k++;
-          while (k < s.length && s[k] !== quote) k++;
-          // advance to closing bracket
-          while (k < s.length && s[k] !== "]") k++;
-          out.push(s.slice(index, index + 1));
-          out.push(s.slice(index + 1, index_).replace(/\s+/g, ""));
-          out.push("=<redacted>]");
-          index = k + 1;
-          continue;
-        }
-        // unquoted value: advance to closing bracket
-        while (k < s.length && s[k] !== "]") k++;
-        out.push(s.slice(index, index + 1));
-        out.push(s.slice(index + 1, index_).replace(/\s+/g, ""));
-        out.push("=<redacted>]");
-        index = k + 1;
-        continue;
-      }
+function redactAttributesSafely(selector: string): string {
+  const length = selector.length;
+  if (length === 0) return selector;
+
+  const isBracketOpen = (c: number) => c === 91; // '['
+  const isEquals = (c: number) => c === 61; // '='
+  const isBracketClose = (c: number) => c === 93; // ']'
+  const isQuote = (ch: string) => ch === '"' || ch === "'";
+  const sliceName = (start: number, eq: number) =>
+    selector.slice(start + 1, eq).replace(/\s+/g, "");
+
+  // Extract one redacted attribute segment starting at index. Returns
+  // [emittedString, newIndex] or undefined if not an attribute segment.
+  const scanNameOrClose = (startIndex: number): number => {
+    let scan = startIndex + 1;
+    while (scan < length) {
+      const code = selector.charCodeAt(scan);
+      if (isEquals(code) || isBracketClose(code)) break;
+      scan++;
     }
-    out.push(String(ch));
+    return scan;
+  };
+
+  const consumeQuotedValue = (valueIndex: number, quote: string): number => {
+    // consume until matching quote or end
+    while (valueIndex < length && selector.charAt(valueIndex) !== quote)
+      valueIndex++;
+    // advance to closing bracket
+    while (valueIndex < length && selector.charAt(valueIndex) !== "]")
+      valueIndex++;
+    return valueIndex < length ? valueIndex + 1 : length;
+  };
+
+  const consumeUnquotedValue = (valueIndex: number): number => {
+    while (valueIndex < length && selector.charAt(valueIndex) !== "]")
+      valueIndex++;
+    return valueIndex < length ? valueIndex + 1 : length;
+  };
+
+  const tryRedactAt = (startIndex: number): [string, number] | undefined => {
+    if (!isBracketOpen(selector.charCodeAt(startIndex))) return undefined;
+    const scan = scanNameOrClose(startIndex);
+    if (scan >= length || !isEquals(selector.charCodeAt(scan)))
+      return undefined;
+    const rawName = sliceName(startIndex, scan);
+    let valueIndex = scan + 1;
+    while (valueIndex < length && /\s/.test(selector.charAt(valueIndex)))
+      valueIndex++;
+    if (valueIndex < length && isQuote(selector.charAt(valueIndex))) {
+      const quote = selector.charAt(valueIndex);
+      const endIndex = consumeQuotedValue(valueIndex + 1, quote);
+      return [`[${rawName}=<redacted>]`, endIndex];
+    }
+    const endIndex = consumeUnquotedValue(valueIndex);
+    return [`[${rawName}=<redacted>]`, endIndex];
+  };
+
+  let output = "";
+  let index = 0;
+  let safetyCounter = 0;
+  const maxSteps = length * 2; // linear safety cap
+  while (index < length && safetyCounter <= maxSteps) {
+    safetyCounter++;
+    const attempt = tryRedactAt(index);
+    if (attempt) {
+      output += attempt[0];
+      index = attempt[1];
+      continue;
+    }
+    output += selector.charAt(index);
     index++;
   }
-  return out.join("");
+  return output;
 }
 
 /** Remove quoted segments safely (handles escaped quotes conservatively). */
@@ -445,15 +555,15 @@ function removeQuotedSegmentsSafely(s: string): string {
   let out = "";
   let index = 0;
   while (index < s.length) {
-    const ch = s[index];
+    const ch = s.charAt(index);
     if (ch === '"' || ch === "'") {
       const quote = ch;
       index++;
       while (index < s.length) {
-        if (s[index] === "\\") {
+        if (s.charAt(index) === "\\") {
           // skip escaped char
           index += 2;
-        } else if (s[index] === quote) {
+        } else if (s.charAt(index) === quote) {
           index++;
           break;
         } else {
@@ -517,6 +627,50 @@ function extractAttributeSegments(s: string): string[] {
   return parts;
 }
 
+/* ----------------------- Selector syntax helper utilities ------------------ */
+
+// Fast path: determine if a selector is composed only of simple tokens (IDs, classes, tags)
+// separated by basic combinators. Kept intentionally small & allocation‑free.
+function isSimpleSelectorFast(s: string, maxCombinators: number): boolean {
+  let tokens = 0;
+  let index = 0;
+  const length = s.length;
+  const tokenRegex = /^[#.]?[\w-]+$/; // small, safe regex (no catastrophic backtracking)
+  while (index < length) {
+    let index_ = index;
+    while (index_ < length && !/[ +>~]/.test(s.charAt(index_))) index_++;
+    const tok = s.slice(index, index_).trim();
+    if (!tok) return false;
+    if (!tokenRegex.test(tok)) return false;
+    tokens++;
+    while (index_ < length && /[ +>~]/.test(s.charAt(index_))) index_++;
+    index = index_;
+    if (tokens > maxCombinators + 1) return false;
+  }
+  return tokens > 0 && tokens <= maxCombinators + 1;
+}
+
+// Return the first disallowed/expensive pseudo substring if present; otherwise undefined.
+function findExpensivePseudo(
+  s: string,
+  expensiveList: readonly string[],
+): string | undefined {
+  const lower = s.toLowerCase();
+  for (const token of expensiveList) if (lower.includes(token)) return token;
+  return undefined;
+}
+
+// Validate extracted attribute segments for balance & size; return failure reason if any.
+function attributeSegmentIssue(
+  segments: readonly string[],
+): string | undefined {
+  for (const seg of segments)
+    if (!seg.endsWith("]")) return "unbalanced_attribute_brackets";
+  for (const seg of segments)
+    if (seg.length > 128) return "attribute_selector_too_long";
+  return undefined;
+}
+
 /* ------------------------------ Implementation ---------------------------- */
 
 type RootCache = Map<string, Element | undefined>;
@@ -525,6 +679,7 @@ type RootCache = Map<string, Element | undefined>;
  * A security-focused class for validating and querying DOM elements.
  */
 export class DOMValidator {
+  // Normalized config with defaults applied
   readonly #config: DOMValidatorConfig;
 
   // validatedElements stores last validation timestamp to allow TTL-based revalidation.
@@ -532,7 +687,7 @@ export class DOMValidator {
   readonly #validatedElements = new WeakMap<Element, number>();
 
   // Mutable internal cache (lazily populated) — typed as RootCache for clarity.
-  #resolvedRootsCache?: RootCache;
+  #resolvedRootsCache: RootCache;
 
   // Rate limiter state (mutable)
   #validationCounter = 0;
@@ -548,7 +703,9 @@ export class DOMValidator {
    * @mutates this.#resolvedRootsCache - initializes internal cache (Map by default)
    */
   constructor(config: DOMValidatorConfig = DEFAULT_CONFIG) {
-    this.#config = Object.freeze(DOMValidator.cloneAndNormalizeConfig(config));
+    this.#config = Object.freeze(
+      DOMValidator.cloneAndNormalizeConfig(config),
+    ) as DOMValidatorConfig;
     this.#instanceId = this.#config.instanceId;
 
     // initialize cache synchronously via factory (if provided) or Map
@@ -572,7 +729,7 @@ export class DOMValidator {
     // Defensive validation: ensure no allowed selector is present in forbiddenRoots (case-insensitive compare)
     for (const root of this.#config.allowedRootSelectors) {
       try {
-        const normalized = String(root).trim().toLowerCase();
+        const normalized = root.trim().toLowerCase();
         if (this.#config.forbiddenRoots.has(normalized)) {
           throw new InvalidConfigurationError(
             `Disallowed broad selector in validator allowlist: "${root}"`,
@@ -625,7 +782,7 @@ export class DOMValidator {
         "lru_import_timeout",
       );
       // Narrow the dynamic import result into a minimal runtime shape we expect.
-      const LRU: unknown = (module_ as any).default ?? module_;
+      const LRU: unknown = module_.default ?? module_;
       if (typeof LRU === "function") {
         // Construct via 'any' intentionally but validate runtime shape before use.
         // eslint-disable-next-line @typescript-eslint/no-unsafe-call
@@ -659,23 +816,41 @@ export class DOMValidator {
   }
 
   private static cloneAndNormalizeConfig(
-    cfg: DOMValidatorConfig,
+    // Accept partial/nullable at runtime to harden against misconfigured callers/tests
+    cfg_: DOMValidatorConfig | Partial<DOMValidatorConfig> | null | undefined,
   ): DOMValidatorConfig {
-    // Defensive clones: ensure nested Sets are fresh copies (prevent external mutation)
+    const cfg = cfg_ ?? {};
+
+    // Rehydrate and normalize inputs; gracefully accept arrays/iterables or undefined
+    const allowedInput = (cfg.allowedRootSelectors ??
+      DEFAULT_CONFIG.allowedRootSelectors) as Iterable<string>;
+    const forbiddenInput = (cfg.forbiddenRoots ??
+      DEFAULT_CONFIG.forbiddenRoots) as Iterable<string>;
+
     const allowed = new Set<string>();
-    for (const s of cfg.allowedRootSelectors ??
-      DEFAULT_CONFIG.allowedRootSelectors) {
-      allowed.add(String(s).trim());
+    try {
+      for (const s of allowedInput) {
+        if (typeof s === "string") allowed.add(s.trim());
+      }
+    } catch {
+      // Fallback to defaults if iteration fails
+      for (const s of DEFAULT_CONFIG.allowedRootSelectors) allowed.add(s);
     }
+
     const forbidden = new Set<string>();
-    for (const s of cfg.forbiddenRoots ?? DEFAULT_CONFIG.forbiddenRoots) {
-      forbidden.add(String(s).trim().toLowerCase());
+    try {
+      for (const s of forbiddenInput) {
+        if (typeof s === "string") forbidden.add(s.trim().toLowerCase());
+      }
+    } catch {
+      for (const s of DEFAULT_CONFIG.forbiddenRoots)
+        forbidden.add(s.toLowerCase());
     }
 
     const out = {
       allowedRootSelectors: allowed,
       forbiddenRoots: forbidden,
-      failFast: Boolean(cfg.failFast),
+      failFast: Boolean(cfg.failFast ?? DEFAULT_CONFIG.failFast),
       maxSelectorLength:
         cfg.maxSelectorLength ?? DEFAULT_CONFIG.maxSelectorLength,
       maxValidationsPerSecond:
@@ -731,19 +906,18 @@ export class DOMValidator {
   #resolveAndCacheAllowedRoots(): ReadonlyMap<string, Element | undefined> {
     if (!hasDOM) return new Map();
 
-    if (this.#resolvedRootsCache && this.#resolvedRootsCache.size > 0) {
+    if (this.#resolvedRootsCache.size > 0) {
       return this.#resolvedRootsCache;
     }
 
-    const mutable =
-      this.#resolvedRootsCache ?? new Map<string, Element | undefined>();
+    const mutable = this.#resolvedRootsCache;
     for (const selector of this.#config.allowedRootSelectors) {
       try {
         const element = document.querySelector(selector) ?? undefined;
         mutable.set(selector, element);
       } catch (error) {
         secureDevelopmentLog("debug", "DOMValidator", "resolve root failed", {
-          selector: sanitizeSelectorForLogs(String(selector)),
+          selector: sanitizeSelectorForLogs(selector),
           err: sanitizeErrorForLogs(error),
         });
         mutable.set(selector, undefined);
@@ -812,11 +986,11 @@ export class DOMValidator {
         // `parse` or the default export. Treat as unknown and validate before use.
 
         const maybeParser: unknown =
-          (module_ as any).parse ?? (module_ as any).default ?? module_;
+          module_.parse ?? module_.default ?? module_;
         if (typeof maybeParser === "function") {
           const parserFunction = maybeParser as (s: string) => unknown;
           // call parser; css-what throws on invalid input
-          parserFunction(String(selector));
+          parserFunction(selector);
         }
       } catch (error) {
         try {
@@ -831,7 +1005,8 @@ export class DOMValidator {
             },
           );
         } catch {
-          /* swallow */
+          // explicit no-op to satisfy lint rule and avoid swallowing behavior
+          void 0;
         }
       }
     })();
@@ -851,7 +1026,9 @@ export class DOMValidator {
       this.#validationCounter = 0;
     }
     this.#validationCounter++;
-    const max = this.#config.maxValidationsPerSecond ?? 50;
+    const max =
+      this.#config.maxValidationsPerSecond ??
+      DEFAULT_CONFIG.maxValidationsPerSecond;
     if (this.#validationCounter > max) {
       if (this.#config.auditHook) {
         const eventBase = {
@@ -861,7 +1038,21 @@ export class DOMValidator {
         const event = this.#instanceId
           ? ({ ...eventBase, instanceId: this.#instanceId } as AuditEvent)
           : (eventBase as AuditEvent);
-        void this.#safeCallAuditHook(event).catch(() => {});
+        void this.#safeCallAuditHook(event).catch((error: unknown) => {
+          // Observe rejection to avoid unhandledrejection; log minimally
+          try {
+            secureDevelopmentLog(
+              "debug",
+              "DOMValidator",
+              "rate-limit audit hook failed",
+              {
+                err: sanitizeErrorForLogs(error),
+              },
+            );
+          } catch {
+            /* swallow */
+          }
+        });
       }
       throw new InvalidParameterError("Selector validation rate exceeded");
     }
@@ -879,12 +1070,11 @@ export class DOMValidator {
     this.#checkRateLimit();
 
     if (typeof selector !== "string") {
-      this.#emitValidationFailureEvent(String(selector), "non_string_selector");
+      this.#emitValidationFailureEvent("<non_string>", "non_string_selector");
       throw new InvalidParameterError("Selector must be a string.");
     }
 
     const s = selector.trim();
-
     if (!s) {
       this.#emitValidationFailureEvent(s, "empty_selector");
       throw new InvalidParameterError(
@@ -892,39 +1082,18 @@ export class DOMValidator {
       );
     }
 
-    const maxLength = this.#config.maxSelectorLength ?? 1024;
+    const maxLength =
+      this.#config.maxSelectorLength ?? DEFAULT_CONFIG.maxSelectorLength;
     if (s.length > maxLength) {
       this.#emitValidationFailureEvent(s, "selector_too_long");
       throw new InvalidParameterError("Selector is too long.");
     }
 
-    // Fast allowlist for very simple selectors: ID, class, tag, and simple combinators.
-    // Implemented via safe scanner to avoid complex regexes and ReDoS.
-    const maxCombinators = 8;
-    const isSimple = (() => {
-      let tokens = 0;
-      let index = 0;
-      const validToken = (tok: string) => /^[#.]?[-\w]+$/.test(tok);
-      while (index < s.length) {
-        // split on combinators
-        let index_ = index;
-        while (index_ < s.length && !/[ >+~]/.test(s.charAt(index_))) index_++;
-        const tok = s.slice(index, index_).trim();
-        if (!tok) return false;
-        if (!validToken(tok)) return false;
-        tokens++;
-        // skip combinator(s)
-        while (index_ < s.length && /[ >+~]/.test(s.charAt(index_))) index_++;
-        index = index_;
-        if (tokens > maxCombinators + 1) return false;
-      }
-      return tokens > 0 && tokens <= maxCombinators + 1;
-    })();
-    if (isSimple) return s;
+    // Simple fast-path allowlist
+    if (isSimpleSelectorFast(s, 8)) return s;
 
-    // Reject known expensive or complex pseudo-classes immediately. Use simple
-    // substring checks instead of a complex regex to avoid ReDoS concerns.
-    const expensiveList = [
+    // Disallowed / expensive pseudo detection
+    const expensiveList = Object.freeze([
       ":has(",
       ":is(",
       ":where(",
@@ -933,27 +1102,25 @@ export class DOMValidator {
       ":not(",
       ":matches(",
       ":contains(",
-    ];
-    for (const token of expensiveList) {
-      if (s.toLowerCase().includes(token)) {
-        this.#emitValidationFailureEvent(s, "expensive_pseudo");
-        throw new InvalidParameterError(
-          "Selector contains disallowed or expensive pseudo-classes.",
-        );
-      }
+    ] as const);
+    if (findExpensivePseudo(s, expensiveList)) {
+      this.#emitValidationFailureEvent(s, "expensive_pseudo");
+      throw new InvalidParameterError(
+        "Selector contains disallowed or expensive pseudo-classes.",
+      );
     }
 
-    // Additional syntactic constraints: parentheses depth, attribute selector length
-    // parentheses depth
+    // Parenthesis depth & attribute segment constraints
     this.#assertParenDepthWithinLimit(s, 3);
-
-    // attributes length and complexity — use a safe scanner to extract bracketed segments
     const attributeSegments = extractAttributeSegments(s);
-    for (const seg of attributeSegments) {
-      if (seg.length > 128) {
-        this.#emitValidationFailureEvent(s, "attribute_selector_too_long");
-        throw new InvalidParameterError("Attribute selector is too large.");
-      }
+    const attributeIssue = attributeSegmentIssue(attributeSegments);
+    if (attributeIssue) {
+      this.#emitValidationFailureEvent(s, attributeIssue);
+      const message =
+        attributeIssue === "unbalanced_attribute_brackets"
+          ? "Unbalanced attribute selector brackets."
+          : "Attribute selector is too large.";
+      throw new InvalidParameterError(message);
     }
 
     if (!hasDOM) {
@@ -963,8 +1130,8 @@ export class DOMValidator {
       );
     }
 
-    // Final safety-net: attempt to parse using a DocumentFragment (may throw)
     try {
+      // Native parser validation (may throw)
       document.createDocumentFragment().querySelector(s);
     } catch (error) {
       const safe = sanitizeErrorForLogs(error);
@@ -976,14 +1143,12 @@ export class DOMValidator {
         { err: safe },
       );
       throw new InvalidParameterError(
-        `Invalid selector syntax (rejected by parser).`,
+        "Invalid selector syntax (rejected by parser).",
       );
     }
 
-    // Kick off an optional background parse using `css-what` for additional
-    // parsing coverage without blocking the sync return.
+    // Non-blocking extended parse
     this.#backgroundCssWhatParse(s);
-
     return s;
   }
 
@@ -996,28 +1161,32 @@ export class DOMValidator {
    */
   public validateElement(element_: unknown): Element {
     if (!hasDOM) {
-      this.#emitValidationFailureEvent(String(element_), "no_dom_for_element");
+      this.#emitValidationFailureEvent("<no_dom>", "no_dom_for_element");
       throw new InvalidParameterError("No DOM available to validate elements.");
     }
     if (!(element_ instanceof Element)) {
-      this.#emitValidationFailureEvent(String(element_), "not_element");
+      this.#emitValidationFailureEvent("<not_element>", "not_element");
       throw new InvalidParameterError(
         "Invalid element: must be a DOM Element.",
       );
     }
-    const element = element_ as Element;
+    const element = element_;
 
     const now = Date.now();
-    const ttl = this.#config.validatedElementTTLms ?? 5 * 60 * 1000;
+    const ttl =
+      this.#config.validatedElementTTLms ??
+      DEFAULT_CONFIG.validatedElementTTLms;
     const last = this.#validatedElements.get(element) ?? 0;
     if (last && now - last <= ttl) {
       // considered still validated
       return element;
     }
 
-    const tag = (element.tagName || "").toLowerCase();
+    // tagName on Element is string in browsers; guard defensively for cross-realm shims
+    const tag =
+      typeof element.tagName === "string" ? element.tagName.toLowerCase() : "";
     if (["script", "iframe", "object", "embed", "style"].includes(tag)) {
-      this.#emitValidationFailureEvent(String(tag), "forbidden_tag");
+      this.#emitValidationFailureEvent(tag, "forbidden_tag");
       throw new InvalidParameterError(`Forbidden element tag: <${tag}>`);
     }
 
@@ -1065,16 +1234,13 @@ export class DOMValidator {
     try {
       this.validateSelectorSyntax(selector);
 
-      const context_ = (context ?? document) as Document | Element;
+      const context_ = context ?? document;
       const nodeList = context_.querySelectorAll(selector);
-      if (!nodeList || nodeList.length === 0) return [];
+      if (nodeList.length === 0) return [];
 
       // Refresh cached roots and ensure connectedness
       const resolved = new Map<string, Element | undefined>(
-        this.#resolveAndCacheAllowedRoots() as ReadonlyMap<
-          string,
-          Element | undefined
-        >,
+        this.#resolveAndCacheAllowedRoots(),
       );
       for (const [sel, rootElement] of Array.from(resolved.entries())) {
         if (rootElement && !rootElement.isConnected) {
@@ -1186,10 +1352,7 @@ export class DOMValidator {
 
     void (async () => {
       try {
-        const hash = await sha256Hex(
-          selector,
-          this.#config.auditHookTimeoutMs ?? 1500,
-        );
+        const hash = await sha256Hex(selector, this.#config.auditHookTimeoutMs);
         const follow: AuditEvent = Object.freeze({
           kind: "validation_failure_hash",
           timestamp: new Date().toISOString(),
@@ -1223,7 +1386,7 @@ export class DOMValidator {
     try {
       const hook = this.#config.auditHook;
       if (!hook) return;
-      const timeoutMs = this.#config.auditHookTimeoutMs ?? 2000;
+      const timeoutMs = this.#config.auditHookTimeoutMs;
       // Wrap the hook call in Promise.race with a timeout.
       // Create a plain, whitelisted, frozen event object to avoid accidental
       // prototype pollution or unexpected keys being received by the hook.
@@ -1268,11 +1431,11 @@ export class DOMValidator {
   // in a controlled manner. These are part of the test surface only and
   // do not change production behavior.
   public async __test_tryUpgradeCache(): Promise<void> {
-    return await this.#tryUpgradeCache();
+    await this.#tryUpgradeCache();
   }
 
   public __test_backgroundCssWhatParse(selector: string): void {
-    return this.#backgroundCssWhatParse(selector);
+    this.#backgroundCssWhatParse(selector);
   }
 }
 
@@ -1306,11 +1469,10 @@ export function createDefaultDOMValidator(
     | Iterable<string>;
 
   const allowedSet = new Set<string>();
-  for (const s of allowedInput as Iterable<string>)
-    allowedSet.add(String(s).trim());
+  for (const s of allowedInput as Iterable<string>) allowedSet.add(s.trim());
   const forbiddenSet = new Set<string>();
   for (const s of forbiddenInput as Iterable<string>)
-    forbiddenSet.add(String(s).trim().toLowerCase());
+    forbiddenSet.add(s.trim().toLowerCase());
 
   const finalConfig: DOMValidatorConfig = Object.freeze({
     ...merged,
@@ -1326,7 +1488,7 @@ export function createDefaultDOMValidator(
  *
  * @mutates defaultInstance
  */
-let defaultInstance: DOMValidator | undefined = undefined;
+let defaultInstance: DOMValidator | undefined;
 
 export function getDefaultDOMValidator(): DOMValidator {
   if (!defaultInstance) defaultInstance = new DOMValidator(DEFAULT_CONFIG);

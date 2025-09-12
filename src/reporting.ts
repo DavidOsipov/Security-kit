@@ -6,12 +6,12 @@
  * @module
  */
 
-import { environment } from "./environment";
+import { environment } from "./environment.ts";
 import {
   _redact,
   validateNumericParam as validateNumericParameter,
-} from "./utils";
-import { InvalidParameterError, sanitizeErrorForLogs } from "./errors";
+} from "./utils.ts";
+import { InvalidParameterError, sanitizeErrorForLogs } from "./errors.ts";
 
 // Use integer arithmetic for token refill to avoid floating-point drift.
 const TOKEN_PRECISION = 1000; // millitokens
@@ -21,7 +21,7 @@ const TOKEN_PRECISION = 1000; // millitokens
 // eslint-disable-next-line functional/no-let -- deliberate runtime mutability for hook install/uninstall
 let _productionErrorHook:
   | ((error: Error, context: Record<string, unknown>) => void)
-  | undefined = undefined;
+  | undefined;
 const _productionErrorReportState = {
   // Stored in millitokens
   tokens: 5 * TOKEN_PRECISION,
@@ -117,10 +117,7 @@ export function reportProdError(error: Error, context: unknown = {}) {
     // eslint-disable-next-line functional/immutable-data -- deliberate, limited mutation
     _productionErrorReportState.tokens -= TOKEN_PRECISION;
 
-    const sanitized = sanitizeErrorForLogs(error) || {
-      name: "Error",
-      message: "Unknown",
-    };
+    const sanitized = sanitizeErrorForLogs(error);
     // Call the installed hook in a try/catch to ensure reporter never throws.
     try {
       const hook = _productionErrorHook as (
@@ -140,10 +137,12 @@ export function reportProdError(error: Error, context: unknown = {}) {
         stackHash: (sanitized as { readonly stackHash?: string }).stackHash,
       });
       try {
-        hook(
-          new Error(`${sanitized.name}: ${sanitized.message}`),
-          finalContext,
-        );
+        const safeName =
+          (typeof sanitized.name === "string" && sanitized.name) || "Error";
+        const safeMessage =
+          (typeof sanitized.message === "string" && sanitized.message) ||
+          "Unknown";
+        hook(new Error(`${safeName}: ${safeMessage}`), finalContext);
       } catch {
         // Swallow errors from the hook - reporting must never throw.
       }

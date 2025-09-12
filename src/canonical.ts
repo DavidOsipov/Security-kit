@@ -1,12 +1,46 @@
-import { InvalidParameterError } from "./errors.js";
-import { SHARED_ENCODER } from "./encoding.js";
-import { isForbiddenKey } from "./constants.js";
-import { getCanonicalConfig } from "./config.js";
+import { InvalidParameterError } from "./errors.ts";
+import { SHARED_ENCODER } from "./encoding.ts";
+import { isForbiddenKey } from "./constants.ts";
+import { getCanonicalConfig } from "./config.ts";
 
 // Sentinel to mark nodes currently under processing in the cache
 const PROCESSING = Symbol("__processing");
 
 // (internal helpers removed)
+
+/**
+ * Narrow/TypeGuard: returns true only for non-null objects.
+ * Using an explicit helper eliminates ambiguous truthy checks that trigger
+ * strict-boolean-expression lint errors and documents intent (ASVS: clear
+ * input validation and explicit type discrimination).
+ */
+function isNonNullObject(
+  value: unknown,
+): value is Record<PropertyKey, unknown> {
+  return value !== null && value !== undefined && typeof value === "object";
+}
+
+/**
+ * Safe property assignment used during canonicalization. Centralizing this
+ * logic lets us validate keys once and avoid repeated justifications for the
+ * security/detect-object-injection rule. We explicitly reject forbidden keys
+ * (prototype pollution vectors) and silently ignore anything non-string. The
+ * target objects passed here are created with a null prototype so even if a
+ * dangerous key slipped through (it cannot due to isForbiddenKey), it would
+ * not mutate Object.prototype. (OWASP ASVS L3: object property injection /
+ * prototype pollution hardening.)
+ */
+function safeAssign(
+  target: Record<string, unknown>,
+  key: string,
+  value: unknown,
+): void {
+  if (typeof key !== "string") return; // defensive: only string keys
+  if (isForbiddenKey(key)) return; // drop known dangerous keys
+  // Reflect.set used instead of direct assignment to avoid accidental getters
+  // invocation differences in the future and to make intent explicit.
+  Reflect.set(target, key, value);
+}
 
 /**
  * Handles canonicalization of primitive values.
@@ -78,23 +112,23 @@ function canonicalizeArray(
       // If the index does not exist on the source array, treat as undefined
       // (will later be serialized as null by stringify).
       // Access inside try/catch to guard against exotic hosts throwing.
-      element = Object.prototype.hasOwnProperty.call(value, index)
+      element = Object.hasOwn(value, index)
         ? (value as unknown as Record<number, unknown>)[index]
         : undefined;
     } catch {
       element = undefined;
     }
 
-    if (element !== null && typeof element === "object") {
+    if (isNonNullObject(element)) {
       const ex = cache.get(element);
       if (ex === PROCESSING) {
-        // eslint-disable-next-line functional/immutable-data -- Local builder mutation is intentional; not observable outside
+        // eslint-disable-next-line functional/immutable-data, security/detect-object-injection -- Index is a loop-controlled number; not attacker-controlled; assigning into array with null prototype is safe.
         result[index] = { __circular: true };
         continue;
       }
       if (ex !== undefined) {
         // Duplicate reference to an already-processed node — reuse existing canonical form
-        // eslint-disable-next-line functional/immutable-data
+        // eslint-disable-next-line functional/immutable-data, security/detect-object-injection -- See rationale above; controlled numeric index write.
         result[index] = ex;
         continue;
       }
@@ -105,7 +139,7 @@ function canonicalizeArray(
         "BigInt values are not supported in payload/context.body.",
       );
     }
-    // eslint-disable-next-line functional/immutable-data -- Local builder mutation is intentional; not observable outside
+    // eslint-disable-next-line functional/immutable-data, security/detect-object-injection -- Controlled numeric index write; key space not influenced by attacker beyond array length already bounded earlier.
     result[index] = toCanonicalValueInternal(
       element,
       cache,
@@ -192,7 +226,14 @@ function canonicalizeObject(
 
   const keys = Array.from(keySet).sort((a, b) => a.localeCompare(b));
 
-  const result: Record<string, unknown> = {};
+  // Create the result with a null prototype up-front so we never perform
+  // assignments onto a default Object.prototype bearing object. This reduces
+  // the surface for prototype pollution and allows safeAssign to remain a
+  // thin wrapper (ASVS L3: Use of secure object construction patterns).
+  const result: Record<string, unknown> = Object.create(null) as Record<
+    string,
+    unknown
+  >;
   for (const k of keys) {
     // Skip forbidden keys (e.g., __proto__, prototype, constructor) to avoid
     // exposing or reintroducing prototype pollution via canonicalized output.
@@ -212,9 +253,13 @@ function canonicalizeObject(
 
     // eslint-disable-next-line functional/no-let -- Intentional let for raw value handling in canonicalization
     let raw: unknown;
-    if (descriptor && descriptor.enumerable && "value" in descriptor) {
+    if (
+      descriptor !== undefined &&
+      descriptor.enumerable === true &&
+      "value" in descriptor
+    ) {
       raw = descriptor.value;
-    } else if (!descriptor) {
+    } else if (descriptor === undefined) {
       try {
         raw = value[k];
       } catch {
@@ -291,18 +336,14 @@ function canonicalizeObject(
     const canon = computeCanon(raw);
 
     if (!canon.present) continue;
-    // eslint-disable-next-line functional/immutable-data -- Local builder mutation is intentional and confined; final object is created with a null prototype below
-    result[k] = canon.value;
+
+    // Use safeAssign which validates key safety; rule flagged direct dynamic
+    // assignment as a potential injection sink. Key list is derived from
+    // ownKeys + controlled probe set and filtered via isForbiddenKey.
+    safeAssign(result, k, canon.value);
   }
-
-  // Ensure result has a null prototype to avoid prototype pollution exposure
-  const finalResult: Record<string, unknown> = Object.assign(
-    Object.create(null) as Record<string, unknown>,
-    result,
-  );
-
-  cache.set(value as object, finalResult);
-  return finalResult;
+  cache.set(value as object, result);
+  return result;
 }
 
 /**
@@ -350,7 +391,7 @@ function toCanonicalValueInternal(
     );
   }
 
-  if (value !== null && typeof value === "object") {
+  if (isNonNullObject(value)) {
     return canonicalizeObject(
       value as Record<string, unknown>,
       cache,
@@ -398,14 +439,14 @@ export function toCanonicalValue(value: unknown): unknown {
   }
 
   try {
-    if (value && typeof value === "object") {
+    if (isNonNullObject(value)) {
       if (typeof ArrayBuffer !== "undefined") {
         const isView = (
           ArrayBuffer as unknown as {
             readonly isView?: (x: unknown) => boolean;
           }
         ).isView;
-        if (isView?.(value)) {
+        if (isView?.(value) === true) {
           return {};
         }
         if (value instanceof ArrayBuffer) return {};
@@ -417,7 +458,7 @@ export function toCanonicalValue(value: unknown): unknown {
 
   try {
     // Quick top-level forbidden-key check to fail fast on obvious prototype-pollution attempts
-    if (value && typeof value === "object") {
+    if (isNonNullObject(value)) {
       try {
         // Avoid eagerly throwing on top-level forbidden keys; deeper traversal
         // will skip/remove forbidden keys consistently. This preserves API
@@ -452,7 +493,7 @@ export function toCanonicalValue(value: unknown): unknown {
           "BigInt values are not supported in payload/context.body.",
         );
       }
-      if (v && typeof v === "object") {
+      if (isNonNullObject(v)) {
         // Detect dangerous constructor.prototype nesting to prevent prototype pollution attempts
         // If an object contains a nested constructor.prototype, treat as unsafe
         // but do not throw during pre-scan; main traversal will skip forbidden
@@ -461,7 +502,7 @@ export function toCanonicalValue(value: unknown): unknown {
           const ctor = (v as Record<string, unknown>)["constructor"];
           if (
             typeof ctor === "object" &&
-            Object.prototype.hasOwnProperty.call(ctor as object, "prototype")
+            Object.hasOwn(ctor as object, "prototype")
           ) {
             // Mark visited and continue without throwing here
           }
@@ -489,9 +530,7 @@ export function toCanonicalValue(value: unknown): unknown {
               // eslint-disable-next-line functional/no-let -- Value is assigned in try/catch to preserve control flow
               let value_: unknown;
               try {
-                value_ = (v as Record<PropertyKey, unknown>)[
-                  key as PropertyKey
-                ];
+                value_ = v[key as PropertyKey];
               } catch {
                 continue;
               }
@@ -520,7 +559,7 @@ export function toCanonicalValue(value: unknown): unknown {
     // altering the enumerable shape used by consumers.
     try {
       if (hasCircularSentinel(canonical)) {
-        if (canonical && typeof canonical === "object") {
+        if (isNonNullObject(canonical)) {
           // eslint-disable-next-line functional/immutable-data -- Intentional addition of a non-enumerable marker for diagnostic purposes; does not affect consumer-visible enumerable shape
           Object.defineProperty(canonical, "__circular", {
             value: true,
@@ -564,9 +603,9 @@ export function hasCircularSentinel(
   if (depthRemaining !== undefined && depthRemaining <= 0) {
     throw new RangeError("Circular sentinel scan depth budget exceeded");
   }
-  if (v && typeof v === "object") {
+  if (isNonNullObject(v)) {
     try {
-      if (Object.prototype.hasOwnProperty.call(v, "__circular")) return true;
+      if (Object.hasOwn(v, "__circular")) return true;
     } catch {
       /* ignore host failures */
     }

@@ -16,8 +16,8 @@ import {
   RateLimitError,
   CircuitBreakerError,
   SecurityKitError,
-} from "./errors";
-import { safeStableStringify } from "./canonical.js";
+} from "./errors.ts";
+import { safeStableStringify } from "./canonical.ts";
 //   in security-sensitive deployments. "compute" is the pragmatic default for npm consumers.
 // - Other hardenings retained: binary-only secrets, handshake, strict runtime guards, canonicalization,
 //   best-effort wiping, rigorous port cleanup, and fixed destroy listener removal.
@@ -25,26 +25,27 @@ import { safeStableStringify } from "./canonical.js";
 // NOTE: For maximum security in production, CI should compute `expectedWorkerScriptHash` and the integritiy mode should be "require".
 // If that's impractical for your consumers, "compute" offers portability at the cost of the remaining TOCTOU risk.
 
-import { getSecureRandomBytesSync } from "./crypto";
-import { SHARED_ENCODER } from "./encoding";
+import { getSecureRandomBytesSync } from "./crypto.ts";
+import { SHARED_ENCODER } from "./encoding.ts";
 import {
   bytesToBase64,
   base64ToBytes,
   sha256Base64,
   isLikelyBase64,
   secureWipeWrapper,
-} from "./encoding-utils";
-import { environment } from "./environment";
+} from "./encoding-utils.ts";
+import { environment } from "./environment.ts";
 import type {
   InitMessage,
   SignRequest,
   ErrorResponse,
   WorkerMessage,
   SignedResponse,
-} from "./protocol";
-import { getLoggingConfig, getRuntimePolicy } from "./config";
-import { VerifiedByteCache } from "./secure-cache";
-import { secureCompare, secureDevelopmentLog } from "./utils";
+} from "./protocol.ts";
+import { getLoggingConfig, getRuntimePolicy } from "./config.ts";
+import type { NonceFormat } from "./constants.ts";
+import { VerifiedByteCache } from "./secure-cache.ts";
+import { secureCompare, secureDevelopmentLog } from "./utils.ts";
 
 /*
  * NOTE: This file is security-critical and targets a pragmatic balance between
@@ -105,7 +106,7 @@ export type SecureApiSignerInit = {
 
   // NEW: optional handshake policy overrides to prevent config drift
   readonly handshakeMaxNonceLength?: number;
-  readonly allowedNonceFormats?: readonly import("./constants").NonceFormat[];
+  readonly allowedNonceFormats?: readonly NonceFormat[];
 };
 
 export type SignedPayload = {
@@ -665,7 +666,8 @@ export class SecureApiSigner {
       try {
         for (const u of this.#blobUrls) {
           try {
-            URL.revokeObjectURL(String(u));
+            // u is already a string; avoid unnecessary conversion to satisfy lint rule
+            URL.revokeObjectURL(u);
           } catch {
             /* ignore */
           }
@@ -907,7 +909,9 @@ export class SecureApiSigner {
     const handshakeTimer = setTimeout(() => {
       this.#rejectReady(new WorkerError("Worker initialization timed out."));
     }, this.#handshakeTimeoutMs);
-    void this.#ready.finally(() => clearTimeout(handshakeTimer));
+    void this.#ready.finally(() => {
+      clearTimeout(handshakeTimer);
+    });
 
     try {
       // Accept ArrayBuffer or any ArrayBuffer view (Uint8Array, Buffer, DataView, etc.)
@@ -1016,7 +1020,9 @@ export class SecureApiSigner {
               resolve();
             }
           } else if (isErrorResponse(data)) {
-            reject(new WorkerError(`Worker handshake error: ${data.reason}`));
+            // data is ErrorResponse; reason may be undefined — coerce to safe string
+            const reason = data.reason ?? "";
+            reject(new WorkerError(`Worker handshake error: ${reason}`));
           } else {
             reject(
               new WorkerError("Worker handshake returned unexpected message"),
@@ -1169,7 +1175,7 @@ export class SecureApiSigner {
     // Enforce max canonical length to prevent DoS
     if (canonical.length > DEFAULT_MAX_CANONICAL_LENGTH) {
       throw new SecurityKitError(
-        `Canonical string exceeds max length ${DEFAULT_MAX_CANONICAL_LENGTH}`,
+        `Canonical string exceeds max length ${String(DEFAULT_MAX_CANONICAL_LENGTH)}`,
         "E_PAYLOAD_SIZE",
       );
     }
@@ -1209,7 +1215,10 @@ export class SecureApiSigner {
   };
 
   readonly #handleWorkerError = (event: Event | MessageEvent): void => {
-    const message = (event as ErrorEvent).message ?? "Worker error";
+    // Ensure message is a string and never undefined to satisfy strict template checks
+    const rawMessage = (event as ErrorEvent).message;
+    const message =
+      typeof rawMessage === "string" ? rawMessage : "Worker error";
     const error = new WorkerError(message);
     this.#safeRejectReady(error);
     try {
@@ -1482,10 +1491,10 @@ async function fetchAndValidateScript(url: URL): Promise<ArrayBuffer> {
   }
   if (!response.ok)
     throw new WorkerError(
-      `Failed to fetch worker script: ${response.status} ${response.statusText}`,
+      `Failed to fetch worker script: ${String(response.status)} ${response.statusText}`,
     );
   // defensive: ensure no redirect occurred
-  const redirected = "redirected" in response && response.redirected === true;
+  const redirected = "redirected" in response && response.redirected;
   if (redirected || response.url !== String(url)) {
     throw new WorkerError(
       "Worker script fetch was redirected; refusing to proceed.",

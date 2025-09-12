@@ -16,9 +16,9 @@ import {
   CryptoUnavailableError,
   InvalidParameterError,
   RandomGenerationError,
-} from "./errors";
-import { ensureCrypto } from "./state";
-import { isDevelopment } from "./environment";
+} from "./errors.ts";
+import { ensureCrypto } from "./state.ts";
+import { isDevelopment } from "./environment.ts";
 import {
   secureWipe,
   validateNumericParam as validateNumericParameter,
@@ -27,9 +27,9 @@ import {
   secureCompareAsync,
   secureDevLog as secureDevelopmentLog,
   emitMetric,
-} from "./utils";
-import { arrayBufferToBase64 } from "./encoding-utils";
-import { SHARED_ENCODER } from "./encoding";
+} from "./utils.ts";
+import { arrayBufferToBase64 } from "./encoding-utils.ts";
+import { SHARED_ENCODER } from "./encoding.ts";
 
 // Lightweight AbortError subclass so we can return a typed, non-mutated Error
 // instance without assigning properties at runtime (keeps immutable-data rules happy)
@@ -216,7 +216,7 @@ function computeAlphabetParameters(
   // Keep the heuristic explicit: if acceptance ratio < 1/30 we consider it inefficient
   if (acceptanceRatio > 0 && acceptanceRatio < MIN_ACCEPTANCE_RATIO) {
     throw new InvalidParameterError(
-      `Alphabet size ${length} is inefficient for sampling (ratio ${acceptanceRatio.toFixed(4)}).`,
+      `Alphabet size ${String(length)} is inefficient for sampling (ratio ${acceptanceRatio.toFixed(4)}).`,
     );
   }
 
@@ -258,7 +258,9 @@ const _HEX_LOOKUP: readonly string[] = Object.freeze(
 function bytesToHex(bytes: Uint8Array): string {
   // Functional mapping avoids in-place mutation and satisfies immutable-data
   // lint rules while remaining allocation-efficient for small arrays.
-  return Array.from(bytes, (b) => _HEX_LOOKUP[b]!).join("");
+  // Avoid non-null-assertion by providing a safe fallback for unexpected
+  // byte values. The lookup table is size 256, so this is defensive.
+  return Array.from(bytes, (b) => _HEX_LOOKUP[b] ?? "00").join("");
 }
 
 /* -------------------------------------------------------------------------- */
@@ -427,7 +429,7 @@ export async function getSecureRandomInt(
         "warn",
         "security-kit",
         "getSecureRandomInt iteration cap exhausted (path=%s)",
-        capPath ?? "unknown",
+        capPath,
       );
     }
   } catch {
@@ -573,7 +575,7 @@ export function generateSecureStringSync(
 /**
  * Async generator for hex ID strings (uses async-safe path).
  */
-export async function generateSecureId(length = 64): Promise<string> {
+export function generateSecureId(length = 64): Promise<string> {
   validateNumericParameter(length, "length", 1, 256);
   // Prefer async path for portability across runtimes (workers, node, etc.)
   return generateSecureStringInternalAsync(HEX_ALPHABET, length);
@@ -581,7 +583,7 @@ export async function generateSecureId(length = 64): Promise<string> {
 
 // Backwards-compatible async API used by tests and consumers: wrapper around the
 // internal async generator. Kept as a named export for compatibility.
-export async function generateSecureStringAsync(
+export function generateSecureStringAsync(
   alphabet: string,
   size: number,
   options?: RandomOptions,
@@ -625,8 +627,11 @@ export async function generateSecureBytesAsync(
   const crypto = await ensureCrypto();
   // Use the returned crypto instance directly to avoid assumptions about
   // globalThis.crypto wiring in different runtimes.
+  checkAbortOrHidden(_options?.signal, _options?.enforceVisibility ?? true);
   const out = new Uint8Array(byteLength);
   crypto.getRandomValues(out);
+  // Post-generation check to fail fast if context changed mid-operation
+  checkAbortOrHidden(_options?.signal, _options?.enforceVisibility ?? true);
   return out;
 }
 
@@ -692,6 +697,12 @@ export async function createOneTimeCryptoKey(
   const { lengthBits, usages = ["encrypt", "decrypt"] } = options;
   const deprecatedLength = (options as { readonly length?: 128 | 256 }).length;
 
+  // Narrow and validate usages elements to a known safe union to avoid
+  // passing `any` into WebCrypto APIs (addresses @typescript-eslint/no-unsafe-argument)
+  function isKeyUsageAlias(v: unknown): v is KeyUsageAlias {
+    return typeof v === "string" && ALLOWED_KEY_USAGES.has(v as KeyUsageAlias);
+  }
+
   if (lengthBits !== undefined && deprecatedLength !== undefined) {
     throw new InvalidParameterError(
       "Cannot specify both lengthBits and deprecated length.",
@@ -705,15 +716,16 @@ export async function createOneTimeCryptoKey(
     );
   }
 
-  const bitLength = lengthBits ?? deprecatedLength ?? 256;
-  if (bitLength !== 128 && bitLength !== 256) {
+  const bitLength = (lengthBits ?? deprecatedLength ?? 256) as number;
+  const ALLOWED_BIT_LENGTHS = new Set<number>([128, 256]);
+  if (!ALLOWED_BIT_LENGTHS.has(bitLength)) {
     throw new InvalidParameterError("Key length must be 128 or 256 bits.");
   }
 
   if (
     !Array.isArray(usages) ||
     usages.length === 0 ||
-    usages.some((u) => !ALLOWED_KEY_USAGES.has(u))
+    usages.some((u) => !isKeyUsageAlias(u))
   ) {
     throw new InvalidParameterError("Invalid key usages provided.");
   }
@@ -726,7 +738,10 @@ export async function createOneTimeCryptoKey(
   // SECURITY: Prefer non-extractable key generation to avoid materializing raw key bytes.
   if (typeof subtle.generateKey === "function") {
     /* eslint-disable functional/prefer-readonly-type -- WebCrypto expects a mutable KeyUsage[]; usages is a readonly input so we create a fresh array. */
-    const usagesArray = Array.from(usages) as KeyUsage[];
+    // usages is now validated above; cast through KeyUsageAlias[] to avoid `any` flows
+    const usagesArray = (Array.from(usages) as KeyUsageAlias[]).map(
+      (u) => u as KeyUsage,
+    );
     /* eslint-enable functional/prefer-readonly-type */
     return subtle.generateKey(
       { name: "AES-GCM", length: bitLength },
@@ -799,11 +814,22 @@ export async function generateSRI(
     sha384: "SHA-384",
     sha512: "SHA-512",
   } as const;
-  const subtleAlgo = subtleAlgoMap[algorithm];
-  if (!subtleAlgo) {
-    throw new InvalidParameterError(`Unsupported SRI algorithm: ${algorithm}`);
+  // Defensive runtime validation for JS consumers: validate algorithm via type guard
+  const isSRIAlgorithm = (
+    value: unknown,
+  ): value is "sha256" | "sha384" | "sha512" =>
+    value === "sha256" || value === "sha384" || value === "sha512";
+
+  if (!isSRIAlgorithm(algorithm)) {
+    throw new InvalidParameterError(
+      `Unsupported SRI algorithm: ${String(algorithm)}`,
+    );
   }
-  if (input == undefined) {
+  const subtleAlgo = subtleAlgoMap[algorithm];
+
+  // Validate presence of input for JS interop (TypeScript types prevent this at compile time)
+  const inputUnknown: unknown = input;
+  if (inputUnknown === undefined || inputUnknown === null) {
     throw new InvalidParameterError(
       "Input content is required for SRI generation",
     );
@@ -839,7 +865,7 @@ export async function generateSRI(
     digest = await subtle.digest(subtleAlgo, internalView as BufferSource);
     return `${algorithm}-${arrayBufferToBase64(digest)}`;
   } finally {
-    if (digest) {
+    if (digest !== undefined) {
       secureWipe(new Uint8Array(digest), { forbidShared: true });
     }
     if (internalView !== undefined) {
@@ -891,7 +917,7 @@ import {
   generateSecureUUID,
   getSecureRandomInt,
   shouldExecuteThrottled,
-} from '../src/secure-random-updated';
+} from '../src/secure-random-updated.ts';
 
 describe('Secure random smoke tests', () => {
   it('generates hex ids async & sync', async () => {

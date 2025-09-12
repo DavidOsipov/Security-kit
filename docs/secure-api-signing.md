@@ -119,6 +119,10 @@ if (!ok) return respondWithUnauthorized();
 - Worker enforces a payload character limit and rate limiting to mitigate resource exhaustion.
 - The server uses timestamp skew validation (default ±2 minutes) and per-kid nonce tracking to reduce replay risk.
 
+Hostname and IDNA note
+
+- When constructing or validating callback URLs, webhooks, or any host-derived values involved in signing or verification, ensure host labels are processed as strings. The low-level helper `encodeHostLabel` requires a string input only and will throw `InvalidParameterError` on non-string values. This fail-closed contract avoids accidental coercion (e.g., numbers to strings) that could change the security meaning of a label. If you must accept non-string inputs at boundaries, coerce and validate explicitly before calling normalization utilities.
+
 ## Operational notes
 
 - Bundlers: `new URL('./worker/signing-worker.ts', import.meta.url)` is the recommended way to let bundlers emit a separate worker asset. Alternatively pass `workerUrl` explicitly pointing to a hosted worker file.

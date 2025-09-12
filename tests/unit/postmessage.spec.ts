@@ -1,6 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
 import {
-  POSTMESSAGE_MAX_PAYLOAD_BYTES,
   _validatePayload,
   createSecurePostMessageListener,
   sendSecurePostMessage,
@@ -8,6 +7,7 @@ import {
   setAppEnvironment,
   setCrypto,
 } from "../../src";
+import { getPostMessageConfig } from "../../src/config";
 
 describe("postMessage validation (unit)", () => {
   it("accepts valid shallow schema", () => {
@@ -92,7 +92,7 @@ describe("sendSecurePostMessage serialization", () => {
 
   it("enforces max payload bytes on send", () => {
     const targetWindow = { postMessage: vi.fn() } as any;
-    const big = "x".repeat(POSTMESSAGE_MAX_PAYLOAD_BYTES + 10);
+  const big = "x".repeat(getPostMessageConfig().maxPayloadBytes + 10);
     expect(() =>
       sendSecurePostMessage({
         targetWindow,

@@ -4,7 +4,7 @@
 // Requires a Redis client compatible with node-redis v4 (or ioredis with minimal changes)
 // This module is optional and tree-shakable; import only if you use Redis in production.
 
-import type { INonceStore } from "./verify-api-request-signature.js";
+import type { INonceStore } from "./verify-api-request-signature.ts";
 
 /** Minimal Redis client subset used by this store. */
 export type RedisLike = {
@@ -35,7 +35,7 @@ export class RedisNonceStore implements INonceStore {
     return `${this.#prefix}:${kid}:${nonce}`;
   }
 
-  async has(_kid: string, _nonce: string): Promise<boolean> {
+  has(_kid: string, _nonce: string): boolean {
     // We could use EXISTS, but we intentionally avoid additional commands to keep surface tiny.
     // Instead, reserve() or storeIfNotExists() should be used; has() is used only by legacy fallback paths.
     // Implement using PEXPIRE with PX=0 as a read check is not ideal; prefer EXISTS if available in your client.

@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: LGPL-3.0-or-later
 import { describe, it, expect } from 'vitest';
-import { sendSecurePostMessage } from '../src/postMessage';
-import { setPostMessageConfig } from '../src/config';
-import { InvalidParameterError } from '../src/errors';
+import { sendSecurePostMessage } from '../../src/postMessage.ts';
+import { setPostMessageConfig } from '../../src/config.ts';
+import { InvalidParameterError } from '../../src/errors.ts';
 
 function makeTargetWindow(capture: { posted?: unknown }) {
   // Minimal Window-like shim for postMessage

@@ -8,7 +8,7 @@
  */
 /* eslint-disable unicorn/prevent-abbreviations */
 
-import { CryptoUnavailableError, EncodingError } from "./errors";
+import { CryptoUnavailableError, EncodingError } from "./errors.ts";
 
 const DEFAULT_CHUNK = 8192;
 
@@ -116,7 +116,7 @@ export function isLikelyBase64(s: string): boolean {
   if (typeof s !== "string" || s.length === 0) return false;
   // Allow standard base64 and base64url characters (- and _). Optional padding '=' allowed.
   // Use an explicit character set to avoid ambiguity and unnecessary escapes.
-  if (!/^[-\w+/]+={0,2}$/.test(s)) return false;
+  if (!/^[\w+/-]+={0,2}$/.test(s)) return false;
   const normalized = normalizeBase64(s);
   return normalized.length % 4 === 0 && normalized.length >= 4;
 }
@@ -125,13 +125,13 @@ export function isLikelyBase64Url(s: string): boolean {
   // base64url allows A-Z a-z 0-9 - _ and optionally padding may be omitted.
   if (typeof s !== "string" || s.length === 0) return false;
   // base64url characters (dash and underscore allowed). Use \w for letters/digits/underscore and allow dash.
-  if (!/^[-\w]+$/.test(s)) return false;
+  if (!/^[\w-]+$/.test(s)) return false;
   // Padding may be omitted; normalize and ensure decoded length is plausible
   const normalized = normalizeBase64(s);
   return normalized.length % 4 === 0 && normalized.length >= 4;
 }
 
-async function getSubtle(): Promise<SubtleCrypto> {
+function getSubtle(): SubtleCrypto {
   const maybe = (globalThis as { readonly crypto?: Crypto }).crypto;
   if (maybe && (maybe as { readonly subtle?: SubtleCrypto }).subtle) {
     return (maybe as { readonly subtle: SubtleCrypto }).subtle;
@@ -143,7 +143,7 @@ async function getSubtle(): Promise<SubtleCrypto> {
 }
 
 export async function sha256Base64(input: BufferSource): Promise<string> {
-  const subtle = await getSubtle();
+  const subtle = getSubtle();
   const digest = await subtle.digest("SHA-256", input);
   return bytesToBase64(new Uint8Array(digest));
 }

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { CryptoUnavailableError, InvalidParameterError } from "../src/errors";
+import { CryptoUnavailableError, InvalidParameterError } from "../src/errors.ts";
 
 describe("Enhanced Crypto Detection with ASVS L3 Security", () => {
   beforeEach(() => {

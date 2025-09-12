@@ -7,8 +7,8 @@
  * @module
  */
 
-import { secureDevLog as secureDevelopmentLog } from "./utils";
-import { environment } from "./environment";
+import { secureDevLog as secureDevelopmentLog } from "./utils.ts";
+import { environment } from "./environment.ts";
 
 export type LogLevel = "debug" | "info" | "warn" | "error";
 
@@ -24,15 +24,21 @@ export function createLogger(component: string) {
     secureDevelopmentLog(level, component, message, context);
   };
   return {
-    debug: (message: string, context?: unknown) =>
-      log("debug", message, context),
+    debug: (message: string, context?: unknown) => {
+      log("debug", message, context);
+    },
 
-    info: (message: string, context?: unknown) => log("info", message, context),
+    info: (message: string, context?: unknown) => {
+      log("info", message, context);
+    },
 
-    warn: (message: string, context?: unknown) => log("warn", message, context),
+    warn: (message: string, context?: unknown) => {
+      log("warn", message, context);
+    },
 
-    error: (message: string, context?: unknown) =>
-      log("error", message, context),
+    error: (message: string, context?: unknown) => {
+      log("error", message, context);
+    },
 
     child: (sub: string) => createLogger(`${component}:${sub}`),
   };

@@ -17,7 +17,7 @@ export type InitMessage = {
     readonly rateLimitBurst?: number;
     /** Optional: handshake policy overrides to prevent config drift */
     readonly handshakeMaxNonceLength?: number;
-    readonly allowedNonceFormats?: readonly import("./constants").NonceFormat[];
+    readonly allowedNonceFormats?: readonly import("./constants.ts").NonceFormat[];
   };
   readonly kid?: string;
 };

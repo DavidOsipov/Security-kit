@@ -13,7 +13,7 @@
  * For production, use Redis, DynamoDB, or another distributed store.
  */
 
-import { InvalidParameterError } from "../src/errors";
+import { InvalidParameterError } from "../src/errors.ts";
 
 /**
  * Simple in-memory nonce store for testing.

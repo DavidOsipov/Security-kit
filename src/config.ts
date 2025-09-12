@@ -6,24 +6,52 @@
  * @module
  */
 
-import { InvalidConfigurationError, InvalidParameterError } from "./errors";
+import { InvalidConfigurationError, InvalidParameterError } from "./errors.ts";
 import {
   CryptoState,
   getCryptoState,
   _sealSecurityKit,
   _setCrypto,
-} from "./state";
-import { environment } from "./environment";
+} from "./state.ts";
+import { environment } from "./environment.ts";
 import {
   configureProdErrorReporter as configureProductionErrorReporter,
   setProdErrorHook as setProductionErrorHook,
-} from "./reporting";
+} from "./reporting.ts";
 
 import {
   DEFAULT_HANDSHAKE_MAX_NONCE_LENGTH,
   DEFAULT_NONCE_FORMATS,
   type NonceFormat,
-} from "./constants";
+} from "./constants.ts";
+
+/**
+ * Stack & parsing normalization caps (defense in depth; DoS resilience):
+ * Centralizing these ensures uniform bounds across all normalization utilities.
+ */
+export const MAX_TOTAL_STACK_LENGTH = 200_000 as const; // ~200 KB upper processing limit
+export const MAX_STACK_LINE_LENGTH = 2_000 as const; // per-line bound
+export const MAX_PARENS_PER_LINE = 120 as const; // abnormal parentheses threshold
+
+// URL & message parsing bounds (defense in depth)
+export const MAX_URL_INPUT_LENGTH = 10_000 as const; // generous, typical URLs << 2KB
+export const MAX_MESSAGE_EVENT_DATA_LENGTH = 200_000 as const; // mirrors stack total cap
+/**
+ * postMessage JSON / structured payload depth & size caps.
+ * These are centralized here (instead of in postMessage.ts) to ensure
+ * uniform review and allow future adaptive tuning (e.g. environment overrides).
+ *
+ * Rationale:
+ * - Depth 8 is intentionally conservative for typical cross-frame messages while
+ *   preventing adversarial deeply nested graphs that could exhaust traversal.
+ * - JSON textual input byte cap (prior to UTF-16 -> UTF-8 expansion) guards
+ *   against extremely large string payloads even before structural traversal caps.
+ * - The JSON textual cap defaults lower than MAX_MESSAGE_EVENT_DATA_LENGTH to
+ *   reserve headroom for structured clone paths and internal accounting.
+ */
+// Legacy depth & textual JSON size constants removed: all runtime logic must
+// consult getPostMessageConfig(). Defaults are now inline literals (8 depth,
+// 64 KiB textual JSON cap) to avoid accidental direct constant coupling.
 
 /**
  * Logging configuration controls dev-only logging verbosity and behaviour
@@ -75,10 +103,10 @@ type ExtractResult<T> =
   | { readonly present: true; readonly value: T }
   | { readonly present: false };
 
-function extractValidatedProperty<T>(
+function extractValidatedProperty(
   cfg: Partial<LoggingConfig>,
   property: keyof LoggingConfig,
-): ExtractResult<T> {
+): ExtractResult<unknown> {
   if (!Object.hasOwn(cfg, property)) {
     return { present: false };
   }
@@ -86,28 +114,33 @@ function extractValidatedProperty<T>(
   if (!desc) return { present: false };
   if ("get" in desc || "set" in desc) {
     throw new InvalidParameterError(
-      `Configuration property "${String(property)}" must be a plain data property (no getters/setters).`,
+      `Configuration property "${property}" must be a plain data property (no getters/setters).`,
     );
   }
   // Value may be any type; refine using small helpers for each property to keep
   // the function simple and easier to reason about.
   const rawValue = desc.value as unknown;
 
-  const validateBoolean = <U>(v: unknown, propertyName: string): U => {
+  const validateBoolean = (
+    v: unknown,
+    propertyName: keyof LoggingConfig,
+  ): boolean => {
     if (typeof v !== "boolean") {
       throw new InvalidParameterError(`${propertyName} must be a boolean.`);
     }
-    return v as U;
+    return v;
   };
 
-  const validateStringOrUndefined = <U>(v: unknown): U => {
+  const validateStringOrUndefined = (v: unknown): string | undefined => {
     if (v !== undefined && typeof v !== "string") {
       throw new InvalidParameterError("unsafeKeyHashSalt must be a string.");
     }
-    return v as U;
+    return v;
   };
 
-  const validatePositiveIntegerOrUndefined = <U>(v: unknown): U => {
+  const validatePositiveIntegerOrUndefined = (
+    v: unknown,
+  ): number | undefined => {
     if (v !== undefined) {
       if (typeof v !== "number" || !Number.isInteger(v) || v <= 0) {
         throw new InvalidParameterError(
@@ -115,7 +148,7 @@ function extractValidatedProperty<T>(
         );
       }
     }
-    return v as U;
+    return v;
   };
 
   switch (property) {
@@ -123,29 +156,34 @@ function extractValidatedProperty<T>(
     case "includeUnsafeKeyHashesInDev":
       return {
         present: true,
-        value: validateBoolean<T>(rawValue, String(property)),
+        value: validateBoolean(rawValue, property),
       };
     case "unsafeKeyHashSalt":
-      return { present: true, value: validateStringOrUndefined<T>(rawValue) };
+      return {
+        present: true,
+        value: validateStringOrUndefined(rawValue),
+      };
     case "rateLimitTokensPerMinute":
       return {
         present: true,
-        value: validatePositiveIntegerOrUndefined<T>(rawValue),
+        value: validatePositiveIntegerOrUndefined(rawValue),
       };
     default:
-      return { present: true, value: rawValue as T };
+      return { present: true, value: rawValue };
   }
 }
 
 function enforceProductionConstraints(
   isProduction: boolean,
-  allowExtract: ExtractResult<boolean>,
-  includeExtract: ExtractResult<boolean>,
+  allowExtract: ExtractResult<unknown>,
+  includeExtract: ExtractResult<unknown>,
 ): void {
   if (!isProduction) return;
+  const developmentFlagEnabled = (ex: ExtractResult<unknown>): boolean =>
+    ex.present ? ex.value === true : false;
   if (
-    (allowExtract.present && allowExtract.value === true) ||
-    (includeExtract.present && includeExtract.value === true)
+    developmentFlagEnabled(allowExtract) ||
+    developmentFlagEnabled(includeExtract)
   ) {
     throw new InvalidParameterError(
       "Dev-only logging features cannot be enabled in production.",
@@ -154,17 +192,17 @@ function enforceProductionConstraints(
 }
 
 function buildMergedPartial(
-  allowExtract: ExtractResult<boolean>,
-  includeExtract: ExtractResult<boolean>,
+  allowExtract: ExtractResult<unknown>,
+  includeExtract: ExtractResult<unknown>,
   saltExtract: ExtractResult<string | undefined>,
   rateExtract: ExtractResult<number | undefined>,
 ): Partial<LoggingConfig> {
   return {
     ...(allowExtract.present
-      ? { allowUnsafeKeyNamesInDev: allowExtract.value }
+      ? { allowUnsafeKeyNamesInDev: allowExtract.value as boolean }
       : {}),
     ...(includeExtract.present
-      ? { includeUnsafeKeyHashesInDev: includeExtract.value }
+      ? { includeUnsafeKeyHashesInDev: includeExtract.value as boolean }
       : {}),
     ...(saltExtract.present ? { unsafeKeyHashSalt: saltExtract.value } : {}),
     ...(rateExtract.present
@@ -180,23 +218,18 @@ export function setLoggingConfig(cfg: Partial<LoggingConfig>): void {
     );
   }
   // Use helper to safely extract and validate cfg values, then merge.
-  const allowExtract = extractValidatedProperty<boolean>(
+  const allowExtract = extractValidatedProperty(
     cfg,
     "allowUnsafeKeyNamesInDev",
   );
-  const includeExtract = extractValidatedProperty<boolean>(
+  const includeExtract = extractValidatedProperty(
     cfg,
     "includeUnsafeKeyHashesInDev",
   );
-  const saltExtract = extractValidatedProperty<string | undefined>(
-    cfg,
-    "unsafeKeyHashSalt",
-  );
-  const rateExtract = extractValidatedProperty<number | undefined>(
-    cfg,
-    "rateLimitTokensPerMinute",
-  );
+  const saltExtract = extractValidatedProperty(cfg, "unsafeKeyHashSalt");
+  const rateExtract = extractValidatedProperty(cfg, "rateLimitTokensPerMinute");
 
+  // Narrow types for the two boolean logging flags (validated in extractor switch)
   enforceProductionConstraints(
     environment.isProduction,
     allowExtract,
@@ -206,8 +239,8 @@ export function setLoggingConfig(cfg: Partial<LoggingConfig>): void {
   const merged = buildMergedPartial(
     allowExtract,
     includeExtract,
-    saltExtract,
-    rateExtract,
+    saltExtract as ExtractResult<string | undefined>,
+    rateExtract as ExtractResult<number | undefined>,
   );
   _loggingConfig = { ..._loggingConfig, ...merged } as LoggingConfig;
 }
@@ -258,7 +291,11 @@ export function setAppEnvironment(environment_: "development" | "production") {
       "Configuration is sealed and cannot be changed.",
     );
   }
-  if (environment_ !== "development" && environment_ !== "production") {
+  // Runtime-validate inputs from JS consumers while keeping the TypeScript
+  // signature narrow. Use a Set lookup so static analyzers do not fold the
+  // comparison and incorrectly mark it as always-true/false.
+  const _allowed = new Set(["development", "production"]);
+  if (!_allowed.has(environment_)) {
     throw new InvalidParameterError(
       'Environment must be either "development" or "production".',
     );
@@ -308,7 +345,7 @@ export type TimingConfig = {
 
 /* eslint-disable functional/no-let -- controlled runtime configuration */
 let _timingConfig: TimingConfig = {
-  devEqualizeAsyncMs: 16,
+  devEqualizeAsyncMs: 50, // Increased to 50ms to handle high-variance CI environments while maintaining security
   devEqualizeSyncMs: 2,
 };
 /* eslint-enable functional/no-let */
@@ -343,6 +380,8 @@ export function setTimingConfig(cfg: Partial<TimingConfig>): void {
 export type PostMessageConfig = {
   /** Maximum payload size in bytes for postMessage (applies to JSON and structured paths). */
   readonly maxPayloadBytes: number; // default 32 KiB
+  /** Maximum structural depth permitted for any postMessage payload (JSON or structured clone). */
+  readonly maxPayloadDepth: number; // default 8
   /** Global traversal node budget to prevent CPU exhaustion across nested graphs. */
   readonly maxTraversalNodes: number; // default 5000
   /** Maximum number of own string keys processed per object. */
@@ -353,6 +392,8 @@ export type PostMessageConfig = {
   readonly maxArrayItems: number; // default 256
   /** Maximum number of transferable objects allowed in a single payload. */
   readonly maxTransferables: number; // default 2
+  /** Maximum textual JSON bytes accepted before parsing (defense in depth pre-parse guard). */
+  readonly maxJsonTextBytes: number; // default 64 KiB
   /**
    * Whether the sanitizer should include symbol-keyed properties. Defaults to false
    * (drop symbols) to avoid leaking hidden data and reduce traversal surface.
@@ -363,11 +404,13 @@ export type PostMessageConfig = {
 /* eslint-disable functional/no-let -- Controlled mutable configuration allowed */
 let _postMessageConfig: PostMessageConfig = {
   maxPayloadBytes: 32 * 1024,
+  maxPayloadDepth: 8,
   maxTraversalNodes: 5000,
   maxObjectKeys: 256,
   maxSymbolKeys: 32,
   maxArrayItems: 256,
   maxTransferables: 2,
+  maxJsonTextBytes: 64 * 1024, // 64 KiB textual JSON guard
   includeSymbolKeysInSanitizer: false,
 };
 /* eslint-enable functional/no-let */
@@ -384,22 +427,26 @@ export function setPostMessageConfig(cfg: Partial<PostMessageConfig>): void {
   }
   const numericKeys: readonly (keyof PostMessageConfig)[] = [
     "maxPayloadBytes",
+    "maxPayloadDepth",
     "maxTraversalNodes",
     "maxObjectKeys",
     "maxSymbolKeys",
     "maxArrayItems",
     "maxTransferables",
+    "maxJsonTextBytes",
   ];
 
   // Conservative hard caps to prevent DoS via misconfiguration. These align with
   // Pillar #2 (Hardened Simplicity & Performance) and OWASP ASVS V5 limits.
   const CAPS = {
     maxPayloadBytes: 256 * 1024, // 256 KiB
+    maxPayloadDepth: 32, // hard structural depth cap (defense in depth)
     maxTraversalNodes: 100_000,
     maxObjectKeys: 4_096,
     maxSymbolKeys: 256,
     maxArrayItems: 4_096,
     maxTransferables: 64,
+    maxJsonTextBytes: 256 * 1024, // 256 KiB textual guard upper bound
   } as const;
 
   for (const [k, v] of Object.entries(cfg)) {
@@ -407,14 +454,14 @@ export function setPostMessageConfig(cfg: Partial<PostMessageConfig>): void {
     if (numericKeys.includes(key)) {
       if (typeof v !== "number" || !Number.isInteger(v) || v <= 0) {
         throw new InvalidParameterError(
-          `PostMessageConfig.${String(key)} must be a positive integer.`,
+          `PostMessageConfig.${key} must be a positive integer.`,
         );
       }
       // Enforce upper caps
       const cap = (CAPS as Record<string, number>)[key as string];
-      if (typeof cap === "number" && (v as number) > cap) {
+      if (typeof cap === "number" && v > cap) {
         throw new InvalidParameterError(
-          `PostMessageConfig.${String(key)} exceeds hard cap (${cap}).`,
+          `PostMessageConfig.${key} exceeds hard cap (${String(cap)}).`,
         );
       }
     }
@@ -777,7 +824,9 @@ export function setHandshakeConfig(cfg: Partial<HandshakeConfig>): void {
     for (const f of cfg.allowedNonceFormats) {
       if (typeof f !== "string" || f.length === 0) {
         throw new InvalidParameterError(
-          `allowedNonceFormats must contain only non-empty strings. Found: ${String(f)}`,
+          `allowedNonceFormats must contain only non-empty strings. Found: ${String(
+            f,
+          )}`,
         );
       }
     }
@@ -1001,7 +1050,7 @@ function validateUrlHardeningEntry(
   if (booleanKeys.has(key)) {
     if (typeof value !== "boolean") {
       throw new InvalidParameterError(
-        "UrlHardeningConfig." + String(key) + " must be a boolean.",
+        `UrlHardeningConfig.${key} must be a boolean.`,
       );
     }
     return;
@@ -1028,7 +1077,7 @@ function validateUrlHardeningEntry(
   if (key === "maxQueryParamNameLength" || key === "maxQueryParamValueLength") {
     if (typeof value !== "number" || !Number.isInteger(value) || value <= 0) {
       throw new InvalidParameterError(
-        `UrlHardeningConfig.${String(key)} must be a positive integer.`,
+        `UrlHardeningConfig.${key} must be a positive integer.`,
       );
     }
   }
@@ -1202,6 +1251,11 @@ const DANGEROUS_SCHEMES = new Set([
   // Security posture: FTP is insecure and prone to SSRF/origin confusion.
   // We treat it as permanently dangerous for this library's purposes.
   "ftp:",
+  "gopher:",
+  "dict:",
+  "phar:",
+  "smb:",
+  "smtp:",
 ]);
 
 /* eslint-disable functional/no-let -- Policy state must be assignable for configuration */
@@ -1212,7 +1266,7 @@ let _urlPolicyConfig: UrlPolicyConfig = {
 
 function isValidScheme(s: string): boolean {
   // RFC scheme: ALPHA *( ALPHA / DIGIT / "+" / "-" / "." )
-  return typeof s === "string" && /^[a-z][a-z0-9+.-]*:$/.test(s);
+  return typeof s === "string" && /^[a-z][\d+.a-z-]*:$/.test(s);
 }
 
 export function getUrlPolicyConfig(): UrlPolicyConfig {
@@ -1274,22 +1328,17 @@ export function configureUrlPolicy(
     throw new InvalidParameterError("safeSchemes must be a non-empty array.");
   }
 
-  const normalized = safeSchemes.reduce<readonly string[]>(
-    (accumulator, s) => {
-      if (typeof s !== "string")
-        throw new InvalidParameterError("Each scheme must be a string.");
-      if (!isValidScheme(s))
-        throw new InvalidParameterError(
-          `Scheme '${s}' is not a valid URL scheme token. Include trailing ':'`,
-        );
-      if (DANGEROUS_SCHEMES.has(s))
-        throw new InvalidParameterError(
-          `Scheme '${s}' is forbidden by policy.`,
-        );
-      return [...accumulator, s];
-    },
-    [] as readonly string[],
-  );
+  const normalized = safeSchemes.reduce<readonly string[]>((accumulator, s) => {
+    if (typeof s !== "string")
+      throw new InvalidParameterError("Each scheme must be a string.");
+    if (!isValidScheme(s))
+      throw new InvalidParameterError(
+        `Scheme '${s}' is not a valid URL scheme token. Include trailing ':'`,
+      );
+    if (DANGEROUS_SCHEMES.has(s))
+      throw new InvalidParameterError(`Scheme '${s}' is forbidden by policy.`);
+    return [...accumulator, s];
+  }, []);
 
   _urlPolicyConfig = {
     safeSchemes: Object.freeze([...normalized]),
@@ -1341,11 +1390,25 @@ let _canonicalConfig: CanonicalConfig = DEFAULT_CANONICAL_CONFIG;
 // Read environment overrides for canonical limits at module initialization.
 // These environment variables allow deploy-time hardening without a code change.
 try {
+  // Read environment overrides for canonical limits. Use the same safe pattern
+  // as earlier versions to support Node-like runtimes while avoiding runtime
+  // errors in browsers: typeof process guard.
   const maybeMaxString =
-    process?.env?.["SECURITY_KIT_CANONICAL_MAX_STRING_BYTES"];
+    typeof process !== "undefined" &&
+    typeof process.env["SECURITY_KIT_CANONICAL_MAX_STRING_BYTES"] === "string"
+      ? process.env["SECURITY_KIT_CANONICAL_MAX_STRING_BYTES"]
+      : undefined;
   const maybeMaxArray =
-    process?.env?.["SECURITY_KIT_CANONICAL_MAX_TOP_ARRAY_LENGTH"];
-  const maybeMaxDepth = process?.env?.["SECURITY_KIT_CANONICAL_MAX_DEPTH"];
+    typeof process !== "undefined" &&
+    typeof process.env["SECURITY_KIT_CANONICAL_MAX_TOP_ARRAY_LENGTH"] ===
+      "string"
+      ? process.env["SECURITY_KIT_CANONICAL_MAX_TOP_ARRAY_LENGTH"]
+      : undefined;
+  const maybeMaxDepth =
+    typeof process !== "undefined" &&
+    typeof process.env["SECURITY_KIT_CANONICAL_MAX_DEPTH"] === "string"
+      ? process.env["SECURITY_KIT_CANONICAL_MAX_DEPTH"]
+      : undefined;
 
   // Build a new partial object immutably as we parse environment values.
   // Use a function-scoped constant pattern with immutable reassignments to satisfy no-let rule.

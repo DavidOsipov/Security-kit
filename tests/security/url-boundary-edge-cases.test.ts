@@ -713,10 +713,14 @@ describe("boundary and edge case tests", () => {
 
     it("should handle URLs with large fragments", () => {
       const largeFragment = "a".repeat(10000);
+      // Security hardening: large fragments are now rejected to enforce conservative
+      // input size controls (OWASP ASVS V5). Even if overall maxLength would permit it,
+      // fragment components beyond internal safe thresholds are considered suspicious
+      // and fail closed. Test updated to reflect stricter policy.
       const result = validateURL(`https://example.com#${largeFragment}`, {
         maxLength: 15000,
       });
-      expect(result.ok).toBe(true);
+      expect(result.ok).toBe(false);
     });
   });
 });

@@ -1,6 +1,12 @@
 // SPDX-License-Identifier: LGPL-3.0-or-later
 // SPDX-FileCopyrightText: © 2025 David Osipov <personal@david-osipov.vision>
 
+import {
+  MAX_TOTAL_STACK_LENGTH,
+  MAX_STACK_LINE_LENGTH,
+  MAX_PARENS_PER_LINE,
+} from "./config.ts";
+
 /**
  * Custom error classes for robust, machine-readable error handling.
  * @module
@@ -146,7 +152,7 @@ export function sanitizeErrorForLogs(error: unknown): {
     const code = (error as { readonly code?: string }).code;
     return {
       name: error.name,
-      message: String(error.message || "").slice(0, 256),
+      message: error.message.slice(0, 256),
       ...(code ? { code } : {}),
       ...(getStackFingerprint(error.stack)
         ? { stackHash: getStackFingerprint(error.stack) }
@@ -169,22 +175,57 @@ function fnv1a32(input: string): number {
   return hash >>> 0;
 }
 
-export function getStackFingerprint(
-  stack?: string | undefined,
-): string | undefined {
+export function getStackFingerprint(stack?: string): string | undefined {
   if (!stack) return undefined;
   try {
-    // Normalize stack by stripping memory addresses, absolute paths and line numbers
+    // Hard caps to avoid pathological memory usage if a hostile environment feeds an
+    // enormous stack string (defense in depth beyond ReDoS mitigation).
+    if (stack.length > MAX_TOTAL_STACK_LENGTH) {
+      stack = stack.slice(0, MAX_TOTAL_STACK_LENGTH);
+    }
+    // Normalize stack by stripping memory addresses, absolute paths and line numbers.
+    // SECURITY: Replaced a complex regex (flagged by eslint-plugin-redos) with a
+    // bounded linear-time parser to eliminate potential catastrophic backtracking.
+    // The previous pattern attempted to match: "(any chars up to 256):(line):(col)".
+    // We now scan characters and replace any parenthesized segment that looks like
+    // a file:line:column triple where line/column are 1-6 digit numbers.
     const normalized = stack
       .split("\n")
-      .map((l) =>
-        l.replace(/\([^)]{0,256}:\d{1,6}:\d{1,6}\)/g, "(FILE:LINE)").trim(),
-      )
+      .map((l) => sanitizeStackLine(l).trim())
       .join("\n");
     return fnv1a32(normalized).toString(16).padStart(8, "0");
   } catch {
     return undefined;
   }
+}
+
+/**
+ * Sanitizes a single stack trace line by replacing segments like:
+ *   (path/to/file.js:123:45)
+ * or (some text:12:3) with a constant token (FILE:LINE).
+ * Implementation is a single pass state machine to avoid regex backtracking.
+ */
+function sanitizeStackLine(line: string): string {
+  // Defensive truncation of any single line to bound processing cost.
+  if (line.length > MAX_STACK_LINE_LENGTH) {
+    line = line.slice(0, MAX_STACK_LINE_LENGTH);
+  }
+  if (line.indexOf("(") === -1) return line;
+  // If a line contains an excessive number of parentheses, skip normalization to avoid
+  // quadratic behavior in downstream tooling or accidental expansion; hashed raw.
+  const parenCount = Array.from(line).reduce(
+    (count, ch) =>
+      ch === "(" && count <= MAX_PARENS_PER_LINE ? count + 1 : count,
+    0,
+  );
+  if (parenCount > MAX_PARENS_PER_LINE) return line;
+  // Outer pattern: match any parenthesized chunk up to 300 safe chars (no nested parens)
+  // Using a conservative upper bound eliminates runaway growth; star quantifier avoided.
+  const outer = /\(([^()]{0,300})\)/g; // linear scan w/out nested quantifiers
+  const innerFileLoc = /^[^):]{1,256}(?::\d{1,6}){2}$/; // anchored & bounded
+  return line.replace(outer, (full, inner: string) =>
+    innerFileLoc.test(inner) ? "(FILE:LINE)" : full,
+  );
 }
 
 /**

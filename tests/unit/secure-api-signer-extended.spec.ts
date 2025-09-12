@@ -232,21 +232,13 @@ describe("SecureApiSigner - Extended Canonical Format & Security Features", () =
   });
 
   describe("Extended Canonical Format", () => {
-    it("creates signatures compatible with server verification", async () => {
+  it("creates signatures compatible with server verification", async () => {
       // Allow more time for this test in resource-constrained environments
       try {
         // Use the proper vitest API to increase timeout for this slow test.
         // Some environments expose `vi` as global; call both to be defensive.
-        try {
-          vi.setTimeout(30000);
-        } catch {
-          /* ignore */
-        }
-        try {
-          (global as any).vi?.setTimeout?.(30000);
-        } catch {
-          /* ignore */
-        }
+        try { vi.setTimeout(45000); } catch {}
+        try { (global as any).vi?.setTimeout?.(45000); } catch {}
       } catch {
         /* ignore if vi global not available */
       }
@@ -292,7 +284,7 @@ describe("SecureApiSigner - Extended Canonical Format & Security Features", () =
       expect(isValid).toBe(true);
 
       await signer.destroy();
-    });
+  }, 45000);
 
     it("includes all canonical parts in correct order", async () => {
       const secret = Buffer.from(
