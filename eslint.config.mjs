@@ -10,6 +10,191 @@
  */
 // @ts-nocheck: config file uses dynamic imports and plugin shapes; type checking here is noisy
 import process from 'node:process';
+
+/*
+ * Local rule documentation (security-kit custom ESLint rules)
+ * ---------------------------------------------------------
+ * The rules implemented under `tools/eslint-rules/` are security-first
+ * lint checks that codify the project's Security Constitution and align
+ * with OWASP ASVS L3 requirements. This block documents each local rule
+ * so maintainers and reviewers understand the intent, configuration and
+ * the OWASP / Constitution mapping.
+ *
+ * Usage: these rules are registered through the `local` plugin mapping
+ * (see the plugin import below). Each rule's identifier is "local/<name>"
+ * and the configuration options used by this project are set in the
+ * `rules` object later in this file.
+ *
+ * Documentation index (alphabetical):
+ *
+ * - enforce-config-immutability
+ *   Purpose: Ensure configuration objects are frozen and runtime mutations
+ *   are guarded by the kit's sealed-state checks. Prevents accidental or
+ *   hostile configuration drift in production.
+ *   OWASP mapping: ASVS V14.2.1 (Configuration integrity)
+ *   Constitution refs: §1.3 Principle of Least Privilege
+ + Options: configPatterns (regex strings), requiredFreezeFor (AST node types)
+ *   Failure mode: missing Object.freeze or assignments to config variables
+ *   without a getCryptoState() === CryptoState.Sealed guard.
+ *
+ * - enforce-error-sanitization-at-boundary
+ *   Purpose: Require explicit sanitization of Error objects before they
+ *   cross logging/telemetry boundaries. Prevents stack trace and PII
+ *   leakage in logs.
+ *   OWASP mapping: ASVS V7.1.1, V14.3.3 (Error message leakage)
+ *   Constitution refs: §1.4 "Fail Loudly, Fail Safely"
+ *   Options: approvedSanitizers (list), loggingFunctions (list)
+ *
+ * - enforce-json-size-guard
+ *   Purpose: Flag uses of JSON.parse/stringify on external data without
+ *   explicit size validation to mitigate large payload DoS and memory
+ *   exhaustion attacks.
+ *   OWASP mapping: ASVS V14.2.* (Resource validation)
+ *   Options: maxSizeBytes, allowedValidationFunctions
+ *
+ * - enforce-postmessage-config-consistency
+ *   Purpose: Detect incompatible or unsafe combinations of postMessage
+ *   options (e.g., sanitize: true + allowTypedArrays: true with structured
+ *   wire formats). Encourages consistent, secure postMessage configs.
+ *   OWASP mapping: ASVS V5.1.3 (Input validation consistency)
+ *
+ * - enforce-sealed-kit-startup
+ *   Purpose: Ensure `sealSecurityKit()` is invoked in application entry
+ *   points at top-level during initialization, preventing runtime tampering.
+ *   OWASP mapping: ASVS V14.2.* (Configuration lifecycle)
+ *   Options: entryPointPatterns, sealFunctionNames
+ *
+ * - enforce-secure-logging
+ *   Purpose: Disallow direct console logging in most production sources and
+ *   require the project's secure logging helpers (redaction, ratelimiting).
+ *   OWASP mapping: ASVS V7.* (Logging & telemetry hygiene)
+ *   Options: allowInFiles, allowedMethods
+ *
+ * - enforce-secure-postmessage-listener
+ *   Purpose: Require `createSecurePostMessageListener()` calls to include
+ *   validation and origin restrictions in non-test code.
+ *   OWASP mapping: ASVS V14.1.1 (Message validation and origin verification)
+ *   Options: requireValidation, requireOriginRestriction, testDirectoryPatterns
+ *
+ * - enforce-secure-signer-integrity
+ *   Purpose: Enforce strong integrity options for `SecureApiSigner.create()`
+ *   to avoid supply-chain / worker-script tampering (forbid 'none', warn on
+ *   'compute', require explicit expectedWorkerScriptHash for 'require').
+ *   OWASP mapping: ASVS V10.3.3 (Supply chain security)
+ *
+ * - enforce-secure-wipe
+ *   Purpose: Ensure Uint8Array buffers carrying secrets are wiped via
+ *   `secureWipe()` (or secureWipeOrThrow) inside a finally block to satisfy
+ *   memory hygiene requirements.
+ *   OWASP mapping: ASVS L3 memory hygiene and secrets handling
+ *
+ * - enforce-security-kit-imports
+ *   Purpose: Prevent ad-hoc direct Web Crypto / native crypto imports in
+ *   application code. Enforces use of the centralized security-kit wrappers
+ *   which implement DoS caps, validation and uniform error handling.
+ *   OWASP mapping: ASVS V1.1.2 (Security frameworks and libraries)
+ *   Options: allowedFiles, securityKitModule, allowedMethods
+ *
+ * - enforce-security-suppression-format
+ *   Purpose: Require justifications for suppressing security rules. Suppress
+ *   directives must include a nearby comment with security keywords so
+ *   reviewers and auditors can quickly find the rationale.
+ *
+ * - enforce-test-api-guard
+ *   Purpose: Ensure test-only APIs are guarded by `assertTestApiAllowed()` to
+ *   prevent accidental production exposure. Identifies functions matching
+ *   common test suffix/prefix heuristics and requires guard call at function start.
+ *
+ * - enforce-text-encoder-decoder
+ *   Purpose: Enforce usage of shared TextEncoder/TextDecoder instances
+ *   (e.g., SHARED_ENCODER / SHARED_DECODER) to avoid repeated allocations and
+ *   reduce attack surface from unnecessary temporary buffers.
+ *
+ * - enforce-visibility-abort-pattern
+ *   Purpose: Require long-running/crypto operations to implement the visibility
+ *   change abort pattern (AbortController + visibilitychange listener) to
+ *   protect against timing/TOCTOU issues when the page is backgrounded.
+ *   Constitution refs: §2.11 visibility-abort pattern (MANDATORY)
+ *
+ * - no-broad-exception-swallow
+ *   Purpose: Disallow empty or generic catch blocks that swallow errors;
+ *   require typed rethrows, approved recoveries or reporting via approved
+ *   reporters (reportProdError etc.). Aligns with "Fail Safely".
+ *
+ * - no-date-entropy-security-context
+ *   Purpose: Flag use of Date.now(), new Date(), performance.now() and similar
+ *   time-based entropy sources in security contexts (tokens, keys, nonces).
+ *   Use cryptographically secure random primitives instead.
+ *
+ * - no-direct-process-env
+ *   Purpose: Disallow direct reads from `process.env` outside approved
+ *   configuration files (e.g., `environment.ts`, `config.ts`). Centralizes
+ *   configuration and prevents accidental secret leakage.
+ *
+ * - no-direct-subtle-crypto / no-direct-subtle-crypto (overlapping rules)
+ *   Purpose: Forbid direct `crypto.subtle` usage in application code; require
+ *   the high-level security-kit APIs which provide validation and safer
+ *   defaults. Options allow a small set of migration exceptions.
+ *
+ * - no-direct-url-constructor
+ *   Purpose: Prevent `new URL()` usage in application code in favor of
+ *   hardened utilities (`validateURL`, `createSecureURL`, `normalizeOrigin`)
+ *   that strip credentials and validate origins.
+ *
+ * - no-insecure-nonce-store
+ *   Purpose: Disallow `InMemoryNonceStore` in production code; require a
+ *   distributed/persistent nonce store (Redis, Database) to prevent replay attacks.
+ *
+ * - no-math-random-security-context
+ *   Purpose: Disallow `Math.random()` in security contexts (ID/token/nonce
+ *   generation). Suggest `getSecureRandom()` / `generateSecureId()` from
+ *   security-kit.
+ *
+ * - no-plaintext-secret-storage
+ *   Purpose: Detect plaintext storage of secrets in variables, object props,
+ *   or local/session storage and suggest encrypted storage helpers.
+ *
+ * - no-postmessage-constant-usage
+ *   Purpose: Disallow direct runtime reads of `POSTMESSAGE_MAX_*` constants
+ *   outside `config.ts` and tests; require `getPostMessageConfig()` to make
+ *   runtime limits central and configurable prior to sealing.
+ *
+ * - no-secret-eq
+ *   Purpose: Warn when secret-like identifiers are compared using `===` or
+ *   `==` and recommend constant-time comparison helpers (`secureCompareAsync`,
+ *   `secureCompareBytes`) to avoid timing side-channels.
+ *
+ * - no-un-normalized-string-comparison
+ *   Purpose: Require Unicode normalization for comparisons involving external
+ *   input to prevent homograph and normalization bypass attacks. Suggest
+ *   `normalizeInputString()` or canonical String.prototype.normalize() usage.
+ *
+ * - no-unsafe-object-merge
+ *   Purpose: Flag object spread / Object.assign usage with external input to
+ *   prevent prototype pollution. Recommend `toNullProto()` or explicit safe
+ *   merging helper.
+ *
+ * - no-unsealed-configuration
+ *   Purpose: Ensure configuration-modifying functions check the kit sealed
+ *   state before applying changes; enforces State Machine Integrity.
+ *
+ * - throw-typed-errors
+ *   Purpose: Enforce use of typed, project-specific error classes (from
+ *   `src/errors.ts`) rather than generic `Error` so callers can handle
+ *   failures programmatically.
+ *
+ * Shared helpers
+ * - _shared/analysis.js
+ *   Provides common AST helpers used by several rules: alias collection,
+ *   secret name detection, member name resolution and taint heuristics.
+ *
+ * Notes for maintainers:
+ * - These rules intentionally avoid automated fixers for security-critical
+ *   transformations. Reported violations should be fixed by a human reviewer.
+ * - Many rules include test-directory relaxations to avoid noisy errors in
+ *   fixtures and demos. If you need to change relaxations, prefer scoped
+ *   overrides rather than broadening rule defaults.
+ */
 import tseslintPlugin from "@typescript-eslint/eslint-plugin";
 import tsParser from "@typescript-eslint/parser";
 // Some parser packages are CommonJS and, when imported from an ESM flat-config,
