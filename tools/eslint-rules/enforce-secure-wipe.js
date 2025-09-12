@@ -57,19 +57,43 @@ export default {
     function isUint8ArrayFromCrypto(node) {
       if (!node || !node.init) return false;
 
-      // Check for: await secureRandomBytes(...) or other crypto calls
+      // Explicitly exclude non-Uint8Array initializations
+      if (node.init.type === "NewExpression") {
+        const constructorName = node.init.callee?.name;
+        
+        // Only allow Uint8Array, ArrayBuffer, and related buffer types
+        if (constructorName === "Uint8Array" || constructorName === "ArrayBuffer" || 
+            constructorName === "Int8Array" || constructorName === "Uint16Array" ||
+            constructorName === "Int16Array" || constructorName === "Uint32Array" ||
+            constructorName === "Int32Array" || constructorName === "Float32Array" ||
+            constructorName === "Float64Array") {
+          return true; // These are buffer types that might contain sensitive data
+        }
+        
+        // Exclude other constructor types (Set, Map, Array, Object, etc.)
+        return false;
+      }
+
+      // Check for object literals, arrays, and other non-buffer types
+      if (["ObjectExpression", "ArrayExpression", "Literal"].includes(node.init.type)) {
+        return false;
+      }
+
+      // Check for: await secureRandomBytes(...) or other crypto calls that return buffers
       if (node.init.type === "AwaitExpression" && node.init.argument) {
         const call = node.init.argument;
         if (call.type === "CallExpression" && call.callee) {
           const funcName = call.callee.name || call.callee.property?.name;
           const cryptoFunctions = [
             "secureRandomBytes",
-            "getRandomValues",
+            "getRandomValues", 
             "generateKey",
             "deriveBits",
-            "deriveKey",
+            "deriveKey", 
             "digest",
             "sign",
+            "getSecureRandomBytesSync",
+            "generateSecureBytesAsync",
           ];
           return cryptoFunctions.includes(funcName);
         }
@@ -80,9 +104,12 @@ export default {
         const funcName = node.init.callee.name || node.init.callee.property?.name;
         const cryptoFunctions = [
           "secureRandomBytes",
-          "getRandomValues",
+          "getRandomValues", 
           "generateSecureStringSync",
           "createSecureZeroingArray",
+          "getSecureRandomBytesSync",
+          "generateSecureBytesAsync",
+          "createSecureZeroingBuffer",
         ];
         return cryptoFunctions.includes(funcName);
       }
@@ -134,29 +161,34 @@ export default {
 
     return {
       VariableDeclarator(node) {
-        if (
-          node.id?.type === "Identifier" &&
-          (isSensitiveBufferName(node.id.name) || isUint8ArrayFromCrypto(node))
-        ) {
-          let container = node;
-          const containerTypes = new Set([
-            "FunctionDeclaration",
-            "FunctionExpression",
-            "ArrowFunctionExpression",
-            "Program",
-            "TryStatement",
-            "BlockStatement",
-          ]);
-          while (container && !containerTypes.has(container.type)) {
-            container = container.parent;
-          }
+        if (node.id?.type === "Identifier") {
+          // Only flag variables that are both:
+          // 1. Have sensitive names AND
+          // 2. Are actually initialized with Uint8Array/crypto operations
+          const hasSensitiveName = isSensitiveBufferName(node.id.name);
+          const isActuallyUint8Array = isUint8ArrayFromCrypto(node);
+          
+          if (hasSensitiveName && isActuallyUint8Array) {
+            let container = node;
+            const containerTypes = new Set([
+              "FunctionDeclaration",
+              "FunctionExpression",
+              "ArrowFunctionExpression",
+              "Program",
+              "TryStatement",
+              "BlockStatement",
+            ]);
+            while (container && !containerTypes.has(container.type)) {
+              container = container.parent;
+            }
 
-          if (container) {
-            sensitiveBuffers.set(node.id.name, {
-              declarationNode: node,
-              containerNode: container,
-              bufferName: node.id.name,
-            });
+            if (container) {
+              sensitiveBuffers.set(node.id.name, {
+                declarationNode: node,
+                containerNode: container,
+                bufferName: node.id.name,
+              });
+            }
           }
         }
       },

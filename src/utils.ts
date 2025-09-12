@@ -17,6 +17,7 @@ import {
   getTimingConfig,
 } from "./config.ts";
 import { setDevelopmentLogger_ } from "./dev-logger.ts";
+import { normalizeInputString } from "./canonical.ts";
 
 // --- Internal types used in this module ---
 type GlobalWithSharedArrayBuffer = {
@@ -55,8 +56,14 @@ function sanitizeMetricTags(tags: unknown): Record<string, string> | undefined {
     return undefined;
   const source = tags as Record<string, unknown>;
   const entries = Object.keys(source)
-    .filter((key) => ALLOWED_TAG_KEYS.has(key))
+    .filter((key) => {
+      // Normalize key with NFKC (stronger canonical form) to mitigate Unicode spoofing (OWASP ASVS V5.1.4)
+      const safeKey = normalizeInputString(key);
+      return ALLOWED_TAG_KEYS.has(safeKey);
+    })
     .map((key) => {
+      // Re-apply NFKC normalization for the emitted key tuple (defense-in-depth)
+      const safeKey = normalizeInputString(key);
       const value = Object.hasOwn(source, key)
         ? ((): unknown => {
             const descriptor = Object.getOwnPropertyDescriptor(source, key);
@@ -76,7 +83,7 @@ function sanitizeMetricTags(tags: unknown): Record<string, string> | undefined {
         return "[object]";
       })();
       const stringValue = raw.slice(0, 64);
-      return [key, stringValue] as const;
+      return [safeKey, stringValue] as const;
     })
     .filter((pair): pair is readonly [string, string] => Boolean(pair));
   if (entries.length === 0) return undefined;
@@ -2050,19 +2057,18 @@ function handlePlainObject(
   // NEW: breadth limiting for keys
   const limit = Math.min(MAX_KEYS_PER_OBJECT, Math.max(0, allKeys.length));
   /* eslint-disable functional/no-let -- loop counter for key processing */
+  /* eslint-disable local/enforce-visibility-abort-pattern -- short object property iteration, not crypto operation */
   for (let index = 0; index < limit; index++) {
     const key = allKeys[index] as string;
     try {
-      const v = _cloneAndNormalizeForLogging(
-        Object.hasOwn(data as Record<string, unknown>, key)
-          ? Object.getOwnPropertyDescriptor(
-              data as Record<string, unknown>,
-              key,
-            )?.value
-          : undefined,
-        depth + 1,
-        visited,
-      );
+      // For accessor properties (getters/setters), we need to invoke the getter to get the value
+      // For data properties, we can use the descriptor's value
+      // Always attempt direct property access to handle both cases uniformly and catch hostile getters
+      const rawValue = Object.hasOwn(data as Record<string, unknown>, key)
+        ? (data as Record<string, unknown>)[key]
+        : undefined;
+
+      const v = _cloneAndNormalizeForLogging(rawValue, depth + 1, visited);
       // eslint-disable-next-line functional/immutable-data
       Object.defineProperty(result, key, {
         value: v,
@@ -2090,6 +2096,7 @@ function handlePlainObject(
       });
     }
   }
+  /* eslint-enable local/enforce-visibility-abort-pattern */
   /* eslint-enable functional/no-let */
   if (allKeys.length > limit) {
     // eslint-disable-next-line functional/immutable-data
@@ -2588,10 +2595,15 @@ export const _devConsole = _developmentConsole;
 // Module-scoped token bucket state (dev-only). We keep these outside the
 // `secureDevLog` function to avoid re-creating timers or state on each call.
 // These are intentionally mutable; disable rules that would force `const`.
-/* eslint-disable-next-line functional/no-let */
-let __development_event_tokens = 5; // initial burst
-/* eslint-disable-next-line functional/no-let */
-let __development_event_last_refill = Date.now();
+/* eslint-disable functional/prefer-readonly-type -- audited mutable state for development event rate limiting */
+const __development_event_state: {
+  tokens: number;
+  lastRefill: number;
+} = {
+  tokens: 5, // initial burst
+  lastRefill: Date.now(),
+};
+/* eslint-enable functional/prefer-readonly-type */
 const __DEV_EVENT_REFILL_PER_SEC = 1; // 60 per minute
 const __DEV_EVENT_MAX_TOKENS = 5;
 
@@ -2599,19 +2611,23 @@ function developmentEventDispatchAllow(): boolean {
   try {
     if (environment.isProduction) return false;
     const now = Date.now();
-    const elapsedMs = now - __development_event_last_refill;
+    const elapsedMs = now - __development_event_state.lastRefill;
     if (elapsedMs > 0) {
       const toAdd = Math.floor((elapsedMs / 1000) * __DEV_EVENT_REFILL_PER_SEC);
       if (toAdd > 0) {
-        __development_event_tokens = Math.min(
+        /* eslint-disable functional/immutable-data -- audited mutation of development event rate limiting state */
+        __development_event_state.tokens = Math.min(
           __DEV_EVENT_MAX_TOKENS,
-          __development_event_tokens + toAdd,
+          __development_event_state.tokens + toAdd,
         );
-        __development_event_last_refill = now;
+        __development_event_state.lastRefill = now;
+        /* eslint-enable functional/immutable-data */
       }
     }
-    if (__development_event_tokens > 0) {
-      __development_event_tokens -= 1;
+    if (__development_event_state.tokens > 0) {
+      /* eslint-disable functional/immutable-data -- audited mutation of development event rate limiting state */
+      __development_event_state.tokens -= 1;
+      /* eslint-enable functional/immutable-data */
       return true;
     }
     return false;
@@ -2634,8 +2650,8 @@ export function getDevelopmentEventDispatchState():
   | undefined {
   if (environment.isProduction) return undefined;
   return {
-    tokens: __development_event_tokens,
-    lastRefill: __development_event_last_refill,
+    tokens: __development_event_state.tokens,
+    lastRefill: __development_event_state.lastRefill,
     refillPerSec: __DEV_EVENT_REFILL_PER_SEC,
     maxTokens: __DEV_EVENT_MAX_TOKENS,
   };

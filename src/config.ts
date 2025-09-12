@@ -36,6 +36,49 @@ export const MAX_PARENS_PER_LINE = 120 as const; // abnormal parentheses thresho
 // URL & message parsing bounds (defense in depth)
 export const MAX_URL_INPUT_LENGTH = 10_000 as const; // generous, typical URLs << 2KB
 export const MAX_MESSAGE_EVENT_DATA_LENGTH = 200_000 as const; // mirrors stack total cap
+
+// Unicode normalization security constants (OWASP ASVS L3 compliance + Trojan Source mitigations)
+// OWASP ASVS L3: Conservative default limit to prevent DoS attacks via oversized Unicode processing
+// Most legitimate use cases (URLs, identifiers, form fields) are much smaller than this
+// Can be overridden via options.maxLength for specific use cases that require larger inputs
+export const MAX_CANONICAL_INPUT_LENGTH_BYTES = 2_048 as const; // 2KB - reasonable default for most Unicode canonicalization
+export const MAX_NORMALIZED_LENGTH_RATIO = 2 as const; // Prevent normalization bombs - conservative 2x threshold
+export const MAX_COMBINING_CHARS_PER_BASE = 5 as const; // Prevent combining character DoS attacks (OWASP ASVS L3)
+
+// Comprehensive bidirectional control characters (Trojan Source attack vectors)
+// Based on "Trojan Source: Invisible Vulnerabilities" research (Boucher & Anderson, 2021)
+export const BIDI_CONTROL_CHARS =
+  /[\u200E\u200F\u202A-\u202E\u2066-\u2069\u061C\u2028\u2029]/u;
+
+// Invisible and zero-width characters that can hide malicious content
+export const INVISIBLE_CHARS =
+  /[\u00AD\u034F\u061C\u115F\u1160\u17B4\u17B5\u180B-\u180F\u200B-\u200F\u202A-\u202E\u2060-\u206F\u3164\uFE00-\uFE0F\uFEFF\uFFA0\uFFF0-\uFFFF]/u;
+
+// Homoglyph detection - common spoofing characters that look like ASCII
+// Fixed: Use proper 5-digit Unicode escape syntax \u{xxxxx} for Mathematical Alphanumeric Symbols
+export const HOMOGLYPH_SUSPECTS =
+  /[\u0410-\u044F\u0391-\u03C9\u0100-\u017F\u1E00-\u1EFF\u2100-\u214F\uff00-\uffef\u{1d400}-\u{1d7ff}]/u;
+
+export const DANGEROUS_UNICODE_RANGES =
+  /[\u0000-\u001F\u007F-\u009F\uFEFF\uFFF0-\uFFFF\uE000-\uF8FF]/u;
+
+// Excessive whitespace detection - prevent whitespace bombing and DoS attacks
+// Pattern detects 4+ consecutive whitespace chars (spaces, tabs, various Unicode whitespace)
+// Rationale: No legitimate input needs 4+ consecutive whitespace characters
+// This prevents: DoS attacks, layout manipulation, normalization bypass attempts
+export const EXCESSIVE_WHITESPACE = /[ \t\r\n\u00A0\u2000-\u200B\u2028\u2029\u202F\u205F\u3000]{4,}/u;
+
+// Suspicious repetitive patterns - detect potential layout manipulation attacks
+// Pattern detects repeating sequences that could be used for visual spoofing or DoS
+// Examples: "! ! ! !", "a a a a", ". . . ."
+// Rationale: Legitimate input rarely has such repetitive spacing patterns
+export const SUSPICIOUS_REPETITIVE_PATTERNS = /(.{1,3}[ \t]+){4,}/u;
+
+// Structural delimiter characters whose *introduction* only after normalization
+// can change downstream parsing semantics (host splitting, path traversal, query
+// injection). We fail CLOSED if NFKC introduces any that were absent originally.
+// ASVS L3: canonicalization must not create new unsafe separators.
+export const STRUCTURAL_RISK_CHARS = /[/\\:@#?&=%<>"']/u;
 /**
  * postMessage JSON / structured payload depth & size caps.
  * These are centralized here (instead of in postMessage.ts) to ensure

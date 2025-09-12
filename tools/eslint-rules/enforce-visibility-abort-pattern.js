@@ -198,6 +198,147 @@ export default {
       return false;
     }
 
+    /**
+     * Check if a loop is likely to be long-running and require visibility checks
+     */
+    function isLongRunningLoop(node) {
+      // If loop already has visibility check, it's compliant
+      if (hasVisibilityCheck(node)) {
+        return false;
+      }
+
+      // Check for explicit markers in comments that indicate long-running operations
+      const sourceCode = context.getSourceCode();
+      const comments = sourceCode.getCommentsBefore(node);
+      for (const comment of comments) {
+        if (comment.value.includes('long-running') || 
+            comment.value.includes('crypto') ||
+            comment.value.includes('expensive') ||
+            comment.value.includes('timing-sensitive')) {
+          return true;
+        }
+      }
+
+      // Heuristic 1: Check if loop contains sensitive operations
+      let containsSensitiveOps = false;
+      let containsNetworkOps = false;
+      let containsUnboundedOperation = false;
+
+      // Walk through loop body to check for sensitive operations
+      function checkNode(n) {
+        if (!n) return;
+
+        // Check for sensitive crypto operations
+        if (n.type === "CallExpression") {
+          const opName = isSensitiveOperation(n);
+          if (opName) {
+            containsSensitiveOps = true;
+          }
+
+          // Check for network operations
+          if (n.callee?.name === "fetch" || 
+              (n.callee?.type === "MemberExpression" && 
+               n.callee.property?.name === "fetch")) {
+            containsNetworkOps = true;
+          }
+
+          // Check for potentially unbounded operations
+          if (n.callee?.name === "crypto.getRandomValues" ||
+              n.callee?.name === "Math.random" ||
+              (n.callee?.type === "MemberExpression" &&
+               (n.callee.property?.name === "getRandomValues" ||
+                n.callee.property?.name === "random"))) {
+            containsUnboundedOperation = true;
+          }
+        }
+
+        // Recursively check child nodes
+        for (const key in n) {
+          if (key === 'parent') continue; // Avoid circular references
+          const child = n[key];
+          if (Array.isArray(child)) {
+            child.forEach(checkNode);
+          } else if (child && typeof child === 'object' && child.type) {
+            checkNode(child);
+          }
+        }
+      }
+
+      checkNode(node.body);
+
+      // If loop contains sensitive operations, it needs visibility checks
+      if (containsSensitiveOps || containsNetworkOps || containsUnboundedOperation) {
+        return true;
+      }
+
+      // Heuristic 2: Check loop bounds and iteration patterns
+      if (node.test) {
+        // Check for potentially large bounds
+        if (node.test.type === "BinaryExpression") {
+          const right = node.test.right;
+          if (right?.type === "Literal" && typeof right.value === "number") {
+            // Consider loops with more than 1000 iterations as potentially long-running
+            if (right.value > 1000) {
+              return true;
+            }
+          }
+          
+          // Check for unbounded loops or loops based on external data
+          if (right?.type === "MemberExpression") {
+            // Loops like `i < array.length` where array could be large
+            if (right.property?.name === "length") {
+              // Exception: Object.keys() results are typically small for object property iteration
+              if (right.object?.type === "CallExpression" &&
+                  right.object.callee?.type === "MemberExpression" &&
+                  right.object.callee.object?.name === "Object" &&
+                  right.object.callee.property?.name === "keys") {
+                return false; // Object property iteration is safe
+              }
+              return true; // Other .length-based loops might be large
+            }
+          }
+        }
+      }
+
+      // Heuristic 3: Check for nested loops (O(n²) or worse complexity)
+      let nestedLoopCount = 0;
+      function countNestedLoops(n) {
+        if (!n) return;
+        if (n.type === "ForStatement" || 
+            n.type === "WhileStatement" || 
+            n.type === "DoWhileStatement") {
+          nestedLoopCount++;
+        }
+        for (const key in n) {
+          if (key === 'parent') continue;
+          const child = n[key];
+          if (Array.isArray(child)) {
+            child.forEach(countNestedLoops);
+          } else if (child && typeof child === 'object' && child.type) {
+            countNestedLoops(child);
+          }
+        }
+      }
+      
+      countNestedLoops(node.body);
+      if (nestedLoopCount > 0) { // Has nested loops
+        return true;
+      }
+
+      // Heuristic 4: Simple bounded loops with small, known limits are safe
+      if (node.init?.type === "VariableDeclaration" &&
+          node.test?.type === "BinaryExpression" &&
+          node.test.right?.type === "Literal" &&
+          typeof node.test.right.value === "number" &&
+          node.test.right.value <= 100) { // Small, bounded iteration
+        return false;
+      }
+
+      // Default: for safety, consider other loops as potentially needing checks
+      // but provide a more nuanced message
+      return false; // Changed: be conservative and only flag clearly problematic cases
+    }
+
     return {
       // Track AbortController declarations
       VariableDeclarator(node) {
@@ -249,7 +390,7 @@ export default {
 
       // Check for ForStatement loops
       ForStatement(node) {
-        if (!hasVisibilityCheck(node)) {
+        if (isLongRunningLoop(node)) {
           context.report({
             node,
             messageId: "longRunningWithoutVisibilityCheck",

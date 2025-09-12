@@ -1,12 +1,944 @@
 import { InvalidParameterError } from "./errors.ts";
 import { SHARED_ENCODER } from "./encoding.ts";
 import { isForbiddenKey } from "./constants.ts";
-import { getCanonicalConfig } from "./config.ts";
+import {
+  secureCompareAsync,
+  secureDevLog as secureDevelopmentLog,
+} from "./utils.ts";
+import {
+  getCanonicalConfig,
+  MAX_CANONICAL_INPUT_LENGTH_BYTES,
+  MAX_NORMALIZED_LENGTH_RATIO,
+  MAX_COMBINING_CHARS_PER_BASE,
+  BIDI_CONTROL_CHARS,
+  INVISIBLE_CHARS,
+  HOMOGLYPH_SUSPECTS,
+  DANGEROUS_UNICODE_RANGES,
+  STRUCTURAL_RISK_CHARS,
+} from "./config.ts";
 
 // Sentinel to mark nodes currently under processing in the cache
 const PROCESSING = Symbol("__processing");
 
 // (internal helpers removed)
+
+/**
+ * Convert unknown input to a string safely without triggering hostile toString() methods.
+ * Enhanced for OWASP ASVS L3 with comprehensive input validation and DoS protection.
+ * @internal
+ */
+function _toString(input: unknown): string {
+  if (typeof input === "string") return input;
+  if (typeof input === "number") {
+    return Number.isFinite(input) ? String(input) : "";
+  }
+  if (typeof input === "boolean") return String(input);
+  if (typeof input === "bigint") return input.toString();
+  if (input === null || input === undefined) return "";
+  // For objects, use JSON.stringify as a safe fallback that avoids
+  // calling toString() which could be a hostile getter
+  try {
+    const json = JSON.stringify(input);
+    return typeof json === "string" ? json : "";
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * Validate Unicode string for security threats per OWASP ASVS L3 requirements.
+ * Enhanced with Trojan Source attack detection based on Boucher & Anderson research.
+ * Detects:
+ * - Bidirectional control characters (visual spoofing)
+ * - Invisible/zero-width characters (hidden content)
+ * - Homoglyph suspects (character spoofing)
+ * - Dangerous Unicode ranges (control chars, private use)
+ * - Trojan Source attack patterns
+ *
+ * @param string_ - The string to validate
+ * @param context - Context for error reporting (e.g., "URL", "fragment")
+ * @throws InvalidParameterError if validation fails
+ */
+function validateUnicodeSecurity(string_: string, context: string): void {
+  // Trojan Source Attack Detection: Bidirectional control characters
+  if (BIDI_CONTROL_CHARS.test(string_)) {
+    const suspiciousChars = Array.from(string_.match(BIDI_CONTROL_CHARS) || [])
+      .map(
+        (char) =>
+          `U+${char.charCodeAt(0).toString(16).toUpperCase().padStart(4, "0")}`,
+      )
+      .join(", ");
+
+    secureDevelopmentLog(
+      "warn",
+      "validateUnicodeSecurity",
+      `Trojan Source attack detected: bidirectional control characters found`,
+      { context, suspiciousChars, inputLength: string_.length },
+    );
+
+    throw new InvalidParameterError(
+      `${context}: Contains bidirectional control characters (${suspiciousChars}) that enable Trojan Source attacks.`,
+    );
+  }
+
+  // Invisible Character Detection: Zero-width and formatting characters
+  if (INVISIBLE_CHARS.test(string_)) {
+    const invisibleChars = Array.from(string_.match(INVISIBLE_CHARS) || [])
+      .map(
+        (char) =>
+          `U+${char.charCodeAt(0).toString(16).toUpperCase().padStart(4, "0")}`,
+      )
+      .join(", ");
+
+    secureDevelopmentLog(
+      "warn",
+      "validateUnicodeSecurity",
+      `Invisible characters detected: potential content hiding`,
+      { context, invisibleChars, inputLength: string_.length },
+    );
+
+    throw new InvalidParameterError(
+      `${context}: Contains invisible characters (${invisibleChars}) that could hide malicious content.`,
+    );
+  }
+
+  // Homoglyph Attack Detection: Characters that visually resemble ASCII
+  if (HOMOGLYPH_SUSPECTS.test(string_)) {
+    const homoglyphs = Array.from(string_.match(HOMOGLYPH_SUSPECTS) || [])
+      .map(
+        (char) =>
+          `'${char}' (U+${char.charCodeAt(0).toString(16).toUpperCase().padStart(4, "0")})`,
+      )
+      .join(", ");
+
+    secureDevelopmentLog(
+      "warn",
+      "validateUnicodeSecurity",
+      `Potential homoglyph attack: non-ASCII characters resembling ASCII`,
+      { context, homoglyphs, inputLength: string_.length },
+    );
+
+    throw new InvalidParameterError(
+      `${context}: Contains potential homoglyph characters (${homoglyphs}) that could enable spoofing attacks.`,
+    );
+  }
+
+  // Check for dangerous Unicode ranges (control chars, private use areas, etc.)
+  if (DANGEROUS_UNICODE_RANGES.test(string_)) {
+    const dangerousChars = Array.from(
+      string_.match(DANGEROUS_UNICODE_RANGES) || [],
+    )
+      .map(
+        (char) =>
+          `U+${char.charCodeAt(0).toString(16).toUpperCase().padStart(4, "0")}`,
+      )
+      .join(", ");
+
+    throw new InvalidParameterError(
+      `${context}: Contains dangerous Unicode characters (${dangerousChars}) in control or private use ranges.`,
+    );
+  }
+
+  // Advanced heuristic-based security scoring system
+  // This replaces simple binary rules with adaptive threat assessment
+  const securityScore = calculateSecurityRiskScore(string_);
+  
+  if (securityScore.totalScore >= 60) { // Lowered threshold from 70 to 60
+    secureDevelopmentLog(
+      "warn",
+      "validateUnicodeSecurity",
+      `High security risk score detected: potential attack pattern`,
+      { 
+        context, 
+        totalScore: securityScore.totalScore,
+        factors: securityScore.factors,
+        inputLength: string_.length,
+        recommendation: securityScore.recommendation
+      },
+    );
+
+    throw new InvalidParameterError(
+      `${context}: Input rejected due to high security risk score (${securityScore.totalScore}/100). ${securityScore.recommendation}`,
+    );
+  }
+
+  // Additional Trojan Source pattern detection
+  detectTrojanSourcePatterns(string_, context);
+}
+
+/**
+ * Detect specific Trojan Source attack patterns beyond individual character detection.
+ * Based on "Trojan Source: Invisible Vulnerabilities" research patterns.
+ *
+ * @param string_ - The string to analyze for attack patterns
+ * @param context - Context for error reporting
+ * @throws InvalidParameterError if attack patterns are detected
+ */
+function detectTrojanSourcePatterns(string_: string, context: string): void {
+  // Pattern 1: Bidirectional override sequences (classic Trojan Source)
+  // Look for LRO/RLO followed by content then PDF/PDI
+  const trojanSourcePattern = /[\u202D\u202E].*?[\u202C\u2069]/u;
+  if (trojanSourcePattern.test(string_)) {
+    secureDevelopmentLog(
+      "error",
+      "detectTrojanSourcePatterns",
+      `Classic Trojan Source attack pattern detected`,
+      {
+        context,
+        pattern: "bidirectional_override_sequence",
+        inputLength: string_.length,
+      },
+    );
+
+    throw new InvalidParameterError(
+      `${context}: Contains classic Trojan Source attack pattern (bidirectional override sequence).`,
+    );
+  }
+
+  // Pattern 2: Embedding attacks (LRE/RLE with nested content)
+  const embeddingPattern = /[\u202A\u202B].*?\u202C/u;
+  if (embeddingPattern.test(string_)) {
+    secureDevelopmentLog(
+      "error",
+      "detectTrojanSourcePatterns",
+      `Bidirectional embedding attack pattern detected`,
+      { context, pattern: "embedding_sequence", inputLength: string_.length },
+    );
+
+    throw new InvalidParameterError(
+      `${context}: Contains bidirectional embedding attack pattern.`,
+    );
+  }
+
+  // Pattern 3: Mixed script with suspicious character combinations
+  // Common in supply chain attacks where legitimate-looking identifiers contain hidden chars
+  const mixedScriptSuspicious =
+    /\w+[\u200B-\u200F\u202A-\u202E\u2066-\u2069]+\w+/u;
+  if (mixedScriptSuspicious.test(string_)) {
+    secureDevelopmentLog(
+      "warn",
+      "detectTrojanSourcePatterns",
+      `Suspicious mixed script pattern with invisible characters`,
+      {
+        context,
+        pattern: "mixed_script_invisible",
+        inputLength: string_.length,
+      },
+    );
+
+    throw new InvalidParameterError(
+      `${context}: Contains suspicious mixed script pattern with invisible characters.`,
+    );
+  }
+
+  // Pattern 4: Zero-width character injection in identifier-like strings
+  if (/^[a-zA-Z]\w*$/u.test(string_.replace(/[\u200B-\u200F]/gu, ""))) {
+    if (/[\u200B-\u200F]/u.test(string_)) {
+      secureDevelopmentLog(
+        "error",
+        "detectTrojanSourcePatterns",
+        `Zero-width character injection in identifier detected`,
+        {
+          context,
+          pattern: "zero_width_injection",
+          inputLength: string_.length,
+        },
+      );
+
+      throw new InvalidParameterError(
+        `${context}: Contains zero-width character injection in identifier-like string.`,
+      );
+    }
+  }
+
+  // Combining Character DoS Protection (OWASP ASVS L3)
+  validateCombiningCharacterLimits(string_, context);
+}
+
+/**
+ * Calculate comprehensive security risk score for input validation.
+ * Uses multiple heuristics to detect potential attack patterns that might
+ * evade individual security checks. Implements adaptive security per
+ * OWASP ASVS L3 requirements.
+ * 
+ * @param string_ - The input string to analyze
+ * @returns Security assessment with total score and contributing factors
+ */
+interface SecurityRiskAssessment {
+  totalScore: number;
+  factors: Record<string, number>;
+  recommendation: string;
+}
+
+function calculateSecurityRiskScore(string_: string): SecurityRiskAssessment {
+  const factors: Record<string, number> = {};
+  let totalScore = 0;
+
+  // Factor 1: Whitespace density (any whitespace, not just consecutive)
+  const whitespaceRatio = (string_.match(/[\s\u00A0\u2000-\u200B\u2028\u2029\u202F\u205F\u3000]/gu) || []).length / string_.length;
+  if (whitespaceRatio >= 0.35) { // Lowered from 0.4 to 0.35 (35% instead of 40%)
+    factors.whitespace_density = Math.round(whitespaceRatio * 120); // Increased multiplier
+    totalScore += factors.whitespace_density;
+  }
+
+  // Factor 2: Consecutive whitespace patterns (original logic but as scoring)
+  const consecutiveWhitespace = string_.match(/[\s\u00A0\u2000-\u200B\u2028\u2029\u202F\u205F\u3000]{3,}/gu);
+  if (consecutiveWhitespace) {
+    const maxConsecutive = Math.max(...consecutiveWhitespace.map(m => m.length));
+    factors.consecutive_whitespace = Math.min(maxConsecutive * 10, 50); // Increased multiplier from 8 to 10
+    totalScore += factors.consecutive_whitespace;
+  }
+
+  // Factor 3: Repetitive character patterns (potential DoS/layout manipulation)
+  const repetitiveMatches = string_.match(/(.)\1{4,}/gu); // 5+ same chars
+  if (repetitiveMatches) {
+    const maxRepeats = Math.max(...repetitiveMatches.map(m => m.length));
+    factors.repetitive_patterns = Math.min(maxRepeats * 4, 30); // Increased multiplier
+    totalScore += factors.repetitive_patterns;
+  }
+
+  // Factor 4: Punctuation density (suspicious if too high)
+  const punctuationRatio = (string_.match(/[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/gu) || []).length / string_.length;
+  if (punctuationRatio >= 0.25) { // Lowered from 0.3 to 0.25 (25% instead of 30%)
+    factors.punctuation_density = Math.round(punctuationRatio * 100); // Increased multiplier
+    totalScore += factors.punctuation_density;
+  }
+
+  // Factor 5: Character variety (too low variety suggests pattern attacks)
+  const uniqueChars = new Set(string_).size;
+  const varietyRatio = uniqueChars / string_.length;
+  if (varietyRatio < 0.35 && string_.length > 8) { // Lowered length threshold from 10 to 8
+    factors.low_character_variety = Math.round((0.35 - varietyRatio) * 120);
+    totalScore += factors.low_character_variety;
+  }
+
+  // Factor 6: Suspicious character combinations
+  if (/\s{2,}[!]{3,}/u.test(string_)) { // Multiple spaces followed by many exclamations
+    factors.suspicious_combinations = 20; // Increased from 15 to 20
+    totalScore += factors.suspicious_combinations;
+  }
+
+  // Factor 7: Length-based risk (very short inputs with patterns are more suspicious)
+  if (string_.length < 30 && totalScore > 0) { // Increased from 25 to 30
+    factors.short_pattern_boost = Math.round(15 * (30 - string_.length) / 30); // Increased boost
+    totalScore += factors.short_pattern_boost;
+  }
+
+  // Factor 8: Leading whitespace pattern (common in layout manipulation attacks)
+  if (/^\s{4,}/u.test(string_)) {
+    factors.leading_whitespace = 15;
+    totalScore += factors.leading_whitespace;
+  }
+
+  // Factor 9: Repetitive digits (potential obfuscation or confusion attacks)
+  const digitMatches = string_.match(/(\d)\1{3,}/gu); // 4+ same digits
+  if (digitMatches) {
+    const maxDigitRepeats = Math.max(...digitMatches.map(m => m.length));
+    factors.repetitive_digits = Math.min(maxDigitRepeats * 3, 15);
+    totalScore += factors.repetitive_digits;
+  }
+
+  // Generate contextual recommendation
+  let recommendation = "Consider using simpler, more natural input patterns.";
+  if (factors.whitespace_density) {
+    recommendation = "High whitespace density detected - potential layout manipulation.";
+  } else if (factors.consecutive_whitespace) {
+    recommendation = "Consecutive whitespace patterns detected - potential DoS attack.";
+  } else if (factors.repetitive_patterns) {
+    recommendation = "Repetitive character patterns detected - potential manipulation attempt.";
+  }
+
+  return {
+    totalScore: Math.round(totalScore),
+    factors,
+    recommendation
+  };
+}
+
+/**
+ * Detect excessive combining characters (DoS protection for OWASP ASVS L3).
+ * Prevents denial-of-service attacks where many combining marks are applied
+ * to a single base character, which can cause expensive normalization and
+ * rendering operations.
+ *
+ * Example attack: "a" + "\u0301".repeat(1000) creates 1000 combining acute accents
+ * on a single 'a', causing performance degradation in processing and display.
+ *
+ * @param string_ - String to validate for excessive combining characters
+ * @param context - Context for error reporting
+ * @throws InvalidParameterError when excessive combining characters are detected
+ */
+function validateCombiningCharacterLimits(string_: string, context: string): void {
+  let baseCharCount = 0;
+  let combiningCharCount = 0;
+  let consecutiveCombining = 0;
+
+  for (const char of string_) {
+    const codePoint = char.codePointAt(0)!;
+    
+    // Check if character is a combining mark (General Category Mn, Mc, Me)
+    // Unicode ranges for combining marks:
+    // - Combining Diacritical Marks (0300-036F)
+    // - Combining Diacritical Marks Extended (1AB0-1AFF)
+    // - Combining Diacritical Marks Supplement (1DC0-1DFF)
+    // - Combining Half Marks (FE20-FE2F)
+    const isCombining = (
+      (codePoint >= 0x0300 && codePoint <= 0x036F) ||
+      (codePoint >= 0x1AB0 && codePoint <= 0x1AFF) ||
+      (codePoint >= 0x1DC0 && codePoint <= 0x1DFF) ||
+      (codePoint >= 0xFE20 && codePoint <= 0xFE2F) ||
+      // Check Unicode general category for combining marks
+      /^\p{M}/u.test(char)
+    );
+
+    if (isCombining) {
+      combiningCharCount++;
+      consecutiveCombining++;
+      
+      // Check for excessive combining characters on single base character
+      if (consecutiveCombining > MAX_COMBINING_CHARS_PER_BASE) {
+        throw new InvalidParameterError(
+          `${context}: Excessive combining characters detected (${consecutiveCombining} consecutive). ` +
+          `Maximum ${MAX_COMBINING_CHARS_PER_BASE} combining marks per base character allowed.`
+        );
+      }
+    } else {
+      baseCharCount++;
+      consecutiveCombining = 0; // Reset counter for new base character
+    }
+  }
+
+  // Additional check: if more than 30% of characters are combining marks in larger inputs, likely an attack
+  // Only apply this check for strings with substantial content (>20 chars) to avoid false positives
+  const totalChars = baseCharCount + combiningCharCount;
+  if (totalChars > 20 && (combiningCharCount / totalChars) > 0.3) {
+    throw new InvalidParameterError(
+      `${context}: Suspicious ratio of combining characters (${combiningCharCount}/${totalChars}). ` +
+      "Possible combining character DoS attack."
+    );
+  }
+}
+
+/**
+ * Detect structural metacharacters introduced only after normalization.
+ * If a character in STRUCTURAL_RISK_CHARS appears in the normalized output
+ * but not in the raw input, treat as potential host/split or delimiter
+ * smuggling and reject (OWASP ASVS L3: prevent canonicalization bypass).
+ *
+ * This mitigates attacks where visually benign Unicode variants normalize
+ * into structural separators that alter downstream parsing semantics
+ * (URL host boundaries, path traversal, query injection).
+ *
+ * @param raw - Original untrusted string (pre-normalization)
+ * @param normalized - NFKC-normalized result
+ * @param context - Context for error reporting
+ * @throws InvalidParameterError when new structural characters are introduced
+ */
+function detectIntroducedStructuralChars(
+  raw: string,
+  normalized: string,
+  context: string,
+): void {
+  if (raw === normalized) return;
+
+  // Fast exit: if normalized contains none of the risk chars, skip set diff.
+  if (!STRUCTURAL_RISK_CHARS.test(normalized)) return;
+
+  // Build occurrence sets
+  const inRaw = new Set<string>();
+  for (const ch of raw) {
+    if (STRUCTURAL_RISK_CHARS.test(ch)) inRaw.add(ch);
+  }
+  const introduced: string[] = [];
+  for (const ch of normalized) {
+    if (STRUCTURAL_RISK_CHARS.test(ch) && !inRaw.has(ch)) {
+      introduced.push(ch);
+    }
+  }
+  if (introduced.length === 0) return;
+
+  const unique = Array.from(new Set(introduced));
+  secureDevelopmentLog(
+    "warn",
+    "detectIntroducedStructuralChars",
+    "Normalization introduced structural delimiter(s)",
+    { context, introduced: unique },
+  );
+
+  throw new InvalidParameterError(
+    `${context}: Normalization introduced structural characters (${unique.join(", ")}).`,
+  );
+}
+
+/**
+ * Verify NFKC idempotency (defense-in-depth). canonical(normalized) must equal
+ * normalized. Detects unexpected engine/polyfill behavior or malformed surrogate
+ * edge cases (OWASP ASVS V5.1.4: stable canonicalization).
+ *
+ * Real-world incidents (e.g., Spotify) have shown that non-idempotent
+ * canonicalization can lead to security bypasses and account takeovers.
+ *
+ * @param normalized - The NFKC-normalized string to verify
+ * @param context - Context for error reporting
+ * @throws InvalidParameterError if a second normalization pass changes output
+ */
+function verifyNormalizationIdempotent(
+  normalized: string,
+  context: string,
+): void {
+  const second = normalized.normalize("NFKC");
+  if (second !== normalized) {
+    secureDevelopmentLog(
+      "error",
+      "verifyNormalizationIdempotent",
+      "Non-idempotent normalization detected",
+      {
+        context,
+        firstLength: normalized.length,
+        secondLength: second.length,
+      },
+    );
+    throw new InvalidParameterError(
+      `${context}: Normalization not idempotent (environment anomaly).`,
+    );
+  }
+}
+
+/**
+ * Normalize string input using NFKC to prevent Unicode normalization attacks.
+ * Enhanced for OWASP ASVS Level 3 compliance with comprehensive security hardening:
+ * - DoS protection via input length limits (2KB default, configurable via options.maxLength)
+ * - Trojan Source attack detection (Boucher & Anderson, 2021)
+ * - Bidirectional control character detection
+ * - Invisible/zero-width character detection
+ * - Homoglyph attack prevention
+ * - Normalization bomb prevention (2x expansion ratio limit)
+ * - Combining character DoS prevention (max 5 per base character)
+ * - Dangerous Unicode range validation
+ *
+ * SECURITY NOTE: The default 2KB limit balances security and usability. 
+ * Most legitimate inputs (URLs, identifiers, form fields) are much smaller.
+ * Larger limits increase DoS attack surface via memory/CPU exhaustion.
+ * Override only when absolutely necessary via options.maxLength.
+ *
+ * Protects against:
+ * - Visual spoofing attacks via bidirectional overrides
+ * - Content hiding via invisible characters
+ * - Character spoofing via homoglyphs
+ * - Supply chain attacks via Trojan Source patterns
+ *
+ * NFKC (Normalization Form Compatibility Composition) provides the strictest
+ * normalization, collapsing visually similar characters into common equivalents.
+ *
+ * OWASP ASVS v5 V5.1.4: Unicode normalization for input validation
+ * Security Constitution: Fail Loudly - normalize to detect bypass attempts
+ *
+ * @param input - The input value to normalize (converted to string first)
+ * @param context - Optional context for error reporting (defaults to "input")
+ * @returns The NFKC-normalized string
+ * @throws InvalidParameterError for security violations or DoS attempts
+ */
+export function normalizeInputString(
+  input: unknown,
+  context = "input",
+  options?: { readonly maxLength?: number },
+): string {
+  const rawString = _toString(input);
+
+  // DoS protection: check raw input length before processing
+  const lengthLimit =
+    typeof options?.maxLength === "number" && options.maxLength > 0
+      ? Math.min(options.maxLength, MAX_CANONICAL_INPUT_LENGTH_BYTES)
+      : MAX_CANONICAL_INPUT_LENGTH_BYTES;
+
+  const rawBytes = SHARED_ENCODER.encode(rawString);
+  if (rawBytes.length > lengthLimit) {
+    throw new InvalidParameterError(
+      `${context}: Input exceeds maximum allowed size (${lengthLimit} bytes).`,
+    );
+  }
+
+  // Apply Unicode security validation before normalization
+  if (rawString.length > 0) {
+    validateUnicodeSecurity(rawString, context);
+  }
+
+  // Perform NFKC normalization with error handling
+  let normalized: string;
+  try {
+    normalized = rawString.normalize("NFKC");
+  } catch (e) {
+    secureDevelopmentLog(
+      "error",
+      "normalizeInputString",
+      "Normalization threw exception",
+      { context, error: e instanceof Error ? e.message : String(e) },
+    );
+    throw new InvalidParameterError(
+      `${context}: Failed to normalize input securely.`,
+    );
+  }
+
+  // Prevent normalization bombs - check expansion ratio
+  if (normalized.length > rawString.length * MAX_NORMALIZED_LENGTH_RATIO) {
+    throw new InvalidParameterError(
+      `${context}: Normalization resulted in excessive expansion, potential normalization bomb.`,
+    );
+  }
+
+  // NEW: Detect structural delimiter introduction (host/split style attacks)
+  detectIntroducedStructuralChars(rawString, normalized, context);
+
+  // NEW: Verify normalization idempotency (defense-in-depth)
+  verifyNormalizationIdempotent(normalized, context);
+
+  // Re-validate after normalization to catch newly introduced dangerous patterns
+  if (normalized.length > 0) {
+    validateUnicodeSecurity(normalized, context);
+  }
+
+  return normalized;
+}
+
+/**
+ * Normalize and validate URL components with context-specific security rules.
+ * @param input - The URL component to normalize
+ * @param componentType - Type of URL component for context-specific validation
+ * @returns The normalized and validated URL component
+ */
+export function normalizeUrlComponent(
+  input: unknown,
+  componentType: "scheme" | "host" | "path" | "query" | "fragment" = "query",
+): string {
+  const context = `URL ${componentType}`;
+  const normalized = normalizeInputString(input, context);
+
+  // Additional validation based on component type
+  switch (componentType) {
+    case "scheme": {
+      if (normalized && !/^[a-zA-Z][a-zA-Z0-9+.-]*$/u.test(normalized)) {
+        throw new InvalidParameterError(
+          `${context}: Contains invalid characters for URL scheme.`,
+        );
+      }
+      return normalized.toLowerCase();
+    }
+    case "host": {
+      // Additional hostname-specific validation
+      if (normalized.includes("..") || normalized.includes("//")) {
+        throw new InvalidParameterError(
+          `${context}: Contains path traversal sequences.`,
+        );
+      }
+      return normalized.toLowerCase();
+    }
+    case "path": {
+      // Check for encoded traversal sequences
+      if (/%2e|%2f|%5c/iu.test(normalized)) {
+        throw new InvalidParameterError(
+          `${context}: Contains encoded path traversal sequences.`,
+        );
+      }
+      return normalized;
+    }
+    case "fragment": {
+      // Fragments should not contain dangerous schemes
+      const lowerFragment = normalized.toLowerCase();
+      const dangerousSchemes = ["javascript:", "data:", "vbscript:"];
+      for (const scheme of dangerousSchemes) {
+        if (lowerFragment.includes(scheme)) {
+          throw new InvalidParameterError(
+            `${context}: Contains dangerous scheme '${scheme}'.`,
+          );
+        }
+      }
+      return normalized;
+    }
+    default: {
+      return normalized;
+    }
+  }
+}
+
+/**
+ * Timing-safe string comparison using normalized input.
+ * Combines Unicode normalization with constant-time comparison to prevent
+ * both normalization attacks and timing attacks.
+ *
+ * @param a - First string to compare
+ * @param b - Second string to compare
+ * @param context - Optional context for error reporting
+ * @returns Promise resolving to true if strings are equal after normalization
+ */
+export async function normalizeAndCompareAsync(
+  a: unknown,
+  b: unknown,
+  context = "comparison",
+): Promise<boolean> {
+  try {
+    const normalizedA = normalizeInputString(a, context);
+    const normalizedB = normalizeInputString(b, context);
+    return await secureCompareAsync(normalizedA, normalizedB);
+  } catch (error) {
+    secureDevelopmentLog(
+      "warn",
+      "normalizeAndCompareAsync",
+      `Normalization failed during comparison: ${error instanceof Error ? error.message : String(error)}`,
+      { context },
+    );
+    return false;
+  }
+}
+
+/**
+ * Validate and normalize input for safe logging.
+ * Removes or replaces potentially dangerous Unicode sequences while preserving
+ * readability for debugging purposes.
+ *
+ * @param input - The input to sanitize for logging
+ * @param maxLength - Maximum length for truncation (default: 200)
+ * @returns Sanitized string safe for logging
+ */
+export function sanitizeForLogging(input: unknown, maxLength = 200): string {
+  try {
+    const string_ = _toString(input);
+
+    // Apply basic normalization but catch any security violations
+    // and replace dangerous content rather than throwing
+    let sanitized: string;
+    try {
+      sanitized = string_.normalize("NFKC");
+    } catch {
+      sanitized = string_;
+    }
+
+    // Replace dangerous Unicode ranges with safe placeholders
+    sanitized = sanitized
+      .replace(BIDI_CONTROL_CHARS, "[BIDI]")
+      .replace(DANGEROUS_UNICODE_RANGES, "[CTRL]")
+      .replace(/[\u0000-\u001F\u007F]/gu, "[CTRL]"); // Additional control char cleanup
+
+    // Truncate if too long
+    if (sanitized.length > maxLength) {
+      sanitized = sanitized.slice(0, maxLength - 3) + "...";
+    }
+
+    return sanitized;
+  } catch {
+    return "[INVALID_INPUT]";
+  }
+}
+
+/**
+ * Comprehensive input validation for external data.
+ * Performs multiple layers of security checks before normalization.
+ *
+ * @param input - The input to validate
+ * @param options - Validation options
+ * @returns Validation result with normalized value or error details
+ */
+export function validateAndNormalizeInput(
+  input: unknown,
+  options: {
+    readonly context?: string;
+    readonly maxLength?: number;
+    readonly allowEmpty?: boolean;
+    readonly requireAscii?: boolean;
+  } = {},
+):
+  | { readonly success: true; readonly value: string }
+  | { readonly success: false; readonly error: string } {
+  const {
+    context = "input",
+    maxLength = MAX_CANONICAL_INPUT_LENGTH_BYTES,
+    allowEmpty = true,
+    requireAscii = false,
+  } = options;
+
+  try {
+    const rawString = _toString(input);
+
+    // Early validation checks
+    if (!allowEmpty && rawString.length === 0) {
+      return { success: false, error: `${context}: Empty input not allowed.` };
+    }
+
+    if (requireAscii && !/^[\x00-\x7F]*$/u.test(rawString)) {
+      return {
+        success: false,
+        error: `${context}: Non-ASCII characters not allowed.`,
+      };
+    }
+
+    // Check size before normalization
+    const rawBytes = SHARED_ENCODER.encode(rawString);
+    if (rawBytes.length > maxLength) {
+      return {
+        success: false,
+        error: `${context}: Input exceeds maximum size (${maxLength} bytes).`,
+      };
+    }
+
+    // Perform normalization with full validation
+    const normalized = normalizeInputString(rawString, context);
+
+    return { success: true, value: normalized };
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+/**
+ * Ultra-strict string validation for high-security contexts.
+ * Applies the most restrictive Trojan Source protections with ASCII-only enforcement.
+ * Use this for critical security boundaries like authentication tokens, API keys, etc.
+ *
+ * @param input - The input to validate with maximum security
+ * @param context - Context for error reporting
+ * @param options - Validation options
+ * @returns Validated ASCII-only string
+ * @throws InvalidParameterError for any security violations
+ */
+export function normalizeInputStringUltraStrict(
+  input: unknown,
+  context: string,
+  options: {
+    readonly maxLength?: number;
+    readonly allowedChars?: RegExp;
+  } = {},
+): string {
+  const { maxLength = 512, allowedChars = /^[\w.-]+$/u } = options;
+
+  const rawString = _toString(input);
+
+  if (rawString.length === 0) {
+    throw new InvalidParameterError(
+      `${context}: Empty input not allowed in ultra-strict mode.`,
+    );
+  }
+
+  if (rawString.length > maxLength) {
+    throw new InvalidParameterError(
+      `${context}: Input exceeds ultra-strict maximum length (${maxLength}).`,
+    );
+  }
+
+  // Immediate rejection of any non-ASCII characters
+  if (!/^[\x00-\x7F]*$/u.test(rawString)) {
+    const nonAsciiChars = Array.from(rawString)
+      .filter((char) => char.charCodeAt(0) > 127)
+      .map(
+        (char) =>
+          `'${char}' (U+${char.charCodeAt(0).toString(16).toUpperCase().padStart(4, "0")})`,
+      )
+      .slice(0, 5) // Limit to first 5 for readability
+      .join(", ");
+
+    secureDevelopmentLog(
+      "error",
+      "normalizeInputStringUltraStrict",
+      `Non-ASCII characters rejected in ultra-strict mode`,
+      { context, nonAsciiChars, inputLength: rawString.length },
+    );
+
+    throw new InvalidParameterError(
+      `${context}: Non-ASCII characters not allowed in ultra-strict mode: ${nonAsciiChars}`,
+    );
+  }
+
+  // Apply standard normalization (should be no-op for ASCII)
+  const normalized = rawString.normalize("NFKC");
+
+  // Verify allowed character set
+  if (!allowedChars.test(normalized)) {
+    throw new InvalidParameterError(
+      `${context}: Contains characters not allowed in ultra-strict mode.`,
+    );
+  }
+
+  // Final security validation (should pass for ASCII-only content)
+  validateUnicodeSecurity(normalized, context);
+
+  return normalized;
+}
+
+/**
+ * Specialized function for validating URL-safe strings with Trojan Source protections.
+ * Ideal for URL components, query parameters, and similar web contexts.
+ *
+ * @param input - The input to validate for URL safety
+ * @param context - Context for error reporting
+ * @param options - Validation options
+ * @returns URL-safe normalized string
+ * @throws InvalidParameterError for any security violations
+ */
+export function normalizeUrlSafeString(
+  input: unknown,
+  context: string,
+  options: {
+    readonly maxLength?: number;
+    readonly allowSpaces?: boolean;
+  } = {},
+): string {
+  const { maxLength = 2048, allowSpaces = false } = options;
+
+  const baseNormalized = normalizeInputString(input, context, { maxLength });
+
+  // Define URL-safe character set (RFC 3986 unreserved + percent encoding)
+  const urlSafePattern = allowSpaces
+    ? /^[\w.~:/?#[\]@!$&'()*+,;=\-% ]*$/u
+    : /^[\w.~:/?#[\]@!$&'()*+,;=\-%]*$/u;
+
+  if (!urlSafePattern.test(baseNormalized)) {
+    const unsafeChars = Array.from(baseNormalized)
+      .filter((char) => !urlSafePattern.test(char))
+      .map(
+        (char) =>
+          `'${char}' (U+${char.charCodeAt(0).toString(16).toUpperCase().padStart(4, "0")})`,
+      )
+      .slice(0, 3)
+      .join(", ");
+
+    throw new InvalidParameterError(
+      `${context}: Contains non-URL-safe characters: ${unsafeChars}`,
+    );
+  }
+
+  // Additional validation for common URL injection patterns
+  const suspiciousPatterns = [
+    /javascript:/iu,
+    /data:/iu,
+    /vbscript:/iu,
+    /file:/iu,
+    /<script/iu,
+    /<%/u,
+    /%3cscript/iu,
+  ];
+
+  for (const pattern of suspiciousPatterns) {
+    if (pattern.test(baseNormalized)) {
+      secureDevelopmentLog(
+        "error",
+        "normalizeUrlSafeString",
+        `Suspicious URL pattern detected`,
+        {
+          context,
+          pattern: pattern.source,
+          inputLength: baseNormalized.length,
+        },
+      );
+
+      throw new InvalidParameterError(
+        `${context}: Contains potentially dangerous URL patterns.`,
+      );
+    }
+  }
+
+  return baseNormalized;
+}
 
 /**
  * Narrow/TypeGuard: returns true only for non-null objects.

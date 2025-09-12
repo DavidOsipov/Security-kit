@@ -38,6 +38,7 @@ import {
 } from "./config.ts";
 import { environment } from "./environment.ts";
 import { secureDevLog as secureDevelopmentLog } from "./utils.ts";
+import { normalizeInputString } from "./canonical.ts";
 
 // This file contains deliberate, policy-driven branching that increases
 // cognitive complexity. We allow the sonarjs cognitive-complexity rule to
@@ -128,8 +129,10 @@ const _toString = (v: unknown): string => {
   if (v === undefined || v === null) return "";
   const t = typeof v;
   switch (t) {
-    case "string":
-      return v as string;
+    case "string": {
+      const string_ = v as string;
+      return normalizeInputString(string_, "_toString string normalization");
+    }
     case "number": {
       const n = v as number;
       if (!Number.isFinite(n))
@@ -147,18 +150,6 @@ const _toString = (v: unknown): string => {
       );
   }
 };
-
-/**
- * Normalize string input using NFKC to prevent Unicode normalization attacks.
- * NFKC (Normalization Form Compatibility Composition) provides the strictest
- * normalization, collapsing visually similar characters into common equivalents.
- *
- * OWASP ASVS v5 V5.1.4: Unicode normalization for input validation
- * Security Constitution: Fail Loudly - normalize to detect bypass attempts
- */
-function normalizeInputString(input: unknown): string {
-  return _toString(input).normalize("NFKC");
-}
 
 /**
  * Create a safe error message that avoids leaking internal details in production.
@@ -184,10 +175,12 @@ function makeSafeError(publicMessage: string, error: unknown): string {
  * Determine canonical scheme (ensures trailing ':').
  */
 function canonicalizeScheme(s: string): string {
-  const sString = s.trim();
-  return sString.endsWith(":")
+  const normalizedScheme = normalizeInputString(s, "scheme");
+  const sString = normalizedScheme.trim();
+  const normalizedColon = normalizeInputString(":", "colon");
+  return sString.endsWith(normalizedColon)
     ? sString.toLowerCase()
-    : `${sString.toLowerCase()}:`;
+    : `${sString.toLowerCase()}${normalizedColon}`;
 }
 
 /**
@@ -208,8 +201,10 @@ const MAX_FQDN_LENGTH = 253; // Excludes optional trailing dot
 
 function canonicalizeHostname(hostname: string): string {
   // Lowercase and strip a single trailing dot to canonicalize FQDNs.
-  const lower = hostname.toLowerCase();
-  return lower.endsWith(".") ? lower.slice(0, -1) : lower;
+  const normalizedHostname = normalizeInputString(hostname, "hostname");
+  const lower = normalizedHostname.toLowerCase();
+  const normalizedDot = normalizeInputString(".", "dot");
+  return lower.endsWith(normalizedDot) ? lower.slice(0, -1) : lower;
 }
 
 function isDigit(code: number): boolean {
@@ -332,9 +327,13 @@ function parseAndValidateURLInternal(
     if (typeof urlString !== "string") {
       throw new InvalidParameterError(`${context}: URL must be a string.`);
     }
+
+    // HARDENING: Normalize URL input to prevent Unicode attacks
+    const normalizedUrlString = normalizeInputString(urlString, context);
+
     // Defense in depth: enforce an absolute maximum input length to bound processing.
     // Extremely large strings are likely malicious or erroneous; reject early.
-    if (urlString.length > MAX_URL_INPUT_LENGTH) {
+    if (normalizedUrlString.length > MAX_URL_INPUT_LENGTH) {
       throw new InvalidParameterError(
         `${context}: URL exceeds maximum allowed length (${String(MAX_URL_INPUT_LENGTH)}).`,
       );
@@ -344,21 +343,26 @@ function parseAndValidateURLInternal(
 
     // Enforce WHATWG special vs non-special scheme structure before further parsing.
     // Detect an initial scheme token `<scheme>:` ignoring leading spaces (which we reject later).
-    const firstColon = urlString.indexOf(":");
+    const normalizedColon = normalizeInputString(":", "colon");
+    const firstColon = normalizedUrlString.indexOf(normalizedColon);
     if (firstColon > 0) {
-      const schemeSlice = urlString.slice(0, firstColon);
+      const schemeSlice = normalizedUrlString.slice(0, firstColon);
       const potentialScheme = canonicalizeScheme(schemeSlice);
       // The character(s) following the scheme
-      const afterColon = urlString.slice(firstColon + 1, firstColon + 3);
+      const afterColon = normalizedUrlString.slice(
+        firstColon + 1,
+        firstColon + 3,
+      );
+      const normalizedDoubleSlash = normalizeInputString("//", "double-slash");
       if (urlHardening.enforceSpecialSchemeAuthority) {
         if (SPECIAL_SCHEMES.has(potentialScheme)) {
           // Special schemes must be followed by "//" per hardened policy.
-          if (afterColon !== "//") {
+          if (afterColon !== normalizedDoubleSlash) {
             throw new InvalidParameterError(
               `${context}: Special scheme '${potentialScheme}' must be followed by '//'`,
             );
           }
-        } else if (afterColon === "//") {
+        } else if (afterColon === normalizedDoubleSlash) {
           // Non-special schemes must not include an authority introducer.
           throw new InvalidParameterError(
             `${context}: Non-special scheme '${potentialScheme}' must not include an authority ('//').`,
@@ -366,7 +370,11 @@ function parseAndValidateURLInternal(
         }
       }
     }
-    const schemeIndex = urlString.indexOf("://");
+    const normalizedSchemeAuthority = normalizeInputString(
+      "://",
+      "scheme-authority",
+    );
+    const schemeIndex = normalizedUrlString.indexOf(normalizedSchemeAuthority);
     // Declared here so the value is available later in the function scope.
     // eslint-disable-next-line functional/no-let -- complex logic requires mutable state
     let authorityForIPv4Check = "";
@@ -817,9 +825,16 @@ type UnsafeKeyAction = "throw" | "warn" | "skip";
  * Prevents XSS and injection attacks through malicious fragments.
  */
 function validateStrictFragment(fragment: string, context: string): void {
+  // Normalize the fragment input for security validation
+  const normalizedFragment = normalizeInputString(
+    fragment,
+    `${context} fragment`,
+  );
+
   // Check for dangerous schemes in fragment - common XSS vector
   for (const scheme of DANGEROUS_SCHEMES) {
-    if (fragment.toLowerCase().includes(scheme)) {
+    const normalizedScheme = normalizeInputString(scheme, "scheme");
+    if (normalizedFragment.toLowerCase().includes(normalizedScheme)) {
       throw new InvalidParameterError(
         `Fragment contains dangerous scheme '${scheme}' in ${context}.`,
       );
@@ -839,9 +854,10 @@ function validateStrictFragment(fragment: string, context: string): void {
     "expression(",
   ];
 
-  const lowerFragment = fragment.toLowerCase();
+  const lowerFragment = normalizedFragment.toLowerCase();
   for (const pattern of dangerousPatterns) {
-    if (lowerFragment.includes(pattern)) {
+    const normalizedPattern = normalizeInputString(pattern, "pattern");
+    if (lowerFragment.includes(normalizedPattern)) {
       throw new InvalidParameterError(
         `Fragment contains potentially dangerous pattern '${pattern}' in ${context}.`,
       );

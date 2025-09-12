@@ -137,15 +137,29 @@ describe("Autofix Comprehensive Tests", () => {
       valid: [
         // Already has secure wipe in finally block
         `try {
-          const buffer = new Uint8Array(32);
+          const keyBuffer = new Uint8Array(32);
         } finally {
-          secureWipe(buffer);
+          secureWipe(keyBuffer);
         }`,
-        // Non-sensitive buffers
-        "const display = new Uint8Array(10);",
+        // Non-sensitive buffers should not trigger
+        "const displayBuffer = new Uint8Array(10);",
+        "const outputData = new Uint8Array(16);", 
+        // Non-Uint8Array types with sensitive names should not trigger
+        "const ALLOWED_TAG_KEYS = new Set(['user', 'session']);",
+        "const secretMap = new Map();", 
+        "const keyCache = new WeakMap();",
+        "const tokenList = [];",
+        "const secretConfig = { apiKey: 'value' };",
+        // String and primitive values
+        "const secretValue = 'not-a-buffer';",
+        "const keyCount = 42;",
+        // Functions that don't return buffers
+        "const keyValidator = () => true;",
+        // Already using crypto functions that return non-buffers
+        "const randomId = generateSecureIdSync();",
       ],
       invalid: [
-        // Missing secure wipe for sensitive buffer
+        // Missing secure wipe for sensitive Uint8Array
         {
           code: `function processKey() {
             const keyBuffer = new Uint8Array(32);
@@ -157,6 +171,22 @@ describe("Autofix Comprehensive Tests", () => {
               return keyBuffer;
             } finally {
               secureWipe(keyBuffer);
+            }
+          }`,
+          errors: [{ messageId: "missingSecureWipe" }]
+        },
+        // Missing secure wipe for crypto function result
+        {
+          code: `function generateSecret() {
+            const secretData = getSecureRandomBytesSync(16);
+            processSecret(secretData);
+          }`,
+          output: `function generateSecret() {
+            const secretData = getSecureRandomBytesSync(16);
+            try {
+              processSecret(secretData);
+            } finally {
+              secureWipe(secretData);
             }
           }`,
           errors: [{ messageId: "missingSecureWipe" }]
@@ -178,7 +208,39 @@ describe("Autofix Comprehensive Tests", () => {
             secureWipe(secretData);
           }`,
           errors: [{ messageId: "missingSecureWipe" }]
-        }
+        },
+        // Async crypto call
+        {
+          code: `async function processToken() {
+            const tokenBytes = await getSecureRandomBytesAsync(32);
+            return processBytes(tokenBytes);
+          }`,
+          output: `async function processToken() {
+            const tokenBytes = await getSecureRandomBytesAsync(32);
+            try {
+              return processBytes(tokenBytes);
+            } finally {
+              secureWipe(tokenBytes);
+            }
+          }`,
+          errors: [{ messageId: "missingSecureWipe" }]
+        },
+        // Different buffer types
+        {
+          code: `function handleSensitiveData() {
+            const passwordHash = new ArrayBuffer(64);
+            return hashData(passwordHash);
+          }`,
+          output: `function handleSensitiveData() {
+            const passwordHash = new ArrayBuffer(64);
+            try {
+              return hashData(passwordHash);
+            } finally {
+              secureWipe(passwordHash);
+            }
+          }`,
+          errors: [{ messageId: "missingSecureWipe" }]
+        },
       ],
     });
   });
