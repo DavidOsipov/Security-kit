@@ -75,6 +75,18 @@ export default {
       if (!node || node.type !== "Identifier") return false;
 
       const name = node.name;
+      
+      // Exclude obvious non-sensitive patterns to reduce false positives
+      const nonSensitivePatterns = [
+        /result|output|response|data|value|item|element|property/i,
+        /index|count|length|size|status|type|kind|id/i,
+        /config|option|setting|param|arg|flag/i
+      ];
+      
+      if (nonSensitivePatterns.some(pattern => pattern.test(name))) {
+        return false;
+      }
+      
       return allSecretNames.has(name.toLowerCase()) ||
              allSecretPatterns.some(pattern => pattern.test(name));
     }

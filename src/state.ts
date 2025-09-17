@@ -14,7 +14,8 @@ import {
 } from "./errors.ts";
 import { environment, isDevelopment } from "./environment.ts";
 // Use explicit process import to satisfy Deno/Node hybrid linting rules
-import process from "node:process";
+// Use namespace import to avoid relying on synthetic default (TS1259 under strict settings)
+import * as process from "node:process";
 import { Buffer } from "node:buffer";
 
 // Safe environment accessor to avoid unsafe member access on process.env

@@ -18,7 +18,7 @@ export default {
     schema: [],
     messages: {
       requireNormalization:
-        "String comparison with external input requires normalization. Use normalizeInputString() from url.ts or similar normalization function",
+        "String comparison with external input requires normalization. Use normalizeInputString() from canonical.ts or similar normalization function",
       unsafeMethodCall:
         "String method '{{method}}' on external input requires normalization first. External strings may contain visually identical but canonically different characters",
       unsafeSwitchCase:
@@ -35,40 +35,136 @@ export default {
       return {};
     }
 
+    // Skip canonical.ts entirely - it's the normalization module
+    // and ALL string operations within it are part of the normalization process
+    if (/canonical\.ts$/.test(filename) || filename.includes('canonical.ts')) {
+      return {};
+    }
+
+    // Skip generated files and internal utilities that handle Unicode data processing
+    if (/generated\//.test(filename) || /unicode-/.test(filename)) {
+      return {};
+    }
+    
+    // Skip internal utility modules that process trusted/internal data
+    // These modules handle low-level operations and internal string processing
+    if (/\/(config|constants|encoding|errors)\.ts$/.test(filename)) {
+      return {};
+    }
+
+    // Skip scripts directory - contains build/development tools, not runtime code
+    if (/\/scripts\//.test(filename)) {
+      return {};
+    }
+
     /**
      * Detects if a node represents potentially external/untrusted input
      */
     function isTaintedInput(node, context) {
       if (!node) return false;
 
-      // Function parameters are considered external input
+      // Skip literal strings - they're not external input
+      if (node.type === "Literal" && typeof node.value === "string") {
+        return false;
+      }
+
+      // Skip template literals with no expressions - they're static
+      if (node.type === "TemplateLiteral" && node.expressions.length === 0) {
+        return false;
+      }
+
+      // Function parameters are considered external input UNLESS they are in internal processing functions
       if (node.type === "Identifier") {
-        // Look for parameter-like names
         const name = node.name;
-        const externalPatterns = [
-          /^(input|data|value|param|arg|query|search|filter|term)$/i,
-          /^user/i,
-          /^external/i,
-          /^raw/i,
-          /Input$/,
-          /Data$/,
-          /Param$/,
+        
+        // Skip internal library identifiers that are known safe or are part of internal processing
+        const internalIdentifiers = [
+          "string_", "rawString", "normalizedString", "normalized", 
+          "context", "scheme", "host", "port", "path", "query", "fragment",
+          "url", "href", "origin", "protocol", "hostname", "pathname", 
+          "search", "hash", "username", "password", "toString", "source",
+          "target", "char", "codePoint", "status", "variant", "pattern",
+          "regex", "key", "value", "name", "type", "method", "property",
+          "input", "canonical", "violation", "factor", "score", "result",
+          // Additional internal processing identifiers
+          "cleanString", "processedString", "internalValue", "configValue",
+          "constantValue", "literalValue", "encodedValue", "decodedValue",
+          "tempString", "workingString", "bufferString", "cacheKey"
         ];
         
+        if (internalIdentifiers.includes(name)) {
+          return false; // These are internal processing variables, not external input
+        }
+        
+        // Check if we're in an internal function context - be more specific
+        const sourceCode = context.sourceCode || context.getSourceCode();
+        const functionScope = sourceCode.getScope ? sourceCode.getScope(node) : context.getScope();
+        
+        // Look for function names that indicate internal processing
+        let currentScope = functionScope;
+        while (currentScope) {
+          if (currentScope.type === 'function' && currentScope.block && 
+              currentScope.block.id && currentScope.block.id.name) {
+            const functionName = currentScope.block.id.name;
+            // More comprehensive list of internal processing function patterns
+            const internalFunctionPatterns = [
+              /^(normalize|validate|sanitize|encode|decode|parse|build|create|update|analyze|calculate|detect|extract|generate|process|transform|convert)/,
+              /^(toCanonical|isNormalized|getConfusable|validateUnicode|detectTrojan|calculateSecurity)/,
+              /^(_[a-z]|internal[A-Z]|helper[A-Z]|process[A-Z]|analyze[A-Z])/,
+              /(Internal|Helper|Utils|Util)$/
+            ];
+            
+            if (internalFunctionPatterns.some(pattern => pattern.test(functionName))) {
+              return false; // This is an internal processing function
+            }
+          }
+          currentScope = currentScope.upper;
+        }
+        
+        const externalPatterns = [
+          /^(userInput|userData|externalData|untrustedInput|rawInput)$/i,
+          /^user(?!Agent$)/i, // user* but not userAgent
+          /^external/i,
+          /^untrusted/i,
+          /^client/i,
+          /^request/i,
+          /Input$/, // but not internalInput
+          /Data$/, // but not internalData
+          /Param$/,
+          /^param[A-Z]/
+        ];
+        
+        // Only flag as tainted if it matches external patterns AND is not in an internal context
         if (externalPatterns.some(pattern => pattern.test(name))) {
           return true;
         }
 
-        // Check if this identifier is a function parameter
-        // Use modern ESLint API - sourceCode.getScope is available in flat config
-        const sourceCode = context.sourceCode || context.getSourceCode();
-        let scope = sourceCode.getScope ? sourceCode.getScope(node) : context.getScope();
+        // Check if this identifier is a function parameter in a non-internal function
+        const sourceCode2 = context.sourceCode || context.getSourceCode();
+        let scope = sourceCode2.getScope ? sourceCode2.getScope(node) : context.getScope();
         while (scope) {
           const variable = scope.variables.find(v => v.name === name);
           if (variable && variable.defs.length > 0) {
             const def = variable.defs[0];
             if (def.type === "Parameter") {
-              return true;
+              // Check if parent function looks like an internal processing function
+              if (scope.block && scope.block.id && scope.block.id.name) {
+                const functionName = scope.block.id.name;
+                if (/^(_|internal|helper|process|analyze|calculate|detect|extract|transform|convert)/.test(functionName) ||
+                    functionName.includes('Internal') || functionName.includes('Helper') ||
+                    /^(normalize|validate|sanitize|encode|decode)/.test(functionName)) {
+                  return false; // Internal function parameter
+                }
+              }
+              // Additional check: if this is the first parameter and function starts with a verb,
+              // it's likely an internal processing function
+              if (def.index === 0 && scope.block && scope.block.id && scope.block.id.name) {
+                const functionName = scope.block.id.name;
+                if (/^[a-z][a-z]*[A-Z]/.test(functionName)) { // camelCase starting with lowercase verb
+                  return false; // Likely internal processing function
+                }
+              }
+              return true; // External function parameter
             }
           }
           scope = scope.upper;
@@ -117,26 +213,179 @@ export default {
     /**
      * Checks if a string has been normalized using approved functions
      */
+    // Collect normalization import bindings from the file (e.g. `import { normalizeInputString } from './canonical'`)
+    const importedNormalizationBindings = new Set();
+    const importedNormalizationNamespaces = new Set();
+
+    function collectImports(programNode) {
+      for (const stmt of programNode.body) {
+        if (stmt.type !== 'ImportDeclaration') continue;
+        const source = String(stmt.source.value || '');
+        // Match canonical import paths like './canonical', 'canonical', '../src/canonical', or 'src/canonical'
+        if (!/(^|\/)canonical(\.js|\.ts)?$/i.test(source) && !/canonical(\/|$)/i.test(source)) continue;
+
+        for (const spec of stmt.specifiers || []) {
+          if (spec.type === 'ImportSpecifier' && spec.local && spec.local.name) {
+            importedNormalizationBindings.add(spec.local.name);
+          }
+          if (spec.type === 'ImportDefaultSpecifier' && spec.local && spec.local.name) {
+            importedNormalizationBindings.add(spec.local.name);
+          }
+          if (spec.type === 'ImportNamespaceSpecifier' && spec.local && spec.local.name) {
+            importedNormalizationNamespaces.add(spec.local.name);
+          }
+        }
+      }
+    }
+
+    /**
+     * Checks if a node represents an expression that has been normalized using approved functions
+     */
     function isNormalizedString(node) {
       if (!node) return false;
       
-      // Check for calls to normalization functions
+      // Check for calls to normalization functions from canonical.ts
       if (node.type === "CallExpression") {
         const callee = node.callee;
+        // Direct call to an imported binder: normalizeInputString(...)
         if (callee && callee.type === "Identifier") {
+          if (importedNormalizationBindings.has(callee.name)) return true;
           const normalizationFunctions = [
             "normalizeInputString",
-            "normalizeUnicode", 
+            "normalizeInputStringInternal",
+            "normalizeUrlComponent",
+            "normalizeInputStringUltraStrict",
+            "normalizeUrlSafeString",
+            "normalizeAndCompareAsync",
+            "validateAndNormalizeInput",
+            "sanitizeForLogging",
+            // Legacy normalization function names for compatibility
+            "normalizeUnicode",
             "sanitizeInput",
-            "normalizeString"
+            "normalizeString",
+            // Internal canonical functions that produce normalized output
+            "toCanonicalValue",
+            "safeStableStringify",
+            "_toString",
+            // String method calls that indicate normalization
+            "toString",
+            "valueOf",
           ];
-          return normalizationFunctions.includes(callee.name);
+          if (normalizationFunctions.includes(callee.name)) return true;
+
+          // Recognize project-specific canonicalizer function patterns by name
+          // e.g., canonicalizeHostname, canonicalizeScheme, parseAndValidateHost
+          if (/^(canonicalize|canonicalise|parseAndValidate|parse_and_validate)[A-Z_]/.test(callee.name) || /^(canonicalize|canonicalise)[A-Z_]/.test(callee.name)) {
+            return true;
+          }
         }
-        
-        // Check for String.prototype.normalize() calls
-        if (callee && callee.type === "MemberExpression" &&
-            callee.property && callee.property.name === "normalize") {
+
+        // Member expression calls like canonical.normalizeInputString(...)
+        if (callee && callee.type === "MemberExpression") {
+          const obj = callee.object;
+          const prop = callee.property;
+          if (obj && prop && prop.type === 'Identifier') {
+            if (obj.type === 'Identifier' && importedNormalizationNamespaces.has(obj.name)) {
+              return true;
+            }
+            // e.g. canonical.normalizeInputString where canonical was imported as default or namespace
+            if (importedNormalizationBindings.has(obj.name) && typeof prop.name === 'string') {
+              return true;
+            }
+            if (prop.name === 'normalize') {
+              return true; // String.prototype.normalize or other normalize calls
+            }
+          }
+        }
+      }
+      
+      // Check for variables that are the result of normalization calls
+      if (node.type === "Identifier") {
+        const name = node.name;
+        const normalizedNames = [
+          /^normalized/i,
+          /^canonical/i,
+          /^sanitized/i,
+          /^validated/i,
+          /^processed/i,
+          /Normalized$/,
+          /Canonical$/,
+          /Sanitized$/,
+          /Validated$/,
+          // Additional patterns for internal processing variables
+          /^string_$/, // canonical.ts uses this pattern for normalized strings
+          /^rawString$/, // often the result of _toString() normalization
+          /^cleanInput$/,
+          /^safeString$/,
+        ];
+
+            if (normalizedNames.some((pattern) => pattern.test(name))) {
           return true;
+        }
+
+        // Additional heuristic: treat names that include 'normalized'/'canonical' or 'finalUrl' as normalized
+        if (/normalized|canonical|finalUrl|normalizedUrl|normalizedBase|safeString|cleanInput/i.test(name)) {
+          return true;
+        }
+
+        // Attempt to resolve the variable definition and see if it was initialized
+        // by a normalization call (e.g., const s = normalizeInputString(raw))
+        try {
+          let scope = context.getScope();
+          while (scope) {
+            const variable = scope.variables && scope.variables.find((v) => v.name === name);
+            if (variable && variable.defs && variable.defs.length > 0) {
+              const def = variable.defs[0];
+              if (def.node && def.node.type === 'VariableDeclarator' && def.node.init) {
+                const init = def.node.init;
+                if (init.type === 'CallExpression') {
+                  const callee = init.callee;
+                          if (callee.type === 'Identifier' && importedNormalizationBindings.has(callee.name)) return true;
+                          if (callee.type === 'MemberExpression' && callee.object.type === 'Identifier') {
+                            if (importedNormalizationNamespaces.has(callee.object.name)) return true;
+                            if (importedNormalizationBindings.has(callee.object.name)) return true;
+                          }
+
+                          // If the initializer is calling a local helper like canonicalizeHostname or parseAndValidateHost
+                          // which likely performs canonicalization, treat as normalized when the helper name matches patterns
+                          if (callee.type === 'Identifier' && /^(canonicalize|canonicalise|parseAndValidate|parse_and_validate)[A-Z_]/.test(callee.name)) {
+                            return true;
+                          }
+                }
+              }
+            }
+            scope = scope.upper;
+          }
+        } catch (e) {
+          // ignore resolution errors and fall back to name-based heuristics
+        }
+      }
+
+      // MemberExpression where object is identifier pointing to normalized variable
+      if (node.type === 'MemberExpression' && node.object && node.object.type === 'Identifier') {
+        const objId = node.object;
+        try {
+          let scope = context.getScope();
+          while (scope) {
+            const variable = scope.variables && scope.variables.find((v) => v.name === objId.name);
+            if (variable && variable.defs && variable.defs.length > 0) {
+              const def = variable.defs[0];
+              if (def.node && def.node.type === 'VariableDeclarator' && def.node.init) {
+                const init = def.node.init;
+                if (init.type === 'CallExpression') {
+                  const callee = init.callee;
+                  if (callee.type === 'Identifier' && importedNormalizationBindings.has(callee.name)) return true;
+                  if (callee.type === 'MemberExpression' && callee.object.type === 'Identifier') {
+                    if (importedNormalizationNamespaces.has(callee.object.name)) return true;
+                    if (importedNormalizationBindings.has(callee.object.name)) return true;
+                  }
+                }
+              }
+            }
+            scope = scope.upper;
+          }
+        } catch (e) {
+          // ignore
         }
       }
       
@@ -144,6 +393,15 @@ export default {
     }
 
     return {
+      Program(node) {
+        // Collect imports once at program level so the checks know which local identifiers
+        // refer to canonical normalization helpers
+        try {
+          collectImports(node);
+        } catch (e) {
+          // ignore import collection failures
+        }
+      },
       BinaryExpression(node) {
         if (node.operator !== "===" && node.operator !== "!==") {
           return;

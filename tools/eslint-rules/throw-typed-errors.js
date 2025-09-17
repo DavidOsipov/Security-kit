@@ -168,6 +168,27 @@ export default {
     }
 
     /**
+     * Checks if a call expression is a factory function from errors.ts
+     */
+    function isErrorFactoryCall(callExpression) {
+      if (callExpression?.type !== "CallExpression") return false;
+      const callee = callExpression.callee;
+      
+      // Check for factory function names from errors.ts
+      const errorFactories = [
+        "makeInvalidParameterError",
+        "makeDepthBudgetExceededError", 
+        "makePayloadTooLargeError"
+      ];
+      
+      if (callee?.type === "Identifier") {
+        return errorFactories.includes(callee.name);
+      }
+      
+      return false;
+    }
+
+    /**
      * Extracts error message from throw statement for analysis
      */
     function extractErrorMessage(throwNode) {
@@ -188,6 +209,11 @@ export default {
     return {
       ThrowStatement(node) {
         const argument = node.argument;
+        
+        // Skip if throwing a factory function call (these return typed errors)
+        if (isErrorFactoryCall(argument)) {
+          return;
+        }
         
         if (argument?.type === "NewExpression") {
           const errorConstructor = argument.callee;

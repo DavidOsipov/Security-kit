@@ -81,7 +81,28 @@ export * from "./dom.ts";
 export { reportProdError } from "./reporting.ts";
 
 // Canonicalization utilities for secure API signing (shared client/server)
-export { safeStableStringify, toCanonicalValue } from "./canonical.ts";
+export {
+  safeStableStringify,
+  toCanonicalValue,
+  normalizeInputString as normalizeIdentifierString,
+  // Unicode Security APIs (Official Unicode 16.0.0 data)
+  getIdentifierRanges,
+  getIdentifierStatus,
+  getConfusables,
+  isConfusable,
+  getConfusableTargets,
+  getDataStats,
+  getUnicodeSecurityConfig,
+  setUnicodeSecurityConfig,
+  sealUnicodeSecurityConfig,
+  // Unicode types
+  type UnicodeProfile,
+  type IdentifierStatus,
+  type UnicodeRangeEntry,
+  type UnicodeConfusableEntry,
+  type UnicodeDataStats,
+  type UnicodeSecurityConfig,
+} from "./canonical.ts";
 
 // Secure LRU Cache - Standalone security-hardened cache utility
 export {

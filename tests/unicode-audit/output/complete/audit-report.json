@@ -1,0 +1,123 @@
+{
+  "profile": "complete",
+  "identifierRanges": {
+    "count": 391,
+    "totalCodepoints": 112778,
+    "statusBreakdown": {
+      "Allowed": 112778,
+      "Disallowed": 0,
+      "Restricted": 0,
+      "Obsolete": 0
+    },
+    "sampleRanges": [
+      {
+        "start": 39,
+        "end": 39,
+        "status": "Allowed"
+      },
+      {
+        "start": 45,
+        "end": 46,
+        "status": "Allowed"
+      },
+      {
+        "start": 48,
+        "end": 58,
+        "status": "Allowed"
+      },
+      {
+        "start": 65,
+        "end": 90,
+        "status": "Allowed"
+      },
+      {
+        "start": 95,
+        "end": 95,
+        "status": "Allowed"
+      },
+      {
+        "start": 97,
+        "end": 122,
+        "status": "Allowed"
+      },
+      {
+        "start": 183,
+        "end": 183,
+        "status": "Allowed"
+      },
+      {
+        "start": 192,
+        "end": 214,
+        "status": "Allowed"
+      },
+      {
+        "start": 216,
+        "end": 246,
+        "status": "Allowed"
+      },
+      {
+        "start": 248,
+        "end": 305,
+        "status": "Allowed"
+      }
+    ]
+  },
+  "confusables": {
+    "count": 7284,
+    "stringTableSize": 0,
+    "avgSourceLength": 1.484623833058759,
+    "avgTargetLength": 1.5483250961010433,
+    "sampleMappings": [
+      {
+        "source": "ǃ",
+        "target": "!"
+      },
+      {
+        "source": "ⵑ",
+        "target": "!"
+      },
+      {
+        "source": "！",
+        "target": "!"
+      },
+      {
+        "source": "‼",
+        "target": "!!"
+      },
+      {
+        "source": "⁉",
+        "target": "!?"
+      },
+      {
+        "source": "''",
+        "target": "\""
+      },
+      {
+        "source": "יי",
+        "target": "\""
+      },
+      {
+        "source": "′′",
+        "target": "\""
+      },
+      {
+        "source": "‵‵",
+        "target": "\""
+      },
+      {
+        "source": "ײ",
+        "target": "\""
+      }
+    ]
+  },
+  "binarySize": {
+    "identifierBytes": 3128,
+    "confusablesBytes": 77959,
+    "totalBytes": 81087
+  },
+  "integrity": {
+    "identifierRangesValid": true,
+    "confusablesValid": true,
+    "errors": []
+  }
+}

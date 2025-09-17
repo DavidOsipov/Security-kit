@@ -66,7 +66,8 @@ export const DANGEROUS_UNICODE_RANGES =
 // Pattern detects 4+ consecutive whitespace chars (spaces, tabs, various Unicode whitespace)
 // Rationale: No legitimate input needs 4+ consecutive whitespace characters
 // This prevents: DoS attacks, layout manipulation, normalization bypass attempts
-export const EXCESSIVE_WHITESPACE = /[ \t\r\n\u00A0\u2000-\u200B\u2028\u2029\u202F\u205F\u3000]{4,}/u;
+export const EXCESSIVE_WHITESPACE =
+  /[ \t\r\n\u00A0\u2000-\u200B\u2028\u2029\u202F\u205F\u3000]{4,}/u;
 
 // Suspicious repetitive patterns - detect potential layout manipulation attacks
 // Pattern detects repeating sequences that could be used for visual spoofing or DoS
@@ -78,7 +79,27 @@ export const SUSPICIOUS_REPETITIVE_PATTERNS = /(.{1,3}[ \t]+){4,}/u;
 // can change downstream parsing semantics (host splitting, path traversal, query
 // injection). We fail CLOSED if NFKC introduces any that were absent originally.
 // ASVS L3: canonicalization must not create new unsafe separators.
-export const STRUCTURAL_RISK_CHARS = /[/\\:@#?&=%<>"']/u;
+// Enhanced for OWASP ASVS L3: Added shell injection metacharacters
+export const STRUCTURAL_RISK_CHARS = /[/\\:@#?&=%<>"'`$|;(){}[\]~*!]/u;
+
+// Shell injection metacharacters specifically - subset of STRUCTURAL_RISK_CHARS
+// OWASP ASVS L3 V5.3.4: Command injection prevention
+export const SHELL_INJECTION_CHARS = /[`$|;&(){}[\]~*!]/u;
+
+// Shell injection metacharacters that must NEVER be allowed in normalized output
+// OWASP ASVS L3 V5.3.4: Input validation must prevent command injection attacks
+// These characters enable various shell injection attack vectors:
+// ` (backticks): Command substitution
+// $ (dollar): Variable expansion, command substitution ($(...))
+// | (pipe): Command chaining
+// ; (semicolon): Command separation
+// & (ampersand): Background execution, AND operator
+// ( ) (parentheses): Subshells, command grouping
+// { } (braces): Command grouping, variable expansion
+// [ ] (brackets): Test commands, pattern matching
+// ~ (tilde): Home directory expansion
+// * (asterisk): Glob patterns
+// ! (exclamation): History expansion (bash)
 /**
  * postMessage JSON / structured payload depth & size caps.
  * These are centralized here (instead of in postMessage.ts) to ensure
@@ -1415,6 +1436,10 @@ export type CanonicalConfig = {
   readonly maxTopLevelArrayLength: number;
   /** Maximum traversal depth budget (optional, reserved for future use). */
   readonly maxDepth?: number | undefined;
+  /** Policy for handling circular references encountered during canonicalization. Fail (throw) by default for fail-loud posture. */
+  readonly circularPolicy: 'fail' | 'annotate';
+  /** Hard wall-clock budget in milliseconds for a single canonicalization traversal (defense-in-depth against pathological proxies). */
+  readonly traversalTimeBudgetMs: number;
 };
 
 /* eslint-disable functional/no-let -- runtime configuration */
@@ -1425,6 +1450,8 @@ const DEFAULT_CANONICAL_CONFIG: CanonicalConfig = {
   // 256 is intentionally conservative for typical JSON-like payloads while
   // preventing extremely deep adversarial nesting.
   maxDepth: 256,
+  circularPolicy: 'fail',
+  traversalTimeBudgetMs: 25, // ~ one event-loop slice; tuned for typical payloads
 };
 
 let _canonicalConfig: CanonicalConfig = DEFAULT_CANONICAL_CONFIG;
@@ -1573,10 +1600,516 @@ export function setCanonicalConfig(cfg: Partial<CanonicalConfig>): void {
     }
   }
 
+  if (cfg.circularPolicy !== undefined) {
+    if (cfg.circularPolicy !== 'fail' && cfg.circularPolicy !== 'annotate') {
+      throw new InvalidParameterError('circularPolicy must be "fail" or "annotate".');
+    }
+  }
+
+  if (cfg.traversalTimeBudgetMs !== undefined) {
+    if (
+      typeof cfg.traversalTimeBudgetMs !== 'number' ||
+      !Number.isFinite(cfg.traversalTimeBudgetMs) ||
+      cfg.traversalTimeBudgetMs <= 0
+    ) {
+      throw new InvalidParameterError('traversalTimeBudgetMs must be a positive finite number.');
+    }
+    const MAX_TRAVERSAL_BUDGET_MS = 5_000; // upper bound clamp (5s)
+    if (cfg.traversalTimeBudgetMs > MAX_TRAVERSAL_BUDGET_MS) {
+      cfg.traversalTimeBudgetMs = MAX_TRAVERSAL_BUDGET_MS; // eslint-disable-line no-param-reassign -- intentional clamping for DoS resilience
+    }
+  }
+
   _canonicalConfig = { ..._canonicalConfig, ...cfg };
 }
 
 // Test helper to reset canonical config to defaults.
 export function _resetCanonicalConfigForTests(): void {
   _canonicalConfig = DEFAULT_CANONICAL_CONFIG;
+}
+
+// ====================== Unicode Security Configuration =======================
+
+/**
+ * Unicode security configuration controls the loading and processing of
+ * Unicode 16.0.0 data for enhanced security validation.
+ */
+export type UnicodeSecurityConfig = {
+  /**
+   * Controls which Unicode data modules to load based on environment.
+   * 'minimal': Load only basic identifier validation (frontend-optimized, ~4KB)
+   * 'standard': Load identifier status + compact confusables (backend default, ~20KB)
+   * 'complete': Load full confusables mapping (~86KB, research/analysis use)
+   */
+  readonly dataProfile: "minimal" | "standard" | "complete";
+
+  /**
+   * Enable lazy loading of Unicode data. When true, data is loaded on first use
+   * rather than at import time. Reduces initial bundle size but adds async overhead.
+   */
+  readonly lazyLoad: boolean;
+
+  /**
+   * Maximum Unicode input length for security validation (characters).
+   * Prevents DoS attacks via oversized Unicode processing.
+   */
+  readonly maxInputLength: number;
+
+  /**
+   * Enable advanced confusables detection using official Unicode data.
+   * When false, falls back to basic pattern-based homoglyph detection.
+   */
+  readonly enableConfusablesDetection: boolean;
+
+  /**
+   * Cache processed Unicode validation results in memory.
+   * Improves performance but increases memory usage.
+   */
+  readonly enableValidationCache: boolean;
+  /**
+   * Enable lightweight cumulative Unicode risk scoring (defense-in-depth).
+   * When true, normalization can aggregate multiple soft signals (expansion ratio,
+   * homoglyph mixing, combining density, low entropy) and optionally block if
+   * cumulative score crosses the configured block threshold. Defaults to false
+   * to preserve prior strict single-trigger failure semantics.
+   */
+  readonly enableRiskScoring: boolean;
+  /** Score at which a dev warning is logged (no throw). */
+  readonly riskWarnThreshold: number;
+  /** Score at or above which a SecurityValidationError is thrown. */
+  readonly riskBlockThreshold: number;
+  /** Optional observer hook invoked after assessment (NOT called on ASCII fast-path). */
+  readonly onRiskAssessment?:
+    | ((detail: {
+        readonly score: number;
+        readonly metrics: readonly {
+          readonly id: string;
+          readonly score: number;
+          readonly triggered: boolean;
+        }[];
+        readonly primaryThreat: string;
+        readonly context: string;
+      }) => void)
+    | undefined;
+  /**
+   * Enable blocking of raw shell metacharacters even if they are not introduced by normalization.
+   * When true, inputs containing shell metacharacters (`, $, |, ;, &, (), {}, [], ~, *, !) are blocked
+   * regardless of whether they appear in the raw input or are introduced during normalization.
+   * This provides additional defense against direct shell injection vectors. Defaults to false.
+   */
+  readonly blockRawShellChars: boolean;
+  /**
+   * When false, security validation errors redact specific character details
+   * (e.g., lists of offending Bidi or invisible characters) to reduce feedback
+   * that could aid iterative bypass attempts. Defaults to true in development
+   * for debuggability and false in production for OWASP ASVS L3 error handling
+   * (avoid leaking precise rejection reasons).
+   */
+  readonly detailedErrorMessages: boolean;
+  /**
+   * Optional per‑metric weight overrides for the Unicode cumulative risk
+   * assessment engine. Keys must correspond to metric ids defined in
+   * UNICODE_RISK_METRICS_SPEC (canonical.ts). Values must be non‑negative
+   * integers. Omitted keys fall back to default weights. This allows
+   * environment‑specific tuning without code modification while still
+   * permitting sealing via sealUnicodeSecurityConfig().
+   */
+  readonly riskMetricWeights?: Readonly<Record<string, number>> | undefined;
+  /**
+   * Hard rejection flag for bidirectional control characters (Trojan Source class).
+   * Default: true. In production this flag cannot be disabled unless an explicit
+   * allow override (allowBidiInProduction) is provided before sealing. Disabling
+   * weakens OWASP ASVS L3 protections and is strongly discouraged.
+   */
+  readonly rejectBidiControls: boolean;
+  /**
+   * Reject invisible / zero-width characters that conceal content. Default true.
+   * May be disabled only in non-production for specialized internationalization
+   * pipelines that pre-sanitize content elsewhere.
+   */
+  readonly rejectInvisibleChars: boolean;
+  /**
+   * Reject structural delimiter introduction exclusively caused by normalization.
+   * Default true. Disabling allows normalization to introduce characters like '/', ':', '@'.
+   * This MUST remain enabled in production.
+   */
+  readonly rejectIntroducedStructuralChars: boolean;
+  /**
+   * Reject characters in dangerous / non-character / private-use ranges. Default true.
+   */
+  readonly rejectDangerousRanges: boolean;
+  /**
+   * Require Unicode binary data integrity verification (header + hash/signature) before use.
+   * Default: true in production, false in development until full signature pipeline is wired.
+   * When enabled but verification cannot be performed, loading fails closed.
+   */
+  readonly requireUnicodeDataIntegrity: boolean;
+  /**
+   * Explicit, narrow override to permit bidi controls in production. Must be set consciously;
+   * presence of this flag with value true allows rejectBidiControls=false in production.
+   * Other rejection flags have no equivalent override to reduce accidental weakening.
+   */
+  readonly allowBidiInProduction?: boolean | undefined;
+  /**
+   * Hash algorithm used for Unicode binary data integrity verification. While the
+   * current implementation performs only header/sanity checks (signature pipeline pending),
+   * this setting future‑proofs the API so pinned digests (or signatures) can be compared
+   * using a 64‑bit optimized algorithm. Default: 'SHA-384' (often faster than SHA-256 on
+   * 64‑bit CPUs for payloads > ~32KB and provides larger security margin). Accepted values:
+   * 'SHA-256' | 'SHA-384' | 'SHA-512'.
+   */
+  readonly integrityHashAlgorithm: 'SHA-256' | 'SHA-384' | 'SHA-512';
+  /**
+   * Build an in-memory index (Map<char, string[]>) for confusable lookups to achieve
+   * amortized O(1) isConfusable/getConfusableTargets operations. Enabled by default
+   * when confusables detection is on in production; can be disabled to save ~ a few KB
+   * and minor construction time during first access.
+   */
+  readonly enableConfusableIndex?: boolean | undefined;
+  /** Maximum allowed overall combining character ratio before hard rejection (DoS / spoofing). Default 0.3. */
+  readonly maxCombiningRatio: number;
+  /** Minimum total length before combining ratio check enforced. Default 20. */
+  readonly minCombiningRatioScanLength: number;
+  /** Idempotency verification mode for NFKC normalization. */
+  readonly normalizationIdempotencyMode: 'off' | 'sample' | 'always';
+  /** Sampling rate (1 in N inputs) when mode === 'sample'. Default 64. */
+  readonly normalizationIdempotencySampleRate: number;
+};
+
+/* eslint-disable functional/no-let -- controlled mutable configuration */
+let _unicodeSecurityConfig: UnicodeSecurityConfig = {
+  dataProfile: environment.isProduction ? "standard" : "minimal",
+  lazyLoad: !environment.isProduction, // eager load in production for predictable performance
+  maxInputLength: 2048, // aligned with MAX_CANONICAL_INPUT_LENGTH_BYTES
+  enableConfusablesDetection: true,
+  enableValidationCache: !environment.isProduction, // avoid memory overhead in production by default
+  enableRiskScoring: false,
+  riskWarnThreshold: 40,
+  riskBlockThreshold: 60,
+  onRiskAssessment: undefined,
+  blockRawShellChars: false,
+  detailedErrorMessages: !environment.isProduction,
+  riskMetricWeights: undefined,
+  rejectBidiControls: true,
+  rejectInvisibleChars: true,
+  rejectIntroducedStructuralChars: true,
+  rejectDangerousRanges: true,
+  requireUnicodeDataIntegrity: environment.isProduction,
+  allowBidiInProduction: undefined,
+  integrityHashAlgorithm: 'SHA-384',
+  enableConfusableIndex: true,
+  maxCombiningRatio: 0.3,
+  minCombiningRatioScanLength: 20,
+  normalizationIdempotencyMode: 'sample',
+  normalizationIdempotencySampleRate: 64,
+};
+/* eslint-enable functional/no-let */
+
+/* eslint-disable functional/no-let */
+let _unicodeSecurityConfigSealed = false;
+/* eslint-enable functional/no-let */
+
+export function getUnicodeSecurityConfig(): UnicodeSecurityConfig {
+  return Object.freeze({ ..._unicodeSecurityConfig });
+}
+
+export function setUnicodeSecurityConfig(
+  cfg: Partial<UnicodeSecurityConfig>,
+): void {
+  if (_unicodeSecurityConfigSealed || getCryptoState() === CryptoState.Sealed) {
+    throw new InvalidConfigurationError(
+      "Configuration is sealed and cannot be changed.",
+    );
+  }
+
+  if (cfg.dataProfile !== undefined) {
+    const validProfiles = new Set(["minimal", "standard", "complete"] as const);
+    if (!validProfiles.has(cfg.dataProfile)) {
+      throw new InvalidParameterError(
+        "dataProfile must be 'minimal', 'standard', or 'complete'.",
+      );
+    }
+  }
+
+  if (cfg.lazyLoad !== undefined && typeof cfg.lazyLoad !== "boolean") {
+    throw new InvalidParameterError("lazyLoad must be a boolean.");
+  }
+
+  if (cfg.maxInputLength !== undefined) {
+    if (
+      typeof cfg.maxInputLength !== "number" ||
+      !Number.isInteger(cfg.maxInputLength) ||
+      cfg.maxInputLength <= 0
+    ) {
+      throw new InvalidParameterError(
+        "maxInputLength must be a positive integer.",
+      );
+    }
+  }
+
+  if (cfg.maxCombiningRatio !== undefined) {
+    if (
+      typeof cfg.maxCombiningRatio !== "number" ||
+      cfg.maxCombiningRatio <= 0 ||
+      cfg.maxCombiningRatio > 0.9
+    ) {
+      throw new InvalidParameterError(
+        "maxCombiningRatio must be a number in (0, 0.9].",
+      );
+    }
+  }
+
+  if (cfg.minCombiningRatioScanLength !== undefined) {
+    if (
+      typeof cfg.minCombiningRatioScanLength !== "number" ||
+      !Number.isInteger(cfg.minCombiningRatioScanLength) ||
+      cfg.minCombiningRatioScanLength < 1
+    ) {
+      throw new InvalidParameterError(
+        "minCombiningRatioScanLength must be a positive integer.",
+      );
+    }
+  }
+
+  if (cfg.normalizationIdempotencyMode !== undefined) {
+    if (
+      !["off", "sample", "always"].includes(
+        cfg.normalizationIdempotencyMode,
+      )
+    ) {
+      throw new InvalidParameterError(
+        "normalizationIdempotencyMode must be off | sample | always",
+      );
+    }
+  }
+
+  if (cfg.normalizationIdempotencySampleRate !== undefined) {
+    if (
+      typeof cfg.normalizationIdempotencySampleRate !== "number" ||
+      !Number.isInteger(cfg.normalizationIdempotencySampleRate) ||
+      cfg.normalizationIdempotencySampleRate < 1
+    ) {
+      throw new InvalidParameterError(
+        "normalizationIdempotencySampleRate must be a positive integer.",
+      );
+    }
+  }
+
+  if (
+    cfg.enableConfusablesDetection !== undefined &&
+    typeof cfg.enableConfusablesDetection !== "boolean"
+  ) {
+    throw new InvalidParameterError(
+      "enableConfusablesDetection must be a boolean.",
+    );
+  }
+
+  if (
+    cfg.enableValidationCache !== undefined &&
+    typeof cfg.enableValidationCache !== "boolean"
+  ) {
+    throw new InvalidParameterError("enableValidationCache must be a boolean.");
+  }
+
+  if (cfg.enableRiskScoring !== undefined && typeof cfg.enableRiskScoring !== 'boolean') {
+    throw new InvalidParameterError('enableRiskScoring must be a boolean.');
+  }
+  if (cfg.riskWarnThreshold !== undefined) {
+    if (typeof cfg.riskWarnThreshold !== 'number' || cfg.riskWarnThreshold < 0) {
+      throw new InvalidParameterError('riskWarnThreshold must be a non-negative number.');
+    }
+  }
+  if (cfg.riskBlockThreshold !== undefined) {
+    if (typeof cfg.riskBlockThreshold !== 'number' || cfg.riskBlockThreshold < 0) {
+      throw new InvalidParameterError('riskBlockThreshold must be a non-negative number.');
+    }
+  }
+  if (cfg.riskBlockThreshold !== undefined && cfg.riskWarnThreshold !== undefined) {
+    if (cfg.riskBlockThreshold < cfg.riskWarnThreshold) {
+      throw new InvalidParameterError('riskBlockThreshold must be >= riskWarnThreshold.');
+    }
+  }
+  if (cfg.blockRawShellChars !== undefined && typeof cfg.blockRawShellChars !== 'boolean') {
+    throw new InvalidParameterError('blockRawShellChars must be a boolean.');
+  }
+  if (cfg.detailedErrorMessages !== undefined && typeof cfg.detailedErrorMessages !== 'boolean') {
+    throw new InvalidParameterError('detailedErrorMessages must be a boolean.');
+  }
+  if (cfg.riskMetricWeights !== undefined) {
+    if (cfg.riskMetricWeights === null || typeof cfg.riskMetricWeights !== 'object') {
+      throw new InvalidParameterError('riskMetricWeights must be an object map.');
+    }
+    for (const [k, v] of Object.entries(cfg.riskMetricWeights)) {
+      if (typeof v !== 'number' || v < 0) {
+        throw new InvalidParameterError(`riskMetricWeights[${k}] must be a non-negative number.`);
+      }
+    }
+  }
+  if (cfg.rejectBidiControls !== undefined && typeof cfg.rejectBidiControls !== 'boolean') {
+    throw new InvalidParameterError('rejectBidiControls must be a boolean.');
+  }
+  if (cfg.rejectInvisibleChars !== undefined && typeof cfg.rejectInvisibleChars !== 'boolean') {
+    throw new InvalidParameterError('rejectInvisibleChars must be a boolean.');
+  }
+  if (cfg.rejectIntroducedStructuralChars !== undefined && typeof cfg.rejectIntroducedStructuralChars !== 'boolean') {
+    throw new InvalidParameterError('rejectIntroducedStructuralChars must be a boolean.');
+  }
+  if (cfg.rejectDangerousRanges !== undefined && typeof cfg.rejectDangerousRanges !== 'boolean') {
+    throw new InvalidParameterError('rejectDangerousRanges must be a boolean.');
+  }
+  if (cfg.requireUnicodeDataIntegrity !== undefined && typeof cfg.requireUnicodeDataIntegrity !== 'boolean') {
+    throw new InvalidParameterError('requireUnicodeDataIntegrity must be a boolean.');
+  }
+  if (cfg.allowBidiInProduction !== undefined && typeof cfg.allowBidiInProduction !== 'boolean') {
+    throw new InvalidParameterError('allowBidiInProduction must be a boolean.');
+  }
+  if (cfg.integrityHashAlgorithm !== undefined) {
+    if (!['SHA-256','SHA-384','SHA-512'].includes(cfg.integrityHashAlgorithm)) {
+      throw new InvalidParameterError('integrityHashAlgorithm must be one of SHA-256 | SHA-384 | SHA-512');
+    }
+  }
+  if (cfg.enableConfusableIndex !== undefined && typeof cfg.enableConfusableIndex !== 'boolean') {
+    throw new InvalidParameterError('enableConfusableIndex must be a boolean.');
+  }
+
+  _unicodeSecurityConfig = { ..._unicodeSecurityConfig, ...cfg };
+
+  if (cfg.enableRiskScoring !== undefined) {
+    if (typeof cfg.enableRiskScoring !== "boolean") {
+      throw new InvalidParameterError("enableRiskScoring must be a boolean.");
+    }
+  }
+  const checkThreshold = (name: string, v: unknown): void => {
+    if (v === undefined) return;
+    if (typeof v !== "number" || !Number.isInteger(v) || v < 0 || v > 10_000) {
+      throw new InvalidParameterError(`${name} must be an integer 0..10000.`);
+    }
+  };
+  checkThreshold("riskWarnThreshold", cfg.riskWarnThreshold);
+  checkThreshold("riskBlockThreshold", cfg.riskBlockThreshold);
+  if (
+    cfg.riskWarnThreshold !== undefined &&
+    cfg.riskBlockThreshold !== undefined &&
+    cfg.riskWarnThreshold > cfg.riskBlockThreshold
+  ) {
+    throw new InvalidParameterError(
+      "riskWarnThreshold must be <= riskBlockThreshold.",
+    );
+  }
+  if (cfg.onRiskAssessment !== undefined) {
+    if (typeof cfg.onRiskAssessment !== "function") {
+      throw new InvalidParameterError("onRiskAssessment must be a function.");
+    }
+  }
+  if (cfg.blockRawShellChars !== undefined) {
+    if (typeof cfg.blockRawShellChars !== "boolean") {
+      throw new InvalidParameterError("blockRawShellChars must be a boolean.");
+    }
+  }
+  if (cfg.detailedErrorMessages !== undefined) {
+    if (typeof cfg.detailedErrorMessages !== "boolean") {
+      throw new InvalidParameterError(
+        "detailedErrorMessages must be a boolean.",
+      );
+    }
+  }
+  if (cfg.riskMetricWeights !== undefined) {
+    if (
+      cfg.riskMetricWeights === null ||
+      typeof cfg.riskMetricWeights !== "object" ||
+      Array.isArray(cfg.riskMetricWeights)
+    ) {
+      throw new InvalidParameterError(
+        "riskMetricWeights must be an object mapping metric ids to weights.",
+      );
+    }
+    for (const [k, v] of Object.entries(cfg.riskMetricWeights)) {
+      if (typeof v !== "number" || !Number.isInteger(v) || v < 0 || v > 10_000) {
+        throw new InvalidParameterError(
+          `riskMetricWeights.${k} must be an integer 0..10000.`,
+        );
+      }
+    }
+  }
+
+  // Validation for new rejection / integrity flags
+  const boolKeys: (keyof Partial<UnicodeSecurityConfig>)[] = [
+    "rejectBidiControls",
+    "rejectInvisibleChars",
+    "rejectIntroducedStructuralChars",
+    "rejectDangerousRanges",
+    "requireUnicodeDataIntegrity",
+    "allowBidiInProduction",
+  ];
+  for (const k of boolKeys) {
+    if (Object.hasOwn(cfg, k) && (cfg as Record<string, unknown>)[k] !== undefined) {
+      const v = (cfg as Record<string, unknown>)[k];
+      if (typeof v !== "boolean") {
+        throw new InvalidParameterError(`${String(k)} must be a boolean.`);
+      }
+    }
+  }
+  if (cfg.integrityHashAlgorithm !== undefined) {
+    const allowed = new Set(['SHA-256','SHA-384','SHA-512']);
+    if (!allowed.has(cfg.integrityHashAlgorithm)) {
+      throw new InvalidParameterError('integrityHashAlgorithm must be one of SHA-256|SHA-384|SHA-512.');
+    }
+  }
+  if (cfg.enableConfusableIndex !== undefined && typeof cfg.enableConfusableIndex !== 'boolean') {
+    throw new InvalidParameterError('enableConfusableIndex must be a boolean.');
+  }
+
+  // Production hardening: prevent disabling critical rejections unless explicit override for bidi only.
+  if (environment.isProduction) {
+    // If attempting to disable bidi controls in production without override, reject.
+    if (
+      cfg.rejectBidiControls === false &&
+      !(_unicodeSecurityConfig.allowBidiInProduction || cfg.allowBidiInProduction === true)
+    ) {
+      throw new InvalidParameterError(
+        "rejectBidiControls cannot be disabled in production without allowBidiInProduction override.",
+      );
+    }
+    // Structural, invisible, dangerous ranges cannot be disabled in production at all.
+    if (cfg.rejectInvisibleChars === false) {
+      throw new InvalidParameterError(
+        "rejectInvisibleChars cannot be disabled in production.",
+      );
+    }
+    if (cfg.rejectIntroducedStructuralChars === false) {
+      throw new InvalidParameterError(
+        "rejectIntroducedStructuralChars cannot be disabled in production.",
+      );
+    }
+    if (cfg.rejectDangerousRanges === false) {
+      throw new InvalidParameterError(
+        "rejectDangerousRanges cannot be disabled in production.",
+      );
+    }
+    // Integrity verification must remain enabled in production.
+    if (cfg.requireUnicodeDataIntegrity === false) {
+      throw new InvalidParameterError(
+        "requireUnicodeDataIntegrity cannot be disabled in production.",
+      );
+    }
+  }
+
+  _unicodeSecurityConfig = { ..._unicodeSecurityConfig, ...cfg };
+}
+
+export function sealUnicodeSecurityConfig(): void {
+  _unicodeSecurityConfigSealed = true;
+}
+
+/**
+ * Seal only the Unicode security configuration (weights, verbosity, etc.) while
+ * allowing other library configuration to remain mutable until the global seal.
+ * This supports staged initialization patterns where Unicode policy is locked
+ * earlier (e.g. before loading untrusted modules) per OWASP ASVS V14.2.
+ */
+export function sealUnicodeSecurityConfig(): void {
+  _unicodeSecurityConfigSealed = true;
+  // Freeze the current object to provide a shallow immutability barrier in case
+  // references were retained (defense‑in‑depth; callers should treat config as immutable).
+  Object.freeze(_unicodeSecurityConfig);
 }

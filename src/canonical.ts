@@ -1,12 +1,56 @@
-import { InvalidParameterError } from "./errors.ts";
+// SPDX-License-Identifier: LGPL-3.0-or-later
+// SPDX-FileCopyrightText: © 2025 David Osipov <personal@david-osipov.vision>
+/**
+ * Security Kit Canonicalization & Unicode Normalization (Option A Scope)
+ * ---------------------------------------------------------------------
+ * This module deliberately focuses ONLY on:
+ *   - Safe Unicode NFKC normalization
+ *   - Detection/rejection of: Bidi controls, invisibles, dangerous ranges,
+ *     excessive combining marks, normalization expansion anomalies, and
+ *     structural delimiter introduction post-normalization.
+ *   - Deterministic canonical object/value serialization utilities.
+ *
+ * Removed (previous experimental WAF responsibilities):
+ *   - Generic XSS / <script> pattern blocking
+ *   - SQLi / shell / path traversal regex heuristics
+ *   - Multi-pass percent / URL decoding & unified scoring engine
+ *   - Public unsafe bypass helper (normalizeInputStringInternal)
+ *
+ * Rationale (Security Constitution Pillars):
+ *   Pillar #1 (Verifiable Security): Narrow scope => easier to reason about & test.
+ *   Pillar #2 (Hardened Simplicity): Eliminates brittle heuristic filters.
+ *   Pillar #3 (Ergonomic API): Single safe normalization path; no insecure variants.
+ *   Pillar #4 (Provable Correctness): Enables high-confidence adversarial & mutation tests
+ *   without exploding combinatorial surface of unrelated attack classes.
+ *
+ * Consumers MUST layer dedicated defenses for context-specific threats:
+ *   - HTML / DOM sanitization: use the Sanitizer utilities (src/sanitizer.ts)
+ *   - SQL injection: use parameterized queries at the data layer
+ *   - Shell command safety: avoid shell concat; use spawn with argv arrays
+ *   - Path traversal: validate normalized filesystem paths separately
+ *
+ * Any feature request to re-expand this file should first justify why it
+ * cannot live in a dedicated, testable module with clear threat boundaries.
+ */
+import {
+  InvalidParameterError,
+  CircuitBreakerError,
+  makeInvalidParameterError,
+  makeDepthBudgetExceededError,
+  SecurityValidationError,
+  CanonicalizationDepthError,
+  CanonicalizationTraversalError,
+} from "./errors.ts";
 import { SHARED_ENCODER } from "./encoding.ts";
 import { isForbiddenKey } from "./constants.ts";
 import {
   secureCompareAsync,
   secureDevLog as secureDevelopmentLog,
+  emitMetric,
 } from "./utils.ts";
 import {
   getCanonicalConfig,
+  getUnicodeSecurityConfig,
   MAX_CANONICAL_INPUT_LENGTH_BYTES,
   MAX_NORMALIZED_LENGTH_RATIO,
   MAX_COMBINING_CHARS_PER_BASE,
@@ -15,345 +59,436 @@ import {
   HOMOGLYPH_SUSPECTS,
   DANGEROUS_UNICODE_RANGES,
   STRUCTURAL_RISK_CHARS,
+  SHELL_INJECTION_CHARS,
 } from "./config.ts";
+// Public Unicode data exports are re-exported later; we don't need to import them here.
+// (Removed unused placeholder import for UnicodeDataStats to keep file lint-clean.)
 
-// Sentinel to mark nodes currently under processing in the cache
+// ================= Option A Core Helpers (restored after refactor) =================
+
+// Sentinel to mark nodes currently under processing in the cache (used by canonicalization)
 const PROCESSING = Symbol("__processing");
 
-// (internal helpers removed)
+// ================= Unicode Risk Assessment (OWASP ASVS L3) =================
+// Centralized Unicode / structural cumulative risk scoring for normalization.
+// Immutable, side-effect-free assessment to satisfy functional & security lint rules.
+// All scoring signals are soft (hard fails still enforced earlier in canonical path).
+
+export type UnicodeRiskMetric = {
+  readonly id: string;
+  readonly weight: number; // assigned if triggered
+  readonly triggered: boolean;
+  readonly detail?: unknown;
+};
+
+export type UnicodeRiskAssessment = {
+  readonly total: number;
+  readonly primaryThreat: string;
+  readonly metrics: readonly UnicodeRiskMetric[];
+  /** Schema version for the Unicode risk assessment shape (future‑proofing & auditability). */
+  readonly schemaVersion: typeof UNICODE_RISK_ASSESSMENT_SCHEMA_VERSION;
+};
+
+// Centralized spec for Unicode risk metrics (Pillar #1 transparency). Tests can
+// assert stability; changing weights requires updating rationale comment.
+export const UNICODE_RISK_METRICS_SPEC: ReadonlyArray<{
+  readonly id: string;
+  readonly weight: number;
+  readonly rationale: string;
+}> = Object.freeze([
+  {
+    id: "bidi",
+    weight: 40,
+    rationale: "Bidirectional control characters enable Trojan Source / visual reordering attacks.",
+  },
+  {
+    id: "invisibles",
+    weight: 20,
+    rationale: "Invisible/zero-width chars hide content or delimiters; medium severity vs bidi.",
+  },
+  {
+    id: "expansionSoft",
+    weight: 15,
+    rationale: "Moderate normalization expansion may indicate mild obfuscation without surpassing hard fail ratio.",
+  },
+  {
+    id: "combiningDensity",
+    weight: 20,
+    rationale: "High combining mark density strains rendering & can conceal characters.",
+  },
+  {
+    id: "combiningRun",
+    weight: 15,
+    rationale: "Localized spike of combining marks may indicate targeted spoofing.",
+  },
+  {
+    id: "mixedScriptHomoglyph",
+    weight: 25,
+    rationale: "Mixed scripts with known homoglyph suspects raise phishing/impersonation risk.",
+  },
+  {
+    id: "lowEntropy",
+    weight: 15,
+    rationale: "Low-entropy dominated strings often part of obfuscation padding or flooding.",
+  },
+  {
+    id: "introducedStructural",
+    weight: 35,
+    rationale: "Structural delimiter introduced only after normalization can alter parsing semantics.",
+  },
+] as const);
+
+// Helper to test combining marks category M (Mn/Mc/Me) cheaply.
+const COMBINING_RE = /^\p{M}$/u;
+
+// === Precompiled regexes & immutable sets (ASVS V5.3.4 safe regex usage) ===
+const RE_BIDI_GLOBAL = new RegExp(BIDI_CONTROL_CHARS, "gu");
+const RE_INVISIBLE_GLOBAL = new RegExp(INVISIBLE_CHARS, "gu");
+const RE_SHELL_GLOBAL = new RegExp(SHELL_INJECTION_CHARS, "gu");
+
+// Static structural risk character list (explicit, auditable; no runtime derivation)
+const STRUCTURAL_RISK_CHAR_LIST: readonly string[] = Object.freeze([
+  "/",
+  "\\",
+  ":",
+  "@",
+  "#",
+  "?",
+  "&",
+  "=",
+  "%",
+  "<",
+  ">",
+  '"',
+  "'",
+  "`",
+  "$",
+  "|",
+  ";",
+  "(",
+  ")",
+  "{",
+  "}",
+  "[",
+  "]",
+  "~",
+  "*",
+  "!",
+]);
+const STRUCTURAL_RISK_CHARS_SET: ReadonlySet<string> = new Set(
+  STRUCTURAL_RISK_CHAR_LIST,
+);
+export const __test_structuralRiskChars = STRUCTURAL_RISK_CHAR_LIST;
+
+// (Removed legacy correlation hash constants – hashing replaced by marker run-length encoding.)
+
+function computeCombiningRatio(s: string): {
+  readonly ratio: number;
+  readonly maxRun: number;
+} {
+  let combining = 0;
+  let currentRun = 0;
+  let maxRun = 0;
+  for (const ch of s) {
+    if (COMBINING_RE.test(ch)) {
+      combining++;
+      currentRun++;
+      if (currentRun > maxRun) maxRun = currentRun;
+    } else {
+      currentRun = 0;
+    }
+  }
+  const ratio = s.length === 0 ? 0 : combining / s.length;
+  return Object.freeze({ ratio, maxRun });
+}
+
+function computeLowEntropy(s: string): boolean {
+  // Heuristic intentionally lightweight (non-cryptographic). Two triggers:
+  // 1. Single character dominates >50% of length (original heuristic).
+  // 2. Cumulative top <=4 characters account for >=80% of length.
+  // Only applied for reasonably large inputs (>=40) to avoid noise.
+  if (s.length < 40) return false;
+  const counts = new Map<string, number>();
+  let maxSingle = 0;
+  // Early termination: once remaining length cannot reduce top coverage
+  // below threshold, we can decide outcome.
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i] as string;
+    const next = (counts.get(ch) ?? 0) + 1;
+    counts.set(ch, next);
+    if (next > maxSingle) maxSingle = next;
+    if (maxSingle / s.length > 0.5) return true; // condition 1 satisfied
+    if (counts.size > 256) break; // cardinality cap (DoS bound)
+  }
+  // Condition 2: compute coverage of top four characters. This is O(k log k)
+  // for k<=256 => negligible. Avoid full map sort by partial selection.
+  const topCounts = Array.from(counts.values())
+    .sort((a, b) => b - a)
+    .slice(0, 4);
+  const coverage = topCounts.reduce((a, b) => a + b, 0) / s.length;
+  return coverage >= 0.8;
+}
+
+function detectIntroducedStructuralInternal(
+  raw: string,
+  normalized: string,
+): boolean {
+  if (raw === normalized) return false;
+  if (!STRUCTURAL_RISK_CHARS.test(normalized)) return false;
+  // Build raw presence set (bounded to risk chars only)
+  const rawSet = new Set<string>();
+  for (const ch of raw) {
+    if (STRUCTURAL_RISK_CHARS.test(ch)) rawSet.add(ch);
+  }
+  for (const ch of normalized) {
+    if (STRUCTURAL_RISK_CHARS.test(ch) && !rawSet.has(ch)) return true;
+  }
+  return false;
+}
+
+const UNICODE_RISK_ASSESSMENT_SCHEMA_VERSION = 1 as const;
+
+function assessUnicodeRisks(raw: string, normalized: string): UnicodeRiskAssessment {
+  const unicodeCfg = getUnicodeSecurityConfig();
+  // ASCII fast-path should not call this; assume at least one non-ASCII or previously validated unicode.
+  const expansionRatio = raw.length === 0 ? 1 : normalized.length / raw.length;
+  const combining = computeCombiningRatio(normalized);
+  const mixedScript =
+    /[A-Za-z]/u.test(normalized) &&
+    /\p{Letter}/u.test(normalized.replace(/[A-Za-z]/gu, "")) &&
+    HOMOGLYPH_SUSPECTS.test(normalized);
+  const lowEntropy = computeLowEntropy(normalized);
+  const introducedStructural = detectIntroducedStructuralInternal(
+    raw,
+    normalized,
+  );
+
+  const metrics: readonly UnicodeRiskMetric[] = Object.freeze(
+    UNICODE_RISK_METRICS_SPEC.map((spec): UnicodeRiskMetric => {
+      const overrideWeight = unicodeCfg.riskMetricWeights?.[spec.id];
+      const weight = typeof overrideWeight === "number" ? overrideWeight : spec.weight;
+      switch (spec.id) {
+        case "bidi":
+          return {
+            id: spec.id,
+            weight,
+            triggered:
+              BIDI_CONTROL_CHARS.test(raw) ||
+              BIDI_CONTROL_CHARS.test(normalized),
+          } as UnicodeRiskMetric;
+        case "invisibles":
+          return {
+            id: spec.id,
+            weight,
+            triggered:
+              INVISIBLE_CHARS.test(raw) || INVISIBLE_CHARS.test(normalized),
+          } as UnicodeRiskMetric;
+        case "expansionSoft":
+          return {
+            id: spec.id,
+            weight,
+            triggered:
+              expansionRatio > 1.2 &&
+              expansionRatio <= MAX_NORMALIZED_LENGTH_RATIO,
+            detail: expansionRatio,
+          } as UnicodeRiskMetric;
+        case "combiningDensity":
+          return {
+            id: spec.id,
+            weight,
+            triggered: combining.ratio > 0.2 && combining.ratio <= 0.3,
+            detail: combining.ratio,
+          } as UnicodeRiskMetric;
+        case "combiningRun":
+          return {
+            id: spec.id,
+            weight,
+            triggered: combining.maxRun > 3 && combining.maxRun <= 5,
+            detail: combining.maxRun,
+          } as UnicodeRiskMetric;
+        case "mixedScriptHomoglyph":
+          return {
+            id: spec.id,
+            weight,
+            triggered: mixedScript,
+          } as UnicodeRiskMetric;
+        case "lowEntropy":
+          return {
+            id: spec.id,
+            weight,
+            triggered: lowEntropy,
+          } as UnicodeRiskMetric;
+        case "introducedStructural":
+          return {
+            id: spec.id,
+            weight,
+            triggered: introducedStructural,
+          } as UnicodeRiskMetric;
+        default:
+          return {
+            id: spec.id,
+            weight,
+            triggered: false,
+          } as UnicodeRiskMetric;
+      }
+    }),
+  );
+
+  let total = 0;
+  let primaryThreat = "none";
+  let topWeight = -1;
+  for (const m of metrics) {
+    if (m.triggered) {
+      total += m.weight;
+      if (m.weight > topWeight) {
+        topWeight = m.weight;
+        primaryThreat = m.id;
+      }
+    }
+  }
+  return Object.freeze({
+    total,
+    primaryThreat,
+    metrics,
+    schemaVersion: UNICODE_RISK_ASSESSMENT_SCHEMA_VERSION,
+  });
+}
+
+// (Removed broader WAF/unified risk scoring. File now focuses strictly on
+// Unicode normalization & structural canonicalization.)
 
 /**
  * Convert unknown input to a string safely without triggering hostile toString() methods.
- * Enhanced for OWASP ASVS L3 with comprehensive input validation and DoS protection.
- * @internal
+ * Minimal version retained for Unicode normalization entrypoints.
  */
 function _toString(input: unknown): string {
   if (typeof input === "string") return input;
-  if (typeof input === "number") {
+  if (typeof input === "number")
     return Number.isFinite(input) ? String(input) : "";
-  }
   if (typeof input === "boolean") return String(input);
   if (typeof input === "bigint") return input.toString();
   if (input === null || input === undefined) return "";
-  // For objects, use JSON.stringify as a safe fallback that avoids
-  // calling toString() which could be a hostile getter
   try {
     const json = JSON.stringify(input);
     return typeof json === "string" ? json : "";
-  } catch {
-    return "";
+  } catch (error) {
+    try { emitMetric("unicode.serialize.unsuccessful", 1, {}); } catch { /* noop */ }
+    secureDevelopmentLog(
+      "warn",
+      "_toString",
+      "JSON serialization failed during safe coercion",
+      { error: error instanceof Error ? error.message : String(error) },
+    );
+    return "[UNSERIALIZABLE]";
   }
 }
+// ================= Unicode Security Validation (Option A focused) =================
+// Core Unicode threat detection: BIDI controls, invisibles, dangerous ranges,
+// excessive combining marks, and basic homoglyph suspicion logging. This is a
+// deliberately *narrow* scope versus prior unified WAF logic.
 
-/**
- * Validate Unicode string for security threats per OWASP ASVS L3 requirements.
- * Enhanced with Trojan Source attack detection based on Boucher & Anderson research.
- * Detects:
- * - Bidirectional control characters (visual spoofing)
- * - Invisible/zero-width characters (hidden content)
- * - Homoglyph suspects (character spoofing)
- * - Dangerous Unicode ranges (control chars, private use)
- * - Trojan Source attack patterns
- *
- * @param string_ - The string to validate
- * @param context - Context for error reporting (e.g., "URL", "fragment")
- * @throws InvalidParameterError if validation fails
- */
 function validateUnicodeSecurity(string_: string, context: string): void {
-  // Trojan Source Attack Detection: Bidirectional control characters
-  if (BIDI_CONTROL_CHARS.test(string_)) {
-    const suspiciousChars = Array.from(string_.match(BIDI_CONTROL_CHARS) || [])
-      .map(
-        (char) =>
-          `U+${char.charCodeAt(0).toString(16).toUpperCase().padStart(4, "0")}`,
-      )
-      .join(", ");
-
-    secureDevelopmentLog(
-      "warn",
-      "validateUnicodeSecurity",
-      `Trojan Source attack detected: bidirectional control characters found`,
-      { context, suspiciousChars, inputLength: string_.length },
-    );
-
+  if (string_.length === 0) return;
+  const config = getUnicodeSecurityConfig();
+  if (string_.length > config.maxInputLength) {
     throw new InvalidParameterError(
-      `${context}: Contains bidirectional control characters (${suspiciousChars}) that enable Trojan Source attacks.`,
+      `${context}: Input exceeds Unicode validation max length (${String(config.maxInputLength)}).`,
     );
   }
 
-  // Invisible Character Detection: Zero-width and formatting characters
-  if (INVISIBLE_CHARS.test(string_)) {
-    const invisibleChars = Array.from(string_.match(INVISIBLE_CHARS) || [])
-      .map(
-        (char) =>
-          `U+${char.charCodeAt(0).toString(16).toUpperCase().padStart(4, "0")}`,
-      )
-      .join(", ");
+  // We intentionally sequence checks in order of (a) security criticality and (b) expected rarity.
+  // This minimizes total regex passes for common benign inputs (performance hardening, Pillar #2).
+  // Bidirectional control characters (Trojan Source class)
+  if (config.rejectBidiControls && BIDI_CONTROL_CHARS.test(string_)) {
+    const seen = new Set<string>();
+    RE_BIDI_GLOBAL.lastIndex = 0;
+    let match: RegExpExecArray | null;
+    while ((match = RE_BIDI_GLOBAL.exec(string_)) !== null) {
+      seen.add(match[0]);
+      if (seen.size >= 10) break; // cap collection for message size
+    }
+    const matches = Array.from(seen);
+    const msg = config.detailedErrorMessages
+      ? `${context}: Contains bidirectional control characters (${matches.join(",")}) — rejected to prevent Trojan Source attacks.`
+      : `${context}: Contains bidirectional control characters.`;
+    try { emitMetric("unicode.reject.bidi", matches.length, { context }); } catch { /* noop */ }
+    throw new InvalidParameterError(msg);
+  }
 
-    secureDevelopmentLog(
-      "warn",
-      "validateUnicodeSecurity",
-      `Invisible characters detected: potential content hiding`,
-      { context, invisibleChars, inputLength: string_.length },
-    );
+  // Invisible / zero-width characters (excluding standard whitespace) – deny.
+  // Only executed if Bidi test did not already throw, avoiding double work on hostile inputs containing both.
+  if (config.rejectInvisibleChars && INVISIBLE_CHARS.test(string_)) {
+    const invSet = new Set<string>();
+    RE_INVISIBLE_GLOBAL.lastIndex = 0;
+    let m: RegExpExecArray | null;
+    while ((m = RE_INVISIBLE_GLOBAL.exec(string_)) !== null) {
+      invSet.add(m[0]);
+      if (invSet.size >= 5) break;
+    }
+    const inv = Array.from(invSet);
+    const msg = config.detailedErrorMessages
+      ? `${context}: Contains invisible/zero-width characters (${inv.join(",")}).`
+      : `${context}: Contains invisible/zero-width characters.`;
+    try { emitMetric("unicode.reject.invisible", inv.length, { context }); } catch { /* noop */ }
+    throw new InvalidParameterError(msg);
+  }
 
+  // Dangerous control / non-character ranges
+  if (config.rejectDangerousRanges && DANGEROUS_UNICODE_RANGES.test(string_)) {
+    try { emitMetric("unicode.reject.dangerousRange", 1, { context }); } catch { /* noop */ }
     throw new InvalidParameterError(
-      `${context}: Contains invisible characters (${invisibleChars}) that could hide malicious content.`,
+      `${context}: Contains disallowed control/unassigned characters.`,
     );
   }
 
-  // Homoglyph Attack Detection: Characters that visually resemble ASCII
-  if (HOMOGLYPH_SUSPECTS.test(string_)) {
-    const homoglyphs = Array.from(string_.match(HOMOGLYPH_SUSPECTS) || [])
-      .map(
-        (char) =>
-          `'${char}' (U+${char.charCodeAt(0).toString(16).toUpperCase().padStart(4, "0")})`,
-      )
-      .join(", ");
+  // Excessive combining marks / normalization bombs
+  _validateCombiningCharacterLimits(string_, context);
 
-    secureDevelopmentLog(
-      "warn",
-      "validateUnicodeSecurity",
-      `Potential homoglyph attack: non-ASCII characters resembling ASCII`,
-      { context, homoglyphs, inputLength: string_.length },
-    );
-
+  // Raw shell character blocking (optional, off by default)
+  if (config.blockRawShellChars && SHELL_INJECTION_CHARS.test(string_)) {
+    const shellSet = new Set<string>();
+    RE_SHELL_GLOBAL.lastIndex = 0;
+    let shellMatch: RegExpExecArray | null;
+    while ((shellMatch = RE_SHELL_GLOBAL.exec(string_)) !== null) {
+      shellSet.add(shellMatch[0]);
+      if (shellSet.size >= 10) break; // cap collection for message size
+    }
+    const shellChars = Array.from(shellSet);
     throw new InvalidParameterError(
-      `${context}: Contains potential homoglyph characters (${homoglyphs}) that could enable spoofing attacks.`,
+      `${context}: Contains shell metacharacters (${shellChars.join(",")}) — raw shell injection guard enabled.`,
     );
   }
 
-  // Check for dangerous Unicode ranges (control chars, private use areas, etc.)
-  if (DANGEROUS_UNICODE_RANGES.test(string_)) {
-    const dangerousChars = Array.from(
-      string_.match(DANGEROUS_UNICODE_RANGES) || [],
-    )
-      .map(
-        (char) =>
-          `U+${char.charCodeAt(0).toString(16).toUpperCase().padStart(4, "0")}`,
-      )
-      .join(", ");
-
-    throw new InvalidParameterError(
-      `${context}: Contains dangerous Unicode characters (${dangerousChars}) in control or private use ranges.`,
-    );
-  }
-
-  // Advanced heuristic-based security scoring system
-  // This replaces simple binary rules with adaptive threat assessment
-  const securityScore = calculateSecurityRiskScore(string_);
-  
-  if (securityScore.totalScore >= 60) { // Lowered threshold from 70 to 60
-    secureDevelopmentLog(
-      "warn",
-      "validateUnicodeSecurity",
-      `High security risk score detected: potential attack pattern`,
-      { 
-        context, 
-        totalScore: securityScore.totalScore,
-        factors: securityScore.factors,
-        inputLength: string_.length,
-        recommendation: securityScore.recommendation
-      },
-    );
-
-    throw new InvalidParameterError(
-      `${context}: Input rejected due to high security risk score (${securityScore.totalScore}/100). ${securityScore.recommendation}`,
-    );
-  }
-
-  // Additional Trojan Source pattern detection
-  detectTrojanSourcePatterns(string_, context);
-}
-
-/**
- * Detect specific Trojan Source attack patterns beyond individual character detection.
- * Based on "Trojan Source: Invisible Vulnerabilities" research patterns.
- *
- * @param string_ - The string to analyze for attack patterns
- * @param context - Context for error reporting
- * @throws InvalidParameterError if attack patterns are detected
- */
-function detectTrojanSourcePatterns(string_: string, context: string): void {
-  // Pattern 1: Bidirectional override sequences (classic Trojan Source)
-  // Look for LRO/RLO followed by content then PDF/PDI
-  const trojanSourcePattern = /[\u202D\u202E].*?[\u202C\u2069]/u;
-  if (trojanSourcePattern.test(string_)) {
-    secureDevelopmentLog(
-      "error",
-      "detectTrojanSourcePatterns",
-      `Classic Trojan Source attack pattern detected`,
-      {
-        context,
-        pattern: "bidirectional_override_sequence",
-        inputLength: string_.length,
-      },
-    );
-
-    throw new InvalidParameterError(
-      `${context}: Contains classic Trojan Source attack pattern (bidirectional override sequence).`,
-    );
-  }
-
-  // Pattern 2: Embedding attacks (LRE/RLE with nested content)
-  const embeddingPattern = /[\u202A\u202B].*?\u202C/u;
-  if (embeddingPattern.test(string_)) {
-    secureDevelopmentLog(
-      "error",
-      "detectTrojanSourcePatterns",
-      `Bidirectional embedding attack pattern detected`,
-      { context, pattern: "embedding_sequence", inputLength: string_.length },
-    );
-
-    throw new InvalidParameterError(
-      `${context}: Contains bidirectional embedding attack pattern.`,
-    );
-  }
-
-  // Pattern 3: Mixed script with suspicious character combinations
-  // Common in supply chain attacks where legitimate-looking identifiers contain hidden chars
-  const mixedScriptSuspicious =
-    /\w+[\u200B-\u200F\u202A-\u202E\u2066-\u2069]+\w+/u;
-  if (mixedScriptSuspicious.test(string_)) {
-    secureDevelopmentLog(
-      "warn",
-      "detectTrojanSourcePatterns",
-      `Suspicious mixed script pattern with invisible characters`,
-      {
-        context,
-        pattern: "mixed_script_invisible",
-        inputLength: string_.length,
-      },
-    );
-
-    throw new InvalidParameterError(
-      `${context}: Contains suspicious mixed script pattern with invisible characters.`,
-    );
-  }
-
-  // Pattern 4: Zero-width character injection in identifier-like strings
-  if (/^[a-zA-Z]\w*$/u.test(string_.replace(/[\u200B-\u200F]/gu, ""))) {
-    if (/[\u200B-\u200F]/u.test(string_)) {
+  // Lightweight homoglyph suspicion logging (non-fatal) if mixed script risk
+  // Present: ASCII letter + suspicious homoglyph pattern + non-ASCII letter.
+  if (config.enableConfusablesDetection && /[A-Za-z]/u.test(string_)) {
+    // Detect presence of any non-ASCII letter alongside ASCII letters when
+    // homoglyph suspects regex also matches; avoids complex character class
+    // intersections not supported in all engines.
+    if (
+      HOMOGLYPH_SUSPECTS.test(string_) &&
+      /\p{Letter}/u.test(string_.replace(/[a-z]/giu, ""))
+    ) {
       secureDevelopmentLog(
-        "error",
-        "detectTrojanSourcePatterns",
-        `Zero-width character injection in identifier detected`,
-        {
-          context,
-          pattern: "zero_width_injection",
-          inputLength: string_.length,
-        },
-      );
-
-      throw new InvalidParameterError(
-        `${context}: Contains zero-width character injection in identifier-like string.`,
+        "warn",
+        "validateUnicodeSecurity",
+        "Potential mixed-script homoglyph risk detected",
+        { context, length: string_.length },
       );
     }
   }
-
-  // Combining Character DoS Protection (OWASP ASVS L3)
-  validateCombiningCharacterLimits(string_, context);
 }
 
 /**
- * Calculate comprehensive security risk score for input validation.
- * Uses multiple heuristics to detect potential attack patterns that might
- * evade individual security checks. Implements adaptive security per
- * OWASP ASVS L3 requirements.
- * 
- * @param string_ - The input string to analyze
- * @returns Security assessment with total score and contributing factors
+ * Calculate homoglyph and Unicode validation scores
+ * @internal
  */
-interface SecurityRiskAssessment {
-  totalScore: number;
-  factors: Record<string, number>;
-  recommendation: string;
-}
+// Removed calculateHomoglyphScores and related scoring aggregation per Option A.
 
-function calculateSecurityRiskScore(string_: string): SecurityRiskAssessment {
-  const factors: Record<string, number> = {};
-  let totalScore = 0;
-
-  // Factor 1: Whitespace density (any whitespace, not just consecutive)
-  const whitespaceRatio = (string_.match(/[\s\u00A0\u2000-\u200B\u2028\u2029\u202F\u205F\u3000]/gu) || []).length / string_.length;
-  if (whitespaceRatio >= 0.35) { // Lowered from 0.4 to 0.35 (35% instead of 40%)
-    factors.whitespace_density = Math.round(whitespaceRatio * 120); // Increased multiplier
-    totalScore += factors.whitespace_density;
-  }
-
-  // Factor 2: Consecutive whitespace patterns (original logic but as scoring)
-  const consecutiveWhitespace = string_.match(/[\s\u00A0\u2000-\u200B\u2028\u2029\u202F\u205F\u3000]{3,}/gu);
-  if (consecutiveWhitespace) {
-    const maxConsecutive = Math.max(...consecutiveWhitespace.map(m => m.length));
-    factors.consecutive_whitespace = Math.min(maxConsecutive * 10, 50); // Increased multiplier from 8 to 10
-    totalScore += factors.consecutive_whitespace;
-  }
-
-  // Factor 3: Repetitive character patterns (potential DoS/layout manipulation)
-  const repetitiveMatches = string_.match(/(.)\1{4,}/gu); // 5+ same chars
-  if (repetitiveMatches) {
-    const maxRepeats = Math.max(...repetitiveMatches.map(m => m.length));
-    factors.repetitive_patterns = Math.min(maxRepeats * 4, 30); // Increased multiplier
-    totalScore += factors.repetitive_patterns;
-  }
-
-  // Factor 4: Punctuation density (suspicious if too high)
-  const punctuationRatio = (string_.match(/[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/gu) || []).length / string_.length;
-  if (punctuationRatio >= 0.25) { // Lowered from 0.3 to 0.25 (25% instead of 30%)
-    factors.punctuation_density = Math.round(punctuationRatio * 100); // Increased multiplier
-    totalScore += factors.punctuation_density;
-  }
-
-  // Factor 5: Character variety (too low variety suggests pattern attacks)
-  const uniqueChars = new Set(string_).size;
-  const varietyRatio = uniqueChars / string_.length;
-  if (varietyRatio < 0.35 && string_.length > 8) { // Lowered length threshold from 10 to 8
-    factors.low_character_variety = Math.round((0.35 - varietyRatio) * 120);
-    totalScore += factors.low_character_variety;
-  }
-
-  // Factor 6: Suspicious character combinations
-  if (/\s{2,}[!]{3,}/u.test(string_)) { // Multiple spaces followed by many exclamations
-    factors.suspicious_combinations = 20; // Increased from 15 to 20
-    totalScore += factors.suspicious_combinations;
-  }
-
-  // Factor 7: Length-based risk (very short inputs with patterns are more suspicious)
-  if (string_.length < 30 && totalScore > 0) { // Increased from 25 to 30
-    factors.short_pattern_boost = Math.round(15 * (30 - string_.length) / 30); // Increased boost
-    totalScore += factors.short_pattern_boost;
-  }
-
-  // Factor 8: Leading whitespace pattern (common in layout manipulation attacks)
-  if (/^\s{4,}/u.test(string_)) {
-    factors.leading_whitespace = 15;
-    totalScore += factors.leading_whitespace;
-  }
-
-  // Factor 9: Repetitive digits (potential obfuscation or confusion attacks)
-  const digitMatches = string_.match(/(\d)\1{3,}/gu); // 4+ same digits
-  if (digitMatches) {
-    const maxDigitRepeats = Math.max(...digitMatches.map(m => m.length));
-    factors.repetitive_digits = Math.min(maxDigitRepeats * 3, 15);
-    totalScore += factors.repetitive_digits;
-  }
-
-  // Generate contextual recommendation
-  let recommendation = "Consider using simpler, more natural input patterns.";
-  if (factors.whitespace_density) {
-    recommendation = "High whitespace density detected - potential layout manipulation.";
-  } else if (factors.consecutive_whitespace) {
-    recommendation = "Consecutive whitespace patterns detected - potential DoS attack.";
-  } else if (factors.repetitive_patterns) {
-    recommendation = "Repetitive character patterns detected - potential manipulation attempt.";
-  }
-
-  return {
-    totalScore: Math.round(totalScore),
-    factors,
-    recommendation
-  };
-}
+/**
+ * Calculate contextual scoring modifiers based on input characteristics
+ * @internal
+ */
 
 /**
  * Detect excessive combining characters (DoS protection for OWASP ASVS L3).
@@ -368,42 +503,46 @@ function calculateSecurityRiskScore(string_: string): SecurityRiskAssessment {
  * @param context - Context for error reporting
  * @throws InvalidParameterError when excessive combining characters are detected
  */
-function validateCombiningCharacterLimits(string_: string, context: string): void {
-  let baseCharCount = 0;
+function _validateCombiningCharacterLimits(
+  string_: string,
+  context: string,
+): void {
+  const unicodeCfg = getUnicodeSecurityConfig();
+  let baseCharCount = 0; // mutable counters: single linear scan for performance
   let combiningCharCount = 0;
   let consecutiveCombining = 0;
 
   for (const char of string_) {
-    const codePoint = char.codePointAt(0)!;
-    
+    const codePoint = char.codePointAt(0);
+    if (codePoint === undefined) continue; // skip malformed surrogate edge (defensive)
+
     // Check if character is a combining mark (General Category Mn, Mc, Me)
     // Unicode ranges for combining marks:
     // - Combining Diacritical Marks (0300-036F)
     // - Combining Diacritical Marks Extended (1AB0-1AFF)
     // - Combining Diacritical Marks Supplement (1DC0-1DFF)
     // - Combining Half Marks (FE20-FE2F)
-    const isCombining = (
-      (codePoint >= 0x0300 && codePoint <= 0x036F) ||
-      (codePoint >= 0x1AB0 && codePoint <= 0x1AFF) ||
-      (codePoint >= 0x1DC0 && codePoint <= 0x1DFF) ||
-      (codePoint >= 0xFE20 && codePoint <= 0xFE2F) ||
+    const isCombining =
+      (codePoint >= 0x0300 && codePoint <= 0x036f) ||
+      (codePoint >= 0x1ab0 && codePoint <= 0x1aff) ||
+      (codePoint >= 0x1dc0 && codePoint <= 0x1dff) ||
+      (codePoint >= 0xfe20 && codePoint <= 0xfe2f) ||
       // Check Unicode general category for combining marks
-      /^\p{M}/u.test(char)
-    );
+      /^\p{M}/u.test(char);
 
     if (isCombining) {
-      combiningCharCount++;
-      consecutiveCombining++;
-      
+      combiningCharCount += 1;
+      consecutiveCombining += 1;
+
       // Check for excessive combining characters on single base character
       if (consecutiveCombining > MAX_COMBINING_CHARS_PER_BASE) {
         throw new InvalidParameterError(
           `${context}: Excessive combining characters detected (${consecutiveCombining} consecutive). ` +
-          `Maximum ${MAX_COMBINING_CHARS_PER_BASE} combining marks per base character allowed.`
+            `Maximum ${MAX_COMBINING_CHARS_PER_BASE} combining marks per base character allowed.`,
         );
       }
     } else {
-      baseCharCount++;
+      baseCharCount += 1;
       consecutiveCombining = 0; // Reset counter for new base character
     }
   }
@@ -411,10 +550,14 @@ function validateCombiningCharacterLimits(string_: string, context: string): voi
   // Additional check: if more than 30% of characters are combining marks in larger inputs, likely an attack
   // Only apply this check for strings with substantial content (>20 chars) to avoid false positives
   const totalChars = baseCharCount + combiningCharCount;
-  if (totalChars > 20 && (combiningCharCount / totalChars) > 0.3) {
+  const ratio = totalChars === 0 ? 0 : combiningCharCount / totalChars;
+  if (
+    totalChars > unicodeCfg.minCombiningRatioScanLength &&
+    ratio > unicodeCfg.maxCombiningRatio
+  ) {
+    try { emitMetric("unicode.reject.combiningRatio", ratio, { context }); } catch { /* noop */ }
     throw new InvalidParameterError(
-      `${context}: Suspicious ratio of combining characters (${combiningCharCount}/${totalChars}). ` +
-      "Possible combining character DoS attack."
+      `${context}: Suspicious ratio of combining characters (${String(combiningCharCount)}/${String(totalChars)} = ${(ratio * 100).toFixed(2)}%). Possible combining character DoS attack (limit ${(unicodeCfg.maxCombiningRatio * 100).toFixed(1)}%).`,
     );
   }
 }
@@ -441,19 +584,26 @@ function detectIntroducedStructuralChars(
 ): void {
   if (raw === normalized) return;
 
-  // Fast exit: if normalized contains none of the risk chars, skip set diff.
+  // Fast exit: if normalized contains none of the risk chars, skip further work.
   if (!STRUCTURAL_RISK_CHARS.test(normalized)) return;
 
-  // Build occurrence sets
+  // Micro‑optimization (Phase 1): replace repeated RegExp.test per character with
+  // Set membership to lower per‑char overhead in hot paths. We intentionally
+  // duplicate the character list from the central regex to avoid parsing the
+  // pattern at runtime – if the central definition changes, this list MUST be
+  // updated in tandem (kept small & auditable).
+  // Use shared immutable STRUCTURAL_RISK_CHARS_SET (defined above).
+
+  // Build set of structural chars present in the raw (pre‑normalization) input.
   const inRaw = new Set<string>();
   for (const ch of raw) {
-    if (STRUCTURAL_RISK_CHARS.test(ch)) inRaw.add(ch);
+    if (STRUCTURAL_RISK_CHARS_SET.has(ch)) inRaw.add(ch);
   }
-  const introduced: string[] = [];
+
+  const introduced = new Array<string>();
   for (const ch of normalized) {
-    if (STRUCTURAL_RISK_CHARS.test(ch) && !inRaw.has(ch)) {
+    if (STRUCTURAL_RISK_CHARS_SET.has(ch) && !inRaw.has(ch))
       introduced.push(ch);
-    }
   }
   if (introduced.length === 0) return;
 
@@ -464,43 +614,99 @@ function detectIntroducedStructuralChars(
     "Normalization introduced structural delimiter(s)",
     { context, introduced: unique },
   );
-
-  throw new InvalidParameterError(
-    `${context}: Normalization introduced structural characters (${unique.join(", ")}).`,
-  );
+  try {
+    emitMetric("unicode.structural.introduced", unique.length, {
+      context,
+      chars: unique.join(""),
+    });
+  } catch {
+    /* metric emission failures are non-fatal */
+  }
+  const unicodeCfg = getUnicodeSecurityConfig();
+  if (!unicodeCfg.rejectIntroducedStructuralChars) {
+    // Soft path: emit a warning & metric but do not fail closed when config disabled (non-production only).
+    try { emitMetric("unicode.structural.introduced.soft", unique.length, { context }); } catch { /* noop */ }
+    return;
+  }
+  const msg = unicodeCfg.detailedErrorMessages
+    ? `${context}: Normalization introduced structural characters (${unique.join(", ")}).`
+    : `${context}: Normalization introduced structural characters.`;
+  try { emitMetric("unicode.reject.introducedStructural", unique.length, { context }); } catch { /* noop */ }
+  throw new InvalidParameterError(msg);
 }
 
-/**
- * Verify NFKC idempotency (defense-in-depth). canonical(normalized) must equal
- * normalized. Detects unexpected engine/polyfill behavior or malformed surrogate
- * edge cases (OWASP ASVS V5.1.4: stable canonicalization).
- *
- * Real-world incidents (e.g., Spotify) have shown that non-idempotent
- * canonicalization can lead to security bypasses and account takeovers.
- *
- * @param normalized - The NFKC-normalized string to verify
- * @param context - Context for error reporting
- * @throws InvalidParameterError if a second normalization pass changes output
- */
-function verifyNormalizationIdempotent(
-  normalized: string,
-  context: string,
-): void {
-  const second = normalized.normalize("NFKC");
-  if (second !== normalized) {
-    secureDevelopmentLog(
-      "error",
-      "verifyNormalizationIdempotent",
-      "Non-idempotent normalization detected",
-      {
-        context,
-        firstLength: normalized.length,
-        secondLength: second.length,
-      },
-    );
-    throw new InvalidParameterError(
-      `${context}: Normalization not idempotent (environment anomaly).`,
-    );
+// Verifies NFKC normalization idempotency; if a second pass changes the string, treat as anomaly.
+// Lightweight fingerprint cache for idempotency checks. We intentionally keep
+// this extremely small (32 entries) to bound memory and avoid timing side‑channels.
+// Key = length + first + last + xor accumulator of code points.
+// Value = original normalized string reference (to detect if environment changed behavior).
+const IDEMPOTENCY_CACHE_MAX = 32;
+// eslint-disable-next-line functional/no-let -- bounded mutable cache for performance
+let _idempotencyCache: Map<string, string> | undefined;
+
+function fingerprintForIdempotency(s: string): string {
+  // XOR + length + boundary chars. Provides cheap heuristic uniqueness.
+  let xor = 0;
+  // Limit work for very long strings by sampling every 8th code point after 1024.
+  const len = s.length;
+  const sampleStride = len > 1024 ? 8 : 1;
+  for (let i = 0; i < len; i += sampleStride) {
+    xor ^= s.charCodeAt(i) & 0xffff;
+  }
+  const first = s.charCodeAt(0) & 0xffff;
+  const last = s.charCodeAt(len - 1) & 0xffff;
+  return `${len}:${first}:${last}:${xor}`;
+}
+
+function maybeVerifyNormalizationIdempotent(normalized: string, context: string): void {
+  const cfg = getUnicodeSecurityConfig();
+  const mode = cfg.normalizationIdempotencyMode;
+  if (mode === 'off') return;
+  if (/^[\x20-\x7E]*$/u.test(normalized)) return; // ASCII stable
+
+  // Heuristic skip via fingerprint cache (only for 'sample' or 'always').
+  const fp = fingerprintForIdempotency(normalized);
+  if (_idempotencyCache?.get(fp) === normalized) {
+    // Previously verified unchanged; skip second normalization entirely.
+    if (mode === 'sample') {
+      // Still respect sampling randomness; we could early return regardless,
+      // but keeping the sampling gate ensures periodic re-validation.
+      const rate = Math.max(1, cfg.normalizationIdempotencySampleRate);
+      const first = normalized.charCodeAt(0) || 0;
+      if (((normalized.length ^ first) % rate) !== 0) return;
+    } else {
+      return; // mode === 'always' but cached -> trust until eviction
+    }
+  } else if (mode === 'sample') {
+    const rate = Math.max(1, cfg.normalizationIdempotencySampleRate);
+    const first = normalized.charCodeAt(0) || 0;
+    if (((normalized.length ^ first) % rate) !== 0) return;
+  }
+
+  try {
+    const second = normalized.normalize('NFKC');
+    if (second !== normalized) {
+      secureDevelopmentLog(
+        'warn',
+        'maybeVerifyNormalizationIdempotent',
+        'Normalization was not idempotent on verification pass',
+        { context, firstLength: normalized.length, secondLength: second.length },
+      );
+      throw new InvalidParameterError(`${context}: Normalization not idempotent (environment anomaly).`);
+    }
+    // Update cache (create lazily to avoid cost when mode='off').
+    if (!_idempotencyCache) _idempotencyCache = new Map();
+    if (!_idempotencyCache.has(fp)) {
+      if (_idempotencyCache.size >= IDEMPOTENCY_CACHE_MAX) {
+        // Evict oldest insertion (Map preserves insertion order)
+        const firstKey = _idempotencyCache.keys().next().value as string | undefined;
+        if (firstKey !== undefined) _idempotencyCache.delete(firstKey);
+      }
+    }
+    _idempotencyCache.set(fp, normalized);
+  } catch (error) {
+    if (error instanceof InvalidParameterError) throw error;
+    throw new InvalidParameterError(`${context}: Failed idempotency verification.`);
   }
 }
 
@@ -516,7 +722,7 @@ function verifyNormalizationIdempotent(
  * - Combining character DoS prevention (max 5 per base character)
  * - Dangerous Unicode range validation
  *
- * SECURITY NOTE: The default 2KB limit balances security and usability. 
+ * SECURITY NOTE: The default 2KB limit balances security and usability.
  * Most legitimate inputs (URLs, identifiers, form fields) are much smaller.
  * Larger limits increase DoS attack surface via memory/CPU exhaustion.
  * Override only when absolutely necessary via options.maxLength.
@@ -544,6 +750,29 @@ export function normalizeInputString(
   options?: { readonly maxLength?: number },
 ): string {
   const rawString = _toString(input);
+
+  // Phase 1 performance improvement (Pillar #2: Hardened Simplicity & Performance):
+  // Fast‑path for common ASCII‑only inputs (printable + space). This avoids
+  // running the full Unicode validation & normalization pipeline when it would
+  // be a no‑op. Security is preserved because ASCII printable characters are
+  // already in stable NFKC form and cannot introduce structural characters via
+  // normalization. Length checks still apply below for DoS protection.
+  // NOTE: We deliberately exclude control characters (<0x20 except space) to
+  // force them through full validation (they would be rejected later anyway).
+  if (rawString.length > 0 && /^[\x20-\x7E]*$/u.test(rawString)) {
+    // Still enforce byte length limit before returning early.
+    const lengthLimit =
+      typeof options?.maxLength === "number" && options.maxLength > 0
+        ? Math.min(options.maxLength, MAX_CANONICAL_INPUT_LENGTH_BYTES)
+        : MAX_CANONICAL_INPUT_LENGTH_BYTES;
+    const rawBytesFast = SHARED_ENCODER.encode(rawString);
+    if (rawBytesFast.length > lengthLimit) {
+      throw new InvalidParameterError(
+        `${context}: Input exceeds maximum allowed size (${lengthLimit} bytes).`,
+      );
+    }
+    return rawString;
+  }
 
   // DoS protection: check raw input length before processing
   const lengthLimit =
@@ -590,15 +819,110 @@ export function normalizeInputString(
   detectIntroducedStructuralChars(rawString, normalized, context);
 
   // NEW: Verify normalization idempotency (defense-in-depth)
-  verifyNormalizationIdempotent(normalized, context);
+  maybeVerifyNormalizationIdempotent(normalized, context);
 
   // Re-validate after normalization to catch newly introduced dangerous patterns
   if (normalized.length > 0) {
     validateUnicodeSecurity(normalized, context);
   }
 
+  // Passive cumulative risk scoring (defense-in-depth, optional)
+  const unicodeCfg = getUnicodeSecurityConfig();
+  if (unicodeCfg.enableRiskScoring) {
+    const assessment = assessUnicodeRisks(rawString, normalized);
+    if (assessment.total >= unicodeCfg.riskBlockThreshold) {
+      throw new SecurityValidationError(
+        "Unicode cumulative risk threshold exceeded",
+        assessment.total,
+        unicodeCfg.riskBlockThreshold,
+        assessment.primaryThreat,
+        "Reject or further sanitize input before use in security-sensitive context.",
+        context,
+      );
+    }
+    if (assessment.total >= unicodeCfg.riskWarnThreshold) {
+      secureDevelopmentLog(
+        "warn",
+        "normalizeInputString",
+        "Unicode cumulative risk warning",
+        {
+          context,
+          score: assessment.total,
+          primaryThreat: assessment.primaryThreat,
+        },
+      );
+    }
+    if (unicodeCfg.onRiskAssessment) {
+      try {
+        const frozenMetrics = Object.freeze(
+          assessment.metrics.map((m) =>
+            Object.freeze({
+              id: m.id,
+              score: m.weight,
+              triggered: m.triggered,
+            })
+          ),
+        );
+        const payload = Object.freeze({
+          score: assessment.total,
+          schemaVersion: UNICODE_RISK_ASSESSMENT_SCHEMA_VERSION,
+          metrics: frozenMetrics,
+          primaryThreat: assessment.primaryThreat,
+          context,
+        });
+        unicodeCfg.onRiskAssessment(payload);
+        // Emit telemetry after successful callback to avoid duplicate events if callback throws.
+        try {
+          emitMetric("unicode.risk.total", assessment.total, {
+            context,
+            primary: assessment.primaryThreat,
+          });
+          for (const m of assessment.metrics) {
+            if (m.triggered) {
+              emitMetric(`unicode.risk.metric.${m.id}`, m.weight, { context });
+            }
+          }
+        } catch {
+          /* ignore metric emission errors */
+        }
+      } catch (error) {
+        secureDevelopmentLog(
+          "warn",
+          "normalizeInputString",
+          "Risk assessment hook threw",
+          { error: error instanceof Error ? error.message : String(error) },
+        );
+      }
+    }
+  }
+
   return normalized;
 }
+
+/**
+ * Internal normalization function for trusted URL components and library operations.
+ * Performs only NFKC normalization without security validation.
+ *
+ * IMPORTANT: This function MUST NOT be used for external/untrusted input.
+ * Use normalizeInputString() for all external input validation.
+ *
+ * This function exists to prevent the architectural issue where URL building
+ * functions were applying security validation to literal URL component characters
+ * like ".", ":", "//" which is inappropriate and causes legitimate operations to fail.
+ *
+ * @param input - The trusted input to normalize (converted to string first)
+ * @param context - Optional context for error reporting (defaults to "internal")
+ * @returns The NFKC-normalized string without security validation
+ * @throws InvalidParameterError only for normalization failures, not security violations
+ */
+// INTERNAL (no export): simplified internal helper retained only for localized
+// performance-sensitive use within this module if ever needed. Public callers
+// must always use normalizeInputString for full validation.
+// NOTE: Previous versions exposed an unsafe bypass helper (normalizeInputStringInternal)
+// that skipped security validation. Per architectural refactor (Option A), this
+// has been removed to eliminate misuse risk and maintain a single, consistent
+// normalization + validation pipeline. All internal callers must use
+// normalizeInputString with appropriate context labels.
 
 /**
  * Normalize and validate URL components with context-specific security rules.
@@ -606,59 +930,6 @@ export function normalizeInputString(
  * @param componentType - Type of URL component for context-specific validation
  * @returns The normalized and validated URL component
  */
-export function normalizeUrlComponent(
-  input: unknown,
-  componentType: "scheme" | "host" | "path" | "query" | "fragment" = "query",
-): string {
-  const context = `URL ${componentType}`;
-  const normalized = normalizeInputString(input, context);
-
-  // Additional validation based on component type
-  switch (componentType) {
-    case "scheme": {
-      if (normalized && !/^[a-zA-Z][a-zA-Z0-9+.-]*$/u.test(normalized)) {
-        throw new InvalidParameterError(
-          `${context}: Contains invalid characters for URL scheme.`,
-        );
-      }
-      return normalized.toLowerCase();
-    }
-    case "host": {
-      // Additional hostname-specific validation
-      if (normalized.includes("..") || normalized.includes("//")) {
-        throw new InvalidParameterError(
-          `${context}: Contains path traversal sequences.`,
-        );
-      }
-      return normalized.toLowerCase();
-    }
-    case "path": {
-      // Check for encoded traversal sequences
-      if (/%2e|%2f|%5c/iu.test(normalized)) {
-        throw new InvalidParameterError(
-          `${context}: Contains encoded path traversal sequences.`,
-        );
-      }
-      return normalized;
-    }
-    case "fragment": {
-      // Fragments should not contain dangerous schemes
-      const lowerFragment = normalized.toLowerCase();
-      const dangerousSchemes = ["javascript:", "data:", "vbscript:"];
-      for (const scheme of dangerousSchemes) {
-        if (lowerFragment.includes(scheme)) {
-          throw new InvalidParameterError(
-            `${context}: Contains dangerous scheme '${scheme}'.`,
-          );
-        }
-      }
-      return normalized;
-    }
-    default: {
-      return normalized;
-    }
-  }
-}
 
 /**
  * Timing-safe string comparison using normalized input.
@@ -699,34 +970,130 @@ export async function normalizeAndCompareAsync(
  * @param maxLength - Maximum length for truncation (default: 200)
  * @returns Sanitized string safe for logging
  */
-export function sanitizeForLogging(input: unknown, maxLength = 200): string {
+export function sanitizeForLogging(
+  input: unknown,
+  maxLength = 200,
+  _options?: { readonly includeRawHash?: boolean },
+): string {
   try {
-    const string_ = _toString(input);
+    // Defensive lower bound: extremely tiny maxLength values can produce
+    // confusing partial markers (e.g., cutting "[CTRL]"). Enforce a
+    // practical minimum of 16 so truncation tokens remain intelligible.
+    if (maxLength < 16) maxLength = 16; // eslint-disable-line no-param-reassign -- Intentional normalization of caller parameter (safe, primitive number)
+    let string_ = _toString(input);
+    // Hard cap raw length prior to normalization to bound normalization & hashing cost
+    // independent of caller-provided maxLength (defense-in-depth). 8192 chosen as
+    // generous diagnostic window while preventing log amplification / CPU spikes.
+    const HARD_LOG_SANITIZE_CAP = 8192; // characters
+    if (string_.length > HARD_LOG_SANITIZE_CAP) {
+      string_ = string_.slice(0, HARD_LOG_SANITIZE_CAP);
+    }
 
     // Apply basic normalization but catch any security violations
     // and replace dangerous content rather than throwing
     let sanitized: string;
     try {
       sanitized = string_.normalize("NFKC");
-    } catch {
-      sanitized = string_;
+    } catch (error) {
+      // SECURITY: Normalization failure should not expose the original string
+      // Log the error for debugging but provide a safe fallback
+      secureDevelopmentLog(
+        "warn",
+        "sanitizeForLogging",
+        "NFKC normalization failed during sanitization",
+        { error: error instanceof Error ? error.message : String(error) },
+      );
+      sanitized = string_; // Use original string as fallback
     }
 
     // Replace dangerous Unicode ranges with safe placeholders
-    sanitized = sanitized
+    // Replace control characters safely for logging without triggering lint rules
+    let cleanedString = sanitized
       .replace(BIDI_CONTROL_CHARS, "[BIDI]")
-      .replace(DANGEROUS_UNICODE_RANGES, "[CTRL]")
-      .replace(/[\u0000-\u001F\u007F]/gu, "[CTRL]"); // Additional control char cleanup
+      .replace(DANGEROUS_UNICODE_RANGES, "[CTRL]");
 
-    // Truncate if too long
-    if (sanitized.length > maxLength) {
-      sanitized = sanitized.slice(0, maxLength - 3) + "...";
+    // Manual replacement of dangerous control characters
+    const controlCharCodes = [
+      1, 2, 3, 4, 5, 6, 7, 8, 11, 12, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23,
+      24, 25, 26, 27, 28, 29, 30, 31, 127,
+    ];
+    for (const code of controlCharCodes) {
+      const char = String.fromCharCode(code);
+      cleanedString = cleanedString.replaceAll(char, "[CTRL]");
     }
 
+  cleanedString = collapseControlMarkerRuns(cleanedString);
+  cleanedString = capMarkerRepetitions(cleanedString);
+  sanitized = cleanedString;
+
+    // Truncate if too long using deterministic token. We reserve space for
+    // the truncation marker to avoid ambiguous tail fragments.
+    const TRUNC_TOKEN = "…[truncated]"; // single Unicode ellipsis + explicit marker
+    if (sanitized.length > maxLength) {
+      const sliceEnd = Math.max(0, maxLength - TRUNC_TOKEN.length);
+      sanitized = sanitized.slice(0, sliceEnd) + TRUNC_TOKEN;
+    }
+
+    // Hard post-condition: ensure final string (excluding optional hash)
+    // never exceeds maxLength + small hash suffix window. This guards against
+    // any future modifications that might expand markers unexpectedly.
+    if (sanitized.length > maxLength + 4) {
+      sanitized = sanitized.slice(0, maxLength) + TRUNC_TOKEN; // enforce strict cap
+    }
+
+    // Include raw hash in output if requested
     return sanitized;
-  } catch {
+  } catch (error) {
+    // SECURITY: If all sanitization fails, return a safe placeholder
+    secureDevelopmentLog(
+      "error",
+      "sanitizeForLogging",
+      "Complete sanitization failure",
+      { error: error instanceof Error ? error.message : String(error) },
+    );
     return "[INVALID_INPUT]";
   }
+}
+
+/**
+ * Compute correlation hash for logging deduplication.
+ *
+ * Uses a simple but adequate hash since logging must be synchronous.
+ * For cryptographic integrity, use crypto.subtle.digest("SHA-256", ...) asynchronously.
+ */
+// correlation hash removed – replaced with marker run-length encoding
+
+/**
+ * Cap repetitions of logging markers to prevent log flooding attacks.
+ */
+function capMarkerRepetitions(input: string, maxRepetitions = 5): string {
+  const markers = ["[BIDI]", "[CTRL]", "[INVALID]"];
+  let result = input;
+
+  for (const marker of markers) {
+    const escapedMarker = marker.replace(/[[\]]/g, "\\$&");
+    const regex = new RegExp(`(${escapedMarker})\\1{${maxRepetitions},}`, "g");
+    const replacement = `${marker.repeat(maxRepetitions)}[+${maxRepetitions}more]`;
+    result = result.replace(regex, replacement);
+  }
+
+  return result;
+}
+
+function collapseControlMarkerRuns(input: string): string {
+  // Collapse any run of combined control markers ([CTRL] or [BIDI]) of length >=4
+  // into a single aggregate token preserving total count. Mixed sequences like
+  // [CTRL][BIDI][CTRL][BIDI]...[CTRL] are aggregated into [CTRL|BIDI]xN to
+  // prevent log amplification via alternating distinct markers.
+  const pattern = /(?:(?:\[CTRL\])|(?:\[BIDI\])){4,}/g;
+  return input.replace(pattern, (segment) => {
+    const ctrlCount = (segment.match(/\[CTRL\]/g) || []).length;
+    const bidiCount = (segment.match(/\[BIDI\]/g) || []).length;
+    const total = ctrlCount + bidiCount;
+    if (bidiCount === 0) return `[CTRL]x${total}`;
+    if (ctrlCount === 0) return `[BIDI]x${total}`;
+    return `[CTRL|BIDI]x${total}`;
+  });
 }
 
 /**
@@ -760,34 +1127,45 @@ export function validateAndNormalizeInput(
 
     // Early validation checks
     if (!allowEmpty && rawString.length === 0) {
-      return { success: false, error: `${context}: Empty input not allowed.` };
+      return Object.freeze({
+        success: false,
+        error: `${context}: Empty input not allowed.`,
+      });
     }
 
-    if (requireAscii && !/^[\x00-\x7F]*$/u.test(rawString)) {
-      return {
+    // Check for ASCII-only requirement using safe character range
+    if (requireAscii && !/^[\x20-\x7E\t\n\r]*$/u.test(rawString)) {
+      return Object.freeze({
         success: false,
         error: `${context}: Non-ASCII characters not allowed.`,
-      };
+      });
     }
 
     // Check size before normalization
     const rawBytes = SHARED_ENCODER.encode(rawString);
     if (rawBytes.length > maxLength) {
-      return {
+      return Object.freeze({
         success: false,
         error: `${context}: Input exceeds maximum size (${maxLength} bytes).`,
-      };
+      });
     }
 
     // Perform normalization with full validation
     const normalized = normalizeInputString(rawString, context);
 
-    return { success: true, value: normalized };
+    return Object.freeze({ success: true, value: normalized });
   } catch (error) {
-    return {
+    // Log for development debugging
+    secureDevelopmentLog(
+      "error",
+      "validateAndNormalizeInput",
+      "String normalization failed",
+      { error: error instanceof Error ? error.message : String(error) },
+    );
+    return Object.freeze({
       success: false,
       error: error instanceof Error ? error.message : String(error),
-    };
+    });
   }
 }
 
@@ -826,8 +1204,8 @@ export function normalizeInputStringUltraStrict(
     );
   }
 
-  // Immediate rejection of any non-ASCII characters
-  if (!/^[\x00-\x7F]*$/u.test(rawString)) {
+  // Immediate rejection of any non-ASCII characters using safe printable range
+  if (!/^[\x20-\x7E\t\n\r]*$/u.test(rawString)) {
     const nonAsciiChars = Array.from(rawString)
       .filter((char) => char.charCodeAt(0) > 127)
       .map(
@@ -875,70 +1253,6 @@ export function normalizeInputStringUltraStrict(
  * @returns URL-safe normalized string
  * @throws InvalidParameterError for any security violations
  */
-export function normalizeUrlSafeString(
-  input: unknown,
-  context: string,
-  options: {
-    readonly maxLength?: number;
-    readonly allowSpaces?: boolean;
-  } = {},
-): string {
-  const { maxLength = 2048, allowSpaces = false } = options;
-
-  const baseNormalized = normalizeInputString(input, context, { maxLength });
-
-  // Define URL-safe character set (RFC 3986 unreserved + percent encoding)
-  const urlSafePattern = allowSpaces
-    ? /^[\w.~:/?#[\]@!$&'()*+,;=\-% ]*$/u
-    : /^[\w.~:/?#[\]@!$&'()*+,;=\-%]*$/u;
-
-  if (!urlSafePattern.test(baseNormalized)) {
-    const unsafeChars = Array.from(baseNormalized)
-      .filter((char) => !urlSafePattern.test(char))
-      .map(
-        (char) =>
-          `'${char}' (U+${char.charCodeAt(0).toString(16).toUpperCase().padStart(4, "0")})`,
-      )
-      .slice(0, 3)
-      .join(", ");
-
-    throw new InvalidParameterError(
-      `${context}: Contains non-URL-safe characters: ${unsafeChars}`,
-    );
-  }
-
-  // Additional validation for common URL injection patterns
-  const suspiciousPatterns = [
-    /javascript:/iu,
-    /data:/iu,
-    /vbscript:/iu,
-    /file:/iu,
-    /<script/iu,
-    /<%/u,
-    /%3cscript/iu,
-  ];
-
-  for (const pattern of suspiciousPatterns) {
-    if (pattern.test(baseNormalized)) {
-      secureDevelopmentLog(
-        "error",
-        "normalizeUrlSafeString",
-        `Suspicious URL pattern detected`,
-        {
-          context,
-          pattern: pattern.source,
-          inputLength: baseNormalized.length,
-        },
-      );
-
-      throw new InvalidParameterError(
-        `${context}: Contains potentially dangerous URL patterns.`,
-      );
-    }
-  }
-
-  return baseNormalized;
-}
 
 /**
  * Narrow/TypeGuard: returns true only for non-null objects.
@@ -1009,14 +1323,22 @@ function canonicalizePrimitive(value: unknown): unknown {
 function canonicalizeArray(
   value: readonly unknown[],
   cache: WeakMap<object, unknown>,
-  depthRemaining?: number,
+  depthRemaining: number | undefined,
+  deadline: number,
+  circularPolicy: 'fail' | 'annotate',
 ): unknown {
+  if (Date.now() > deadline) {
+    throw new CanonicalizationTraversalError('Canonicalization time budget exceeded.');
+  }
   if (depthRemaining !== undefined && depthRemaining <= 0) {
-    throw new RangeError("Canonicalization depth budget exceeded");
+    throw new CanonicalizationDepthError('Canonicalization depth budget exceeded.');
   }
   const asObject = value as unknown as object;
   const existing = cache.get(asObject);
-  if (existing === PROCESSING) return { __circular: true };
+  if (existing === PROCESSING) {
+    if (circularPolicy === 'fail') throw new CanonicalizationTraversalError('Circular reference detected (policy=fail).');
+    return { __circular: true };
+  }
   if (existing !== undefined) return existing;
 
   cache.set(asObject, PROCESSING);
@@ -1047,6 +1369,7 @@ function canonicalizeArray(
       element = Object.hasOwn(value, index)
         ? (value as unknown as Record<number, unknown>)[index]
         : undefined;
+      // eslint-disable-next-line local/no-broad-exception-swallow -- Controlled fallback: exotic object property access may throw; undefined assignment is safe fallback for array canonicalization
     } catch {
       element = undefined;
     }
@@ -1076,11 +1399,31 @@ function canonicalizeArray(
       element,
       cache,
       depthRemaining === undefined ? undefined : depthRemaining - 1,
+      deadline,
+      circularPolicy,
     );
   }
+  const frozen = Object.freeze(result);
+  cache.set(asObject, frozen);
+  return frozen;
+}
 
-  cache.set(asObject, result);
-  return result;
+/**
+ * Detects arrays produced by the canonicalizer (null prototype & frozen).
+ * This helps downstream code decide whether it can safely rely on the array
+ * having no prototype methods (e.g., avoid calling .map directly) and instead
+ * treat it as a plain indexable sequence. Provided as a convenience utility
+ * to reduce repeated instanceof / prototype checks by consumers.
+ */
+export function isCanonicalArray(value: unknown): value is readonly unknown[] {
+  if (!Array.isArray(value)) return false;
+  try {
+    // Null prototype & frozen are the two invariants enforced by canonicalizeArray.
+    if (Object.getPrototypeOf(value) !== null) return false;
+    return Object.isFrozen(value);
+  } catch {
+    return false;
+  }
 }
 /**
  * Handles canonicalization of objects with proxy-friendly property discovery.
@@ -1089,13 +1432,21 @@ function canonicalizeArray(
 function canonicalizeObject(
   value: Record<string, unknown>,
   cache: WeakMap<object, unknown>,
-  depthRemaining?: number,
+  depthRemaining: number | undefined,
+  deadline: number,
+  circularPolicy: 'fail' | 'annotate',
 ): unknown {
+  if (Date.now() > deadline) {
+    throw new CanonicalizationTraversalError('Canonicalization time budget exceeded.');
+  }
   if (depthRemaining !== undefined && depthRemaining <= 0) {
-    throw new RangeError("Canonicalization depth budget exceeded");
+    throw new CanonicalizationDepthError('Canonicalization depth budget exceeded.');
   }
   const existing = cache.get(value as object);
-  if (existing === PROCESSING) return { __circular: true };
+  if (existing === PROCESSING) {
+    if (circularPolicy === 'fail') throw new CanonicalizationTraversalError('Circular reference detected (policy=fail).');
+    return { __circular: true };
+  }
   if (existing !== undefined) return existing;
 
   cache.set(value as object, PROCESSING);
@@ -1108,8 +1459,15 @@ function canonicalizeObject(
       cache.set(value as object, empty);
       return empty;
     }
-  } catch {
-    /* ignore */
+  } catch (error) {
+    // SECURITY: ArrayBuffer access could fail with exotic objects
+    // Continue canonicalization with fallback handling
+    secureDevelopmentLog(
+      "warn",
+      "canonicalizeObject",
+      "ArrayBuffer instanceof check failed",
+      { error: error instanceof Error ? error.message : String(error) },
+    );
   }
 
   // RegExp → {}
@@ -1139,24 +1497,25 @@ function canonicalizeObject(
   }
 
   // Discover keys via ownKeys (strings only). We do not add Object.keys twice;
-  // enumerability is validated when reading descriptors below.
+  // enumerability is validated when reading descriptors below. We defer adding
+  // proxy probe keys until we detect accessor presence or descriptor failures
+  // to reduce surface for DoS via expensive proxy traps (Pillar #2 hardening).
   const keySet = new Set<string>();
   for (const k of Reflect.ownKeys(value)) {
-    // eslint-disable-next-line functional/immutable-data
     if (typeof k === "string") keySet.add(k);
   }
+  let addedProxyProbeKeys = false;
+  const maybeAddProxyProbeKeys = (): void => {
+    if (addedProxyProbeKeys) return;
+    addedProxyProbeKeys = true;
+    const alpha = "abcdefghijklmnopqrstuvwxyz";
+    for (let index = 0; index < alpha.length; index++) {
+      keySet.add(alpha.charAt(index));
+      keySet.add(alpha.charAt(index).toUpperCase());
+    }
+  };
 
-  // Conservative probe for proxies: include alphabetic keys 'a'..'z' and 'A'..'Z'
-  const alpha = "abcdefghijklmnopqrstuvwxyz";
-  // eslint-disable-next-line functional/no-let -- Intentional let for loop index in proxy key probing
-  for (let index = 0; index < alpha.length; index++) {
-    // eslint-disable-next-line functional/immutable-data -- Intentional mutability for proxy key probing during canonicalization
-    keySet.add(alpha.charAt(index));
-    // eslint-disable-next-line functional/immutable-data -- Intentional mutability for proxy key probing during canonicalization
-    keySet.add(alpha.charAt(index).toUpperCase());
-  }
-
-  const keys = Array.from(keySet).sort((a, b) => a.localeCompare(b));
+  const keys = Array.from(keySet).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
 
   // Create the result with a null prototype up-front so we never perform
   // assignments onto a default Object.prototype bearing object. This reduces
@@ -1166,6 +1525,11 @@ function canonicalizeObject(
     string,
     unknown
   >;
+  // Descriptor attempt cap prevents unbounded cost on hostile proxies with
+  // expensive getters or throwing property traps.
+  let descriptorAttempts = 0;
+  const MAX_DESCRIPTOR_ATTEMPTS = 512; // Tunable; small to bound worst-case cost.
+
   for (const k of keys) {
     // Skip forbidden keys (e.g., __proto__, prototype, constructor) to avoid
     // exposing or reintroducing prototype pollution via canonicalized output.
@@ -1178,28 +1542,41 @@ function canonicalizeObject(
     // eslint-disable-next-line functional/no-let -- Intentional let for descriptor handling in canonicalization
     let descriptor: PropertyDescriptor | undefined;
     try {
+      descriptorAttempts++;
+      if (descriptorAttempts > MAX_DESCRIPTOR_ATTEMPTS) {
+        throw new CircuitBreakerError("Descriptor attempt cap exceeded");
+      }
       descriptor = Object.getOwnPropertyDescriptor(value, k) ?? undefined;
-    } catch {
+    } catch (error) {
+      // On descriptor failure we treat as proxy-like and add probe keys once.
+      maybeAddProxyProbeKeys();
       descriptor = undefined;
+      if (error instanceof CircuitBreakerError) throw error;
     }
 
     // eslint-disable-next-line functional/no-let -- Intentional let for raw value handling in canonicalization
     let raw: unknown;
-    if (
-      descriptor !== undefined &&
-      descriptor.enumerable === true &&
-      "value" in descriptor
-    ) {
-      raw = descriptor.value;
-    } else if (descriptor === undefined) {
-      try {
-        raw = value[k];
-      } catch {
+    if (descriptor !== undefined) {
+      if (descriptor.enumerable === true && "value" in descriptor) {
+        raw = descriptor.value;
+      } else if ("get" in descriptor || "set" in descriptor) {
+        // Accessor detected: treat object as proxy-like and add probe keys lazily.
+        maybeAddProxyProbeKeys();
+        // Intentionally skip invoking getters to avoid side effects.
         continue;
+      } else {
+        continue; // non-enumerable data descriptor
       }
     } else {
-      // non-enumerable or accessor — ignore
-      continue;
+      try {
+        descriptorAttempts++;
+        if (descriptorAttempts > MAX_DESCRIPTOR_ATTEMPTS) {
+          throw new CircuitBreakerError("Descriptor attempt cap exceeded");
+        }
+        raw = value[k];
+      } catch {
+        continue; // skip inaccessible property
+      }
     }
 
     if (
@@ -1245,24 +1622,27 @@ function canonicalizeObject(
       if (input !== null && typeof input === "object") {
         const ex = cache.get(input);
         if (ex === PROCESSING)
-          return {
+          return Object.freeze({
             present: true,
             value: { __circular: true } as Record<string, unknown>,
-          };
+          });
         if (ex !== undefined)
-          return {
+          return Object.freeze({
             present: true,
             value: { __circular: true } as Record<string, unknown>,
-          };
+          });
       }
       const out = toCanonicalValueInternal(
         input,
         cache,
         depthRemaining === undefined ? undefined : depthRemaining - 1,
+        deadline,
+        circularPolicy,
       );
-      if (out === undefined) return { present: false };
-      if (isCanonicalValue(out)) return { present: true, value: out };
-      return { present: false };
+      if (out === undefined) return Object.freeze({ present: false });
+      if (isCanonicalValue(out))
+        return Object.freeze({ present: true, value: out });
+      return Object.freeze({ present: false });
     };
 
     const canon = computeCanon(raw);
@@ -1284,10 +1664,15 @@ function canonicalizeObject(
 function toCanonicalValueInternal(
   value: unknown,
   cache: WeakMap<object, unknown>,
-  depthRemaining?: number,
+  depthRemaining: number | undefined,
+  deadline: number,
+  circularPolicy: 'fail' | 'annotate',
 ): unknown {
+  if (Date.now() > deadline) {
+    throw new CanonicalizationTraversalError('Canonicalization time budget exceeded.');
+  }
   if (depthRemaining !== undefined && depthRemaining <= 0) {
-    throw new RangeError("Canonicalization depth budget exceeded");
+    throw new CanonicalizationDepthError('Canonicalization depth budget exceeded.');
   }
   // Handle special cases first
   if (value instanceof Date) return value.toISOString();
@@ -1310,8 +1695,15 @@ function toCanonicalValueInternal(
         });
       }
     }
-  } catch {
-    /* ignore and fall through */
+  } catch (error) {
+    // Log for development debugging but continue canonicalization
+    secureDevelopmentLog(
+      "warn",
+      "toCanonicalValueInternal",
+      "Object property enumeration failed",
+      { error: error instanceof Error ? error.message : String(error) },
+    );
+    /* Continue with array/other handling */
   }
 
   // Array handling: delegate to array canonicalizer for cycle/dup detection
@@ -1320,6 +1712,8 @@ function toCanonicalValueInternal(
       value as readonly unknown[],
       cache,
       depthRemaining,
+      deadline,
+      circularPolicy,
     );
   }
 
@@ -1328,6 +1722,8 @@ function toCanonicalValueInternal(
       value as Record<string, unknown>,
       cache,
       depthRemaining,
+      deadline,
+      circularPolicy,
     );
   }
 
@@ -1379,13 +1775,20 @@ export function toCanonicalValue(value: unknown): unknown {
           }
         ).isView;
         if (isView?.(value) === true) {
-          return {};
+          return Object.freeze({});
         }
-        if (value instanceof ArrayBuffer) return {};
+        if (value instanceof ArrayBuffer) return Object.freeze({});
       }
     }
-  } catch {
-    /* ignore and fall through */
+  } catch (error) {
+    // Log for development debugging but continue canonicalization
+    secureDevelopmentLog(
+      "warn",
+      "toCanonicalValue",
+      "ArrayBuffer/TypedArray detection failed",
+      { error: error instanceof Error ? error.message : String(error) },
+    );
+    /* Continue processing */
   }
 
   try {
@@ -1401,90 +1804,25 @@ export function toCanonicalValue(value: unknown): unknown {
           // This branch is unreachable; it exists to make the read explicit and
           // satisfy no-unused-vars/no-unused-locals without using the `void` operator.
         }
-      } catch {
-        // ignore failures reading keys from exotic hosts — we'll detect deeper during traversal
-      }
-    }
-    // Defensive pre-scan: reject any BigInt found anywhere in the input tree.
-    // This ensures nested BigInt values are consistently rejected regardless
-    // of exotic host objects or proxy behavior that could bypass deeper
-    // checks during canonicalization.
-    const cfg = getCanonicalConfig();
-    const scanInitialDepth = cfg.maxDepth ?? undefined;
-    // Track visited nodes to avoid exponential blow-up on cyclic or highly
-    // connected graphs during the pre-scan. WeakSet ensures we don't retain
-    // references and is safe for arbitrary object graphs.
-    const visited = new WeakSet<object>();
-    // eslint-disable-next-line sonarjs/cognitive-complexity -- Defensive deep scan handles hostile objects, cycles, and proxies
-    const assertNoBigIntDeep = (v: unknown, depth?: number): void => {
-      if (depth !== undefined && depth <= 0) {
-        throw new RangeError("Canonicalization depth budget exceeded");
-      }
-      if (typeof v === "bigint") {
-        throw new InvalidParameterError(
-          "BigInt values are not supported in payload/context.body.",
+      } catch (error) {
+        // Log key enumeration failures but continue - exotic hosts may have special behavior
+        secureDevelopmentLog(
+          "warn",
+          "toCanonicalValue",
+          "Object key enumeration failed",
+          { error: error instanceof Error ? error.message : String(error) },
         );
       }
-      if (isNonNullObject(v)) {
-        // Detect dangerous constructor.prototype nesting to prevent prototype pollution attempts
-        // If an object contains a nested constructor.prototype, treat as unsafe
-        // but do not throw during pre-scan; main traversal will skip forbidden
-        // keys. This preserves sanitizer behavior instead of failing early.
-        try {
-          const ctor = (v as Record<string, unknown>)["constructor"];
-          if (
-            typeof ctor === "object" &&
-            Object.hasOwn(ctor as object, "prototype")
-          ) {
-            // Mark visited and continue without throwing here
-          }
-        } catch {
-          /* ignore access errors */
-        }
-        // Skip already-visited nodes to prevent repeated traversal of cycles
-        // or shared subgraphs which can otherwise lead to exponential work.
-        try {
-          const currentObject: object = v;
-          if (visited.has(currentObject)) return;
-          visited.add(currentObject);
-        } catch {
-          // If WeakSet operations throw due to hostile objects, fall through
-          // without marking as visited; depth caps still protect us.
-        }
-        if (Array.isArray(v)) {
-          for (const it of v) {
-            assertNoBigIntDeep(it, depth === undefined ? undefined : depth - 1);
-          }
-        } else {
-          try {
-            for (const key of Reflect.ownKeys(v)) {
-              // Access property value defensively; ignore access errors
-              // eslint-disable-next-line functional/no-let -- Value is assigned in try/catch to preserve control flow
-              let value_: unknown;
-              try {
-                value_ = v[key as PropertyKey];
-              } catch {
-                continue;
-              }
-              // Recurse without swallowing errors from deep checks; we must
-              // fail closed on BigInt or forbidden constructor.prototype
-              assertNoBigIntDeep(
-                value_,
-                depth === undefined ? undefined : depth - 1,
-              );
-            }
-          } catch {
-            // ignore failures enumerating keys on exotic hosts
-          }
-        }
-      }
-    };
-    assertNoBigIntDeep(value, scanInitialDepth);
-    const initialDepth = scanInitialDepth;
+    }
+    const cfg = getCanonicalConfig();
+    const initialDepth = cfg.maxDepth ?? undefined;
+    const deadline = Date.now() + cfg.traversalTimeBudgetMs;
     const canonical = toCanonicalValueInternal(
       value,
       new WeakMap<object, unknown>(),
       initialDepth,
+      deadline,
+      cfg.circularPolicy,
     );
     // If the canonicalized result contains any nested __circular markers,
     // attach a non-enumerable top-level marker to aid detection without
@@ -1506,18 +1844,23 @@ export function toCanonicalValue(value: unknown): unknown {
     return canonical;
   } catch (error) {
     if (error instanceof InvalidParameterError) throw error;
-    if (error instanceof RangeError) {
+    // Depth budget exhaustion and circuit-breaker errors should be surfaced
+    // to callers as InvalidParameterError so consumers can handle them
+    // deterministically (tests and external callers depend on this shape).
+    if (error instanceof RangeError || error instanceof CircuitBreakerError) {
       // Fail CLOSED: depth exhaustion or traversal resource limits must not
-      // silently produce an empty object. Convert to a typed error so callers
-      // can handle deterministically per Pillar #1 and ASVS L3.
-      throw new InvalidParameterError(
+      // silently produce an empty object. Convert to a typed InvalidParameterError
+      // so callers can handle deterministically per Pillar #1 and ASVS L3.
+      throw makeInvalidParameterError(
         "Canonicalization depth budget exceeded.",
       );
     }
     // Ensure we always throw an Error object. If a non-Error was thrown,
     // wrap it to preserve the original message/inspectable value.
     if (error instanceof Error) throw error;
-    throw new Error(String(error));
+    throw makeInvalidParameterError(
+      `Canonicalization failed: ${String(error)}`,
+    );
   }
 }
 
@@ -1533,7 +1876,7 @@ export function hasCircularSentinel(
   depthRemaining?: number,
 ): boolean {
   if (depthRemaining !== undefined && depthRemaining <= 0) {
-    throw new RangeError("Circular sentinel scan depth budget exceeded");
+    throw makeDepthBudgetExceededError("hasCircularSentinel", 64);
   }
   if (isNonNullObject(v)) {
     try {
@@ -1631,7 +1974,7 @@ export function safeStableStringify(value: unknown): string {
   };
 
   const objectToJson = (objectValue: Record<string, unknown>): string => {
-    const keys = Object.keys(objectValue).sort((a, b) => a.localeCompare(b));
+  const keys = Object.keys(objectValue).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
     // eslint-disable-next-line functional/prefer-readonly-type -- Intentional mutable array for building JSON parts
     const parts: string[] = [];
     for (const k of keys) {
@@ -1661,3 +2004,405 @@ export function safeStableStringify(value: unknown): string {
 
   return stringify(canonical, "top");
 }
+
+// ====================== Unicode Security Public API =======================
+
+/**
+ * Re-export Unicode security functions for public use with enhanced documentation.
+ * These functions provide access to official Unicode 16.0.0 specification data
+ * for identifier validation and confusables detection.
+ *
+ * For detailed documentation on Unicode data formats, profiles, and security
+ * architecture, see: docs/User docs/unicode-data-format.md
+ *
+ * @example
+ * ```typescript
+ * // Configure Unicode security profile
+ * setUnicodeSecurityConfig({
+ *   dataProfile: 'standard',     // Use standard profile with confusables
+ *   enableConfusablesDetection: true,
+ *   maxInputLength: 2048
+ * });
+ *
+ * // Validate identifier character
+ * const status = getIdentifierStatus(0x61); // 'a' -> 'Allowed'
+ *
+ * // Check for confusable characters
+ * const targets = getConfusableTargets('а'); // Cyrillic 'а' -> ['a']
+ * const isRisky = isConfusable('а', 'a');    // true
+ *
+ * // Get profile statistics
+ * const stats = getDataStats();
+ * console.log(`Loaded ${stats.ranges} ranges, ${stats.confusables} confusables`);
+ * ```
+ */
+
+/**
+ * Get Unicode identifier validation ranges for the current profile.
+ *
+ * Returns an array of Unicode code point ranges that are allowed in identifiers
+ * according to Unicode Technical Standard #39 (UTS #39).
+ *
+ * **Profile Behavior:**
+ * - `minimal`: Basic identifier ranges (~391 ranges)
+ * - `standard`: Full identifier ranges
+ * - `complete`: Full identifier ranges (same as standard)
+ *
+ * **Performance:** O(1) - data is cached after first load
+ *
+ * **OWASP ASVS L3 Compliance:**
+ * - V8.1.1: Data integrity verification via SHA-256
+ * - V5.2.1: Input validation with official Unicode data
+ *
+ * @returns Array of Unicode ranges with start/end code points and status
+ * @throws SecurityKitError if integrity verification fails
+ *
+ * @since 1.0.0
+ * @see {@link https://unicode.org/reports/tr39/} UTS #39 Unicode Security Mechanisms
+ */
+export { getIdentifierRanges } from "./generated/unicode-optimized-loader.ts";
+
+/**
+ * Check the identifier status of a Unicode code point.
+ *
+ * Returns the official UTS #39 status for the given code point:
+ * - `'Allowed'`: Safe for use in identifiers
+ * - `'Disallowed'`: Prohibited in identifiers
+ * - `'Restricted'`: Contextually allowed (use with caution)
+ * - `'Obsolete'`: Deprecated characters
+ * - `undefined`: Not found in current profile data
+ *
+ * **Performance:** O(log n) binary search over identifier ranges
+ *
+ * **Security Notes:**
+ * - Unknown code points default to 'Restricted' per UTS #39
+ * - Use `'Allowed'` status for high-security validation
+ * - `'Restricted'` may be acceptable depending on threat model
+ *
+ * @param codePoint - Unicode code point to check (0-0x10FFFF)
+ * @returns Identifier status or undefined if not found
+ * @throws InvalidParameterError if codePoint is invalid
+ *
+ * @example
+ * ```typescript
+ * const status = getIdentifierStatus(0x41);    // 'A' -> 'Allowed'
+ * const status2 = getIdentifierStatus(0x200E); // LTR mark -> 'Disallowed'
+ * ```
+ *
+ * @since 1.0.0
+ * @see {@link https://unicode.org/reports/tr39/#Identifier_Status} UTS #39 Identifier Status
+ */
+export { getIdentifierStatus } from "./generated/unicode-optimized-loader.ts";
+
+/**
+ * Get all Unicode confusable mappings for the current profile.
+ *
+ * Returns an array of confusable character mappings based on the official
+ * Unicode confusablesSummary.txt file. Each mapping represents characters
+ * that could be visually confused with each other.
+ *
+ * **Profile Behavior:**
+ * - `minimal`: Empty array (no confusables for frontend optimization)
+ * - `standard`: Curated high-risk confusables (~20,000 mappings)
+ * - `complete`: Full confusables data (~17,271 official mappings)
+ *
+ * **Performance:** O(1) - data is cached after first load
+ * **Memory Usage:** ~80KB for standard, ~82KB for complete profile
+ *
+ * **Use Cases:**
+ * - Brand protection (domain spoofing detection)
+ * - Security analysis and threat intelligence
+ * - Internationalization validation
+ * - Phishing detection in user-generated content
+ *
+ * @returns Array of source→target confusable mappings
+ * @throws SecurityKitError if integrity verification fails
+ *
+ * @example
+ * ```typescript
+ * const confusables = getConfusables();
+ * console.log(`${confusables.length} confusable mappings loaded`);
+ *
+ * // Find specific confusables
+ * const cyrillicConfusables = confusables.filter(c =>
+ *   c.source >= '\u0400' && c.source <= '\u04FF'
+ * );
+ * ```
+ *
+ * @since 1.0.0
+ * @see {@link https://unicode.org/Public/16.0.0/ucd/confusablesSummary.txt} Official confusables data
+ */
+/**
+ * Get all Unicode confusable mappings for the current profile.
+ *
+ * Returns an array of confusable character mappings based on the official
+ * Unicode confusablesSummary.txt file. Each mapping represents characters
+ * that could be visually confused with each other.
+ *
+ * **Profile Behavior:**
+ * - `minimal`: Empty array (no confusables for frontend optimization)
+ * - `standard`: Curated high-risk confusables (~20,000 mappings)
+ * - `complete`: Full confusables data (~17,271 official mappings)
+ *
+ * **Performance:** O(1) - data is cached after first load
+ * **Memory Usage:** ~80KB for standard, ~82KB for complete profile
+ *
+ * **Use Cases:**
+ * - Brand protection (domain spoofing detection)
+ * - Security analysis and threat intelligence
+ * - Internationalization validation
+ * - Phishing detection in user-generated content
+ *
+ * @returns Array of source→target confusable mappings
+ * @throws SecurityKitError if integrity verification fails
+ *
+ * @example
+ * ```typescript
+ * const confusables = getConfusables();
+ * console.log(`${confusables.length} confusable mappings loaded`);
+ *
+ * // Find specific confusables
+ * const cyrillicConfusables = confusables.filter(c =>
+ *   c.source >= '\u0400' && c.source <= '\u04FF'
+ * );
+ * ```
+ *
+ * @since 1.0.0
+ * @see {@link https://unicode.org/Public/16.0.0/ucd/confusablesSummary.txt} Official confusables data
+ */
+export { getConfusables } from "./generated/unicode-optimized-loader.ts";
+
+/**
+ * Check if two characters are confusable with each other.
+ *
+ * Uses official Unicode confusables data to determine if two characters
+ * could be visually confused. Checks both directions of the mapping.
+ *
+ * **Input Normalization:** Both characters are normalized to NFC before lookup
+ * **Case Sensitivity:** Case-sensitive comparison (use toLowerCase() if needed)
+ * **Performance:** O(n) where n = number of confusables (future: O(log n) with indexing)
+ *
+ * **Security Applications:**
+ * - Homograph attack detection
+ * - Brand/domain spoofing prevention
+ * - User input validation
+ * - Content moderation
+ *
+ * @param char1 - First character to compare
+ * @param char2 - Second character to compare
+ * @returns true if characters are confusable, false otherwise
+ * @throws InvalidParameterError if characters are invalid
+ *
+ * @example
+ * ```typescript
+ * // Cyrillic 'а' vs Latin 'a' (classic homograph attack)
+ * const isRisky = isConfusable('а', 'a');  // true
+ *
+ * // Greek 'ο' vs Latin 'o'
+ * const isRisky2 = isConfusable('ο', 'o'); // true
+ *
+ * // Same characters
+ * const same = isConfusable('a', 'a');     // false
+ * ```
+ *
+ * @since 1.0.0
+ * @see {@link https://unicode.org/reports/tr39/#Confusable_Detection} UTS #39 Confusable Detection
+ */
+export { isConfusable } from "./generated/unicode-optimized-loader.ts";
+
+/**
+ * Get all confusable target characters for a given source character.
+ *
+ * Returns an array of characters that could be visually confused with the
+ * input character, based on official Unicode confusables data.
+ *
+ * **Input Normalization:** Input character is normalized to NFC before lookup
+ * **Performance:** O(n) linear search (future: O(log n) with indexing)
+ * **Ordering:** Results are in the order they appear in confusables data
+ *
+ * **Risk Assessment Applications:**
+ * - Generate alternative spellings for brand protection
+ * - Identify potential spoofing vectors
+ * - Security analysis and penetration testing
+ * - Content similarity analysis
+ *
+ * @param char - Source character to find confusable targets for
+ * @returns Array of confusable target characters (may be empty)
+ * @throws InvalidParameterError if char is invalid
+ *
+ * @example
+ * ```typescript
+ * // Find confusables for Latin 'a'
+ * const targets = getConfusableTargets('a');
+ * // Returns: ['а', 'α', 'ａ', ...] (Cyrillic, Greek, fullwidth variants)
+ *
+ * // Check for any confusables
+ * const hasConfusables = targets.length > 0;
+ *
+ * // Generate brand protection rules
+ * const brandName = 'paypal';
+ * for (const char of brandName) {
+ *   const variants = getConfusableTargets(char);
+ *   if (variants.length > 0) {
+ *     console.log(`'${char}' can be confused with: ${variants.join(', ')}`);
+ *   }
+ * }
+ * ```
+ *
+ * @since 1.0.0
+ * @see {@link https://unicode.org/reports/tr39/#Confusable_Detection} UTS #39 Confusable Detection
+ */
+export { getConfusableTargets } from "./generated/unicode-optimized-loader.ts";
+
+/**
+ * Get statistics about the currently loaded Unicode data profile.
+ *
+ * Provides metrics about the Unicode data currently in memory, useful for
+ * monitoring, debugging, and performance analysis.
+ *
+ * **Profile Statistics:**
+ * - `minimal`: ~391 ranges, 0 confusables, ~877 bytes
+ * - `standard`: ~391 ranges, ~20K confusables, ~80KB
+ * - `complete`: ~391 ranges, ~17K confusables, ~82KB
+ *
+ * **Performance:** O(1) - calculates from cached data
+ *
+ * **Monitoring Applications:**
+ * - Profile validation in production
+ * - Memory usage analysis
+ * - Data loading verification
+ * - Performance benchmarking
+ *
+ * @returns Unicode data statistics object
+ * @throws SecurityKitError if data loading failed
+ *
+ * @example
+ * ```typescript
+ * const stats = getDataStats();
+ * console.log(`Profile loaded: ${stats.ranges} ranges, ${stats.confusables} confusables`);
+ * console.log(`Memory usage: ${stats.totalBytes} bytes`);
+ *
+ * // Verify expected profile
+ * const config = getUnicodeSecurityConfig();
+ * if (config.dataProfile === 'standard' && stats.confusables === 0) {
+ *   console.warn('Standard profile expected but no confusables loaded');
+ * }
+ * ```
+ *
+ * @since 1.0.0
+ */
+export { getDataStats } from "./generated/unicode-optimized-loader.ts";
+
+/**
+ * Get the current Unicode security configuration.
+ *
+ * Returns the current configuration controlling Unicode data loading,
+ * validation behavior, and performance characteristics.
+ *
+ * **Configuration Properties:**
+ * - `dataProfile`: Which Unicode dataset to load (minimal/standard/complete)
+ * - `lazyLoad`: Whether to load data on-demand vs eagerly
+ * - `maxInputLength`: Maximum characters for Unicode validation (DoS protection)
+ * - `enableConfusablesDetection`: Enable/disable confusables analysis
+ * - `enableValidationCache`: Cache validation results for performance
+ *
+ * **Thread Safety:** Configuration is immutable (frozen object)
+ * **Performance:** O(1) - returns cached configuration copy
+ *
+ * @returns Current Unicode security configuration (frozen)
+ *
+ * @example
+ * ```typescript
+ * const config = getUnicodeSecurityConfig();
+ * console.log(`Current profile: ${config.dataProfile}`);
+ * console.log(`Confusables detection: ${config.enableConfusablesDetection}`);
+ * console.log(`Max input length: ${config.maxInputLength} characters`);
+ *
+ * // Conditional behavior based on configuration
+ * if (config.dataProfile === 'minimal') {
+ *   console.log('Using minimal profile - no confusables detection');
+ * }
+ * ```
+ *
+ * @since 1.0.0
+ * @see {@link setUnicodeSecurityConfig} To modify configuration
+ * @see {@link file://./docs/User docs/unicode-data-format.md} Unicode data format documentation
+ */
+export { getUnicodeSecurityConfig } from "./config.ts";
+
+/**
+ * Update Unicode security configuration.
+ *
+ * Modifies the Unicode security configuration to control data loading,
+ * validation behavior, and performance characteristics. Configuration
+ * can only be changed before the crypto state is sealed.
+ *
+ * **Profile Selection Guide:**
+ * - `minimal`: Frontend/mobile apps - basic validation only (~877 bytes)
+ * - `standard`: Backend/servers - full validation with curated confusables (~80KB)
+ * - `complete`: Security research - comprehensive confusables dataset (~82KB)
+ *
+ * **Performance Considerations:**
+ * - `lazyLoad: true`: Faster startup, async overhead on first use
+ * - `lazyLoad: false`: Slower startup, predictable runtime performance
+ * - `enableValidationCache: true`: Memory vs CPU tradeoff
+ *
+ * **Security Considerations:**
+ * - Higher `maxInputLength`: Greater DoS attack surface
+ * - `enableConfusablesDetection: false`: Reduced attack detection capability
+ * - Profile changes require application restart to fully take effect
+ *
+ * @param config - Partial configuration object to merge with current settings
+ * @throws InvalidConfigurationError if crypto state is sealed
+ * @throws InvalidParameterError if configuration values are invalid
+ *
+ * @example
+ * ```typescript
+ * // Frontend-optimized configuration
+ * setUnicodeSecurityConfig({
+ *   dataProfile: 'minimal',
+ *   lazyLoad: true,
+ *   enableConfusablesDetection: false,
+ *   maxInputLength: 1024
+ * });
+ *
+ * // Backend production configuration
+ * setUnicodeSecurityConfig({
+ *   dataProfile: 'standard',
+ *   lazyLoad: false,
+ *   enableConfusablesDetection: true,
+ *   maxInputLength: 4096,
+ *   enableValidationCache: false // Avoid memory overhead
+ * });
+ *
+ * // Security research configuration
+ * setUnicodeSecurityConfig({
+ *   dataProfile: 'complete',
+ *   enableConfusablesDetection: true,
+ *   maxInputLength: 8192
+ * });
+ * ```
+ *
+ * @since 1.0.0
+ * @see {@link getUnicodeSecurityConfig} To read current configuration
+ * @see {@link file://./docs/User docs/unicode-data-format.md} Unicode data format documentation
+ */
+export { setUnicodeSecurityConfig, sealUnicodeSecurityConfig } from "./config.ts";
+
+/**
+ * Export Unicode types for public use.
+ *
+ * These types support the Unicode security API and provide type safety
+ * for applications using the Unicode validation functions.
+ *
+ * @since 1.0.0
+ */
+export type {
+  UnicodeProfile,
+  IdentifierStatus,
+  UnicodeRangeEntry,
+  UnicodeConfusableEntry,
+  UnicodeDataStats,
+} from "./generated/unicode-optimized-loader.ts";
+
+export type { UnicodeSecurityConfig } from "./config.ts";

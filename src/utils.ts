@@ -17,7 +17,6 @@ import {
   getTimingConfig,
 } from "./config.ts";
 import { setDevelopmentLogger_ } from "./dev-logger.ts";
-import { normalizeInputString } from "./canonical.ts";
 
 // --- Internal types used in this module ---
 type GlobalWithSharedArrayBuffer = {
@@ -51,6 +50,17 @@ const ALLOWED_TAG_KEYS = new Set([
 ]);
 const METRIC_NAME_REGEX = /^[\w.-]{1,64}$/u;
 
+/**
+ * Simple synchronous normalization for trusted internal metric tags.
+ * Uses basic NFKC normalization without full security validation.
+ */
+function normalizeMetricKey(key: unknown): string {
+  if (typeof key !== "string") {
+    throw new InvalidParameterError("Metric key must be a string");
+  }
+  return key.normalize("NFKC");
+}
+
 function sanitizeMetricTags(tags: unknown): Record<string, string> | undefined {
   if (tags === null || tags === undefined || typeof tags !== "object")
     return undefined;
@@ -58,12 +68,12 @@ function sanitizeMetricTags(tags: unknown): Record<string, string> | undefined {
   const entries = Object.keys(source)
     .filter((key) => {
       // Normalize key with NFKC (stronger canonical form) to mitigate Unicode spoofing (OWASP ASVS V5.1.4)
-      const safeKey = normalizeInputString(key);
+      const safeKey = normalizeMetricKey(key);
       return ALLOWED_TAG_KEYS.has(safeKey);
     })
     .map((key) => {
       // Re-apply NFKC normalization for the emitted key tuple (defense-in-depth)
-      const safeKey = normalizeInputString(key);
+      const safeKey = normalizeMetricKey(key);
       const value = Object.hasOwn(source, key)
         ? ((): unknown => {
             const descriptor = Object.getOwnPropertyDescriptor(source, key);

@@ -17,3 +17,4 @@ if (typeof (globalThis as any).afterAll === "function") {
   // fallback: attempt to cleanup on process exit
   process.on("exit", () => cleanup());
 }
+

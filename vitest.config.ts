@@ -19,6 +19,18 @@ export default defineConfig({
   test: {
     pool: "threads",
     globals: true,
+    // Memory optimization: reduce parallelism to prevent memory exhaustion
+    poolOptions: {
+      threads: {
+        // Reduced from 6 to 2 CPU cores to control memory usage
+        maxThreads: 2,
+        minThreads: 1,
+        // Enable Atomics for better thread synchronization performance
+        useAtomics: true,
+        // Keep isolation enabled for security tests
+        isolate: true,
+      },
+    },
     // Consider disabling file isolation to speed up large suites if tests clean up after themselves.
     // See docs: https://vitest.dev/guide/improving-performance.html
     // For strict security tests we keep defaults; you can enable locally when profiling:
@@ -153,6 +165,8 @@ export default defineConfig({
     __TEST__: true,
     "process.env.NODE_ENV": JSON.stringify("test"),
     "process.env.SECURITY_KIT_ALLOW_TEST_APIS": JSON.stringify("true"),
+    // Memory optimization: more aggressive rate limiting during tests
+    "process.env.SECURITY_KIT_TEST_LOG_RATE_LIMIT": JSON.stringify("50"),
     "globalThis.__SECURITY_KIT_ALLOW_TEST_APIS": true,
   },
 });

@@ -1,11 +1,30 @@
 // SPDX-License-Identifier: LGPL-3.0-or-later
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { InvalidParameterError } from "../../src/errors.ts";
-import {
-  normalizeInputString,
-} from "../../src/canonical.ts";
+import { normalizeInputString, toCanonicalValue } from "../../src/canonical.ts";
+import { setUnicodeSecurityConfig, getUnicodeSecurityConfig } from "../../src/config.ts";
+import { MAX_KEYS_PER_OBJECT } from "../../src/utils.ts";
 
 describe("canonical normalization hardening", () => {
+  const original = getUnicodeSecurityConfig();
+  beforeAll(() => {
+    // Ensure risk scoring enabled for mutation immutability test
+    setUnicodeSecurityConfig({ enableRiskScoring: true });
+  });
+  afterAll(() => {
+    // Restore config (best effort)
+    setUnicodeSecurityConfig({
+      dataProfile: original.dataProfile,
+      lazyLoad: original.lazyLoad,
+      maxInputLength: original.maxInputLength,
+      enableConfusablesDetection: original.enableConfusablesDetection,
+      enableValidationCache: original.enableValidationCache,
+      enableRiskScoring: original.enableRiskScoring,
+      riskWarnThreshold: original.riskWarnThreshold,
+      riskBlockThreshold: original.riskBlockThreshold,
+      blockRawShellChars: original.blockRawShellChars,
+    });
+  });
   describe("structural delimiter detection (via normalizeInputString)", () => {
     it("passes when no structural characters are introduced", () => {
       const input = "hello world";
@@ -128,17 +147,13 @@ describe("canonical normalization hardening", () => {
       ).toThrow(InvalidParameterError);
       expect(() =>
         normalizeInputString(input, "test"),
-      ).toThrow(/invisible characters/);
+      ).toThrow(/invisible\/zero-width/);
     });
 
-    it("rejects homoglyph characters", () => {
+    // Homoglyph presence currently logs (warning) not hard-reject; ensure no throw
+    it("does not throw for mixed-script homoglyph (logs warning only)", () => {
       const input = "hello\u0430world"; // Cyrillic 'а'
-      expect(() =>
-        normalizeInputString(input, "test"),
-      ).toThrow(InvalidParameterError);
-      expect(() =>
-        normalizeInputString(input, "test"),
-      ).toThrow(/homoglyph characters/);
+      expect(() => normalizeInputString(input, "test")).not.toThrow();
     });
 
     it("rejects dangerous Unicode ranges", () => {
@@ -148,7 +163,7 @@ describe("canonical normalization hardening", () => {
       ).toThrow(InvalidParameterError);
       expect(() =>
         normalizeInputString(input, "test"),
-      ).toThrow(/dangerous Unicode characters/);
+      ).toThrow(/disallowed control/);
     });
 
     it("handles empty input", () => {
@@ -184,6 +199,41 @@ describe("canonical normalization hardening", () => {
     it("handles array input", () => {
       const result = normalizeInputString([1, 2, 3], "test");
       expect(result).toBe("[1,2,3]");
+    });
+
+    it("rejects structural delimiter introduced via normalization (fullwidth colon)", () => {
+      expect(() => normalizeInputString("\uFF1A", "struct-intro"))
+        .toThrow(InvalidParameterError);
+    });
+
+    it("enforces MAX_KEYS_PER_OBJECT cap in deep scan", () => {
+      const obj: Record<string, unknown> = {};
+      for (let i = 0; i < MAX_KEYS_PER_OBJECT + 5; i++) obj["k" + i] = i;
+      expect(() => toCanonicalValue(obj)).toThrow(InvalidParameterError);
+    });
+
+    it("freezes risk assessment payload (mutation attempts fail)", () => {
+      let mutationError: unknown;
+      setUnicodeSecurityConfig({
+        enableRiskScoring: true,
+        onRiskAssessment: (payload) => {
+          try {
+            // @ts-expect-error intentional mutation attempt
+            (payload as any).score = 9999;
+          } catch (e) {
+            mutationError = e;
+          }
+          try {
+            // @ts-expect-error intentional mutation attempt
+            (payload.metrics as any).push({ id: "x", score: 0, triggered: false });
+          } catch (e) {
+            mutationError = e;
+          }
+        },
+      });
+      // Use non-ASCII so fast path skipped
+      normalizeInputString("é", "risk-freeze");
+      expect(mutationError).toBeInstanceOf(TypeError);
     });
   });
 });

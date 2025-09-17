@@ -61,9 +61,11 @@ This library is a powerful tool to help you build secure applications, but it is
   - [Secure Startup Pattern & Sealing the Kit](#secure-startup-pattern--sealing-the-kit)
   - [Secret Length Policy](#secret-length-policy)
   - [Canonicalization for Signatures](#canonicalization-for-signatures)
+    - [Unicode Normalization & Scope (Option A)](#unicode-normalization--scope-option-a)
   - [Worker Integrity Controls and CSP](#worker-integrity-controls-and-csp)
   - [Production Telemetry & Error Reporting](#production-telemetry--error-reporting)
   - [Bundler Configuration (Vite)](#bundler-configuration-vite)
+  - [Optimized Unicode Binaries](#optimized-unicode-binaries)
 - [Deno + JSR Support](#deno--jsr-support)
 - [The Constitutions & Methodology](#the-constitutions--methodology)
 - [Contributing](#contributing)
@@ -391,6 +393,39 @@ Security-kit enforces a minimum secret length for HMAC-based API signing and ver
 -   If you use shorter secrets, rotate to a 32-byte key. For legacy systems, consider using a KDF (like HKDF-SHA256) to derive a 32-byte key from your existing secret.
 
 ### Canonicalization for Signatures
+### Unicode Normalization & Scope (Option A)
+
+Security-Kit intentionally scopes Unicode normalization to a **focused, auditable surface area**. The module `src/canonical.ts` performs:
+
+* NFKC normalization (idempotency-verified)
+* Rejection of bidirectional control characters (Trojan Source class)
+* Rejection of invisible / zero-width characters
+* Rejection of dangerous control / non-character ranges
+* Limits on combining marks per base character (mitigates normalization & rendering DoS)
+* Detection of normalization expansion bombs (length ratio limit)
+* Detection of structural delimiter introduction (e.g., fullwidth ':' normalizing to ':')
+* Deterministic canonical value / JSON serialization utilities (`toCanonicalValue`, `safeStableStringify`)
+
+Deliberately **not** included in this layer (by design):
+
+* Generic XSS filtering or HTML policy enforcement
+* SQL / shell / path traversal heuristics
+* Multi-pass percent decoding or deep URL decoding logic
+* Insecure “bypass” normalization helpers
+
+These concerns belong to higher, context-specific layers (e.g., sanitizer utilities, parameterized queries, path whitelisting). This separation reduces the attack surface and makes each layer easier to test and reason about (aligns with OWASP ASVS L3 and the library’s Security Constitution Pillars #1–#4).
+
+If you previously relied on broad WAF-style behavior inside normalization, migrate as follows:
+
+| Legacy Expectation | Replacement Strategy |
+| ------------------ | -------------------- |
+| URL-encoded `<script>` blocked | Use the Sanitizer + Trusted Types or CSP enforcement |
+| SQL keyword rejection | Use parameterized queries / ORM binding |
+| Auto multi-pass `%` decoding | Decode externally once, then call `normalizeInputString` |
+| Internal unsafe normalization helper | Removed; always use `normalizeInputString` |
+
+For rationale, see the header comment in `src/canonical.ts` (“Option A Scope”). PRs proposing expansion must justify why a concern cannot live in a dedicated module with its own adversarial test suite.
+
 
 For API signing to be reliable, both the client and server must produce the exact same string representation of the payload. The `toCanonicalValue` and `safeStableStringify` functions provide this guarantee. They are **deterministic**, sort object keys, handle circular references, and are hardened against **prototype pollution** by rejecting forbidden keys (`__proto__`, etc.) and insecure data types.
 
@@ -446,6 +481,22 @@ export default defineConfig({
   },
 });
 ```
+
+### Optimized Unicode Binaries
+
+Security-Kit ships **compressed, versioned Unicode data** (Identifier Allowed Ranges + Confusables) for Unicode 16.0.0 using a hardened binary format:
+
+* Identifier Ranges v2: magic `U16R`, delta + base‑128 varint encoding (≈70% smaller than legacy 8‑byte pairs) with strict monotonicity + range caps.
+* Confusables v2: magic `U16C`, split single code point table (uint32) & front‑coded multi sequence table, plus variable‑length mapping entries (flag‑driven small/large indices). Backward compatible with original v1 string‑table format.
+* Minimal profile ships zero mappings for ultra‑tight environments; standard is a curated high‑risk subset; complete includes the full sanitized set.
+* All loaders enforce: magic/version validation, count & size caps, varint sanity (≤5 bytes), bounds checks, and deterministic single‑pass parsing.
+
+See the user guide in: `docs/User docs/unicode-data-format.md` or the technical specification in: `docs/Additional security guidelines/unicode-binary-format.md`.
+
+Why this matters:
+* Reduces bundle size & parse cost without weakening spoofing defenses.
+* Eliminates unneeded Unicode metadata & redirection chains while preserving semantic integrity (validated by round‑trip and adversarial tests).
+* Provides an explicit evolution path (reserved header fields) for future integrity tags (e.g., BLAKE3 checksum) without breaking consumers.
 
 ## Deno + JSR Support
 

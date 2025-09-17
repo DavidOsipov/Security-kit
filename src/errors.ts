@@ -115,6 +115,25 @@ export class CircuitBreakerError extends Error {
   }
 }
 
+// Canonicalization specific error classes (clear taxonomy for callers)
+export class CanonicalizationDepthError extends InvalidParameterError {
+  public override readonly code = 'ERR_INVALID_PARAMETER' as const;
+  public readonly canonicalCode = 'ERR_CANON_DEPTH' as const;
+  constructor(message: string) {
+    super(message);
+    this.name = 'CanonicalizationDepthError';
+  }
+}
+
+export class CanonicalizationTraversalError extends InvalidParameterError {
+  public override readonly code = 'ERR_INVALID_PARAMETER' as const;
+  public readonly canonicalCode = 'ERR_CANON_TRAVERSAL' as const;
+  constructor(message: string) {
+    super(message);
+    this.name = 'CanonicalizationTraversalError';
+  }
+}
+
 export class TransferableNotAllowedError extends Error {
   public readonly code = "ERR_TRANSFERABLE_NOT_ALLOWED";
 
@@ -132,6 +151,25 @@ export class IllegalStateError extends Error {
   constructor(message: string) {
     super(`[security-kit] ${message}`);
     this.name = "IllegalStateError";
+  }
+}
+
+export class SecurityValidationError extends InvalidParameterError {
+  public override readonly code = "ERR_INVALID_PARAMETER" as const;
+  public readonly securityCode = "ERR_SECURITY_VALIDATION" as const;
+
+  constructor(
+    _message: string,
+    public readonly securityScore: number,
+    public readonly threshold: number,
+    public readonly primaryThreat: string,
+    public readonly recommendation: string,
+    public readonly context: string,
+  ) {
+    super(
+      `${context}: BLOCKED - Cumulative security risk score ${securityScore}/${threshold} exceeds safety threshold. Primary threat: ${primaryThreat}. ${recommendation}`,
+    );
+    this.name = "SecurityValidationError";
   }
 }
 
@@ -197,6 +235,47 @@ export function getStackFingerprint(stack?: string): string | undefined {
   } catch {
     return undefined;
   }
+}
+
+/**
+ * Create a typed InvalidParameterError with optional context prefix.
+ * Centralizes message formatting so callers can rely on errors.ts for message shape.
+ */
+export function makeInvalidParameterError(
+  detail: string,
+  context?: string,
+): InvalidParameterError {
+  if (typeof context === "string" && context.length > 0) {
+    return new InvalidParameterError(`${context}: ${detail}`);
+  }
+  return new InvalidParameterError(detail);
+}
+
+/**
+ * Create a CircuitBreakerError for depth budget exceeded scenarios.
+ * Centralizes DoS protection error handling.
+ */
+export function makeDepthBudgetExceededError(
+  operation: string,
+  maxDepth: number,
+): CanonicalizationDepthError {
+  return new CanonicalizationDepthError(
+    `[security-kit] ${operation}: Canonicalization depth budget exceeded (max=${maxDepth}). This prevents DoS attacks from deeply nested structures.`,
+  );
+}
+
+/**
+ * Create an InvalidParameterError for array/payload size violations.
+ * Centralizes payload size validation error handling.
+ */
+export function makePayloadTooLargeError(
+  operation: string,
+  actualSize: number,
+  maxSize: number,
+): InvalidParameterError {
+  return new InvalidParameterError(
+    `${operation}: Payload too large (${actualSize} > ${maxSize}). This prevents DoS attacks from oversized inputs.`,
+  );
 }
 
 /**

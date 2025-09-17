@@ -75,6 +75,9 @@
     // TypeScript errors. This prevents you from accidentally publishing a broken or partially-compiled
     // version of your library. It's a critical safety net.
     "noEmitOnError": true
+    ,
+    // Allow explicit .ts extension imports (needed for current source style, resolves TS5097)
+    "allowImportingTsExtensions": true
   },
   "include": [
     "src/**/*",

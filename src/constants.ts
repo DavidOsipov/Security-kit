@@ -7,7 +7,15 @@
  * to prevent runtime mutation by consumers.
  */
 
-const _FORBIDDEN_KEYS = new Set(["__proto__", "prototype", "constructor"]);
+const _FORBIDDEN_KEYS = new Set([
+  "__proto__",
+  "prototype",
+  "constructor",
+  "__defineGetter__",
+  "__defineSetter__",
+  "__lookupGetter__",
+  "__lookupSetter__",
+]);
 Object.freeze(_FORBIDDEN_KEYS);
 
 /**

@@ -10,6 +10,7 @@ Security Kit is an opinionated, zero-dependency TypeScript library providing sec
 
 - API reference: ../Documentation.md (high-level library docs)
 - URL utilities: ../postMessage.md (detailed examples)
+- Unicode data format: ./unicode-data-format.md (Unicode security & performance guide)
 
 # Getting started
 

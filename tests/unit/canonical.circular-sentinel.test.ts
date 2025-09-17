@@ -1,7 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { hasCircularSentinel } from '../../src/canonical';
+import { hasCircularSentinel, setCanonicalConfig } from '../../src/canonical.ts';
 
 describe('hasCircularSentinel helper', () => {
+  // Ensure annotation mode so any future refactor relying on canonicalization behavior
+  // doesn't conflict with manual sentinel checks here.
+  setCanonicalConfig({ circularPolicy: 'annotate' });
   it('detects direct __circular property on object', () => {
     const o: any = { __circular: true };
     expect(hasCircularSentinel(o)).toBe(true);
