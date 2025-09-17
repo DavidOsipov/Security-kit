@@ -1,4 +1,4 @@
-# A hardened Dependabot configuration file.
+# A hardened Dependabot configuration file for both version and security updates.
 # For all configuration options, see the official documentation:
 # https://docs.github.com/code-security/dependabot/dependabot-version-updates/configuration-options-for-the-dependabot.yml-file
 
@@ -6,44 +6,49 @@ version: 2
 updates:
   # Harden and maintain npm dependencies
   - package-ecosystem: "npm"
-    directory: "/" # Location of package manifests
+    directory: "/"
     schedule:
       interval: "daily"
-      time: "04:00" # Run early in the morning (UTC)
+      time: "04:00"
       timezone: "Etc/UTC"
 
-    # **SECURITY HARDENING**
+    # **SECURITY HARDENING (for Version Updates)**
     # Wait 5 days before opening a PR for a new version. This gives time
     # for the community to discover and flag malicious packages.
+    # This does NOT delay critical security patches for known vulnerabilities.
     cooldown:
       default-days: 5
 
     # **MANAGEABILITY**
-    # Group patch and minor updates together to reduce PR noise.
-    # Major updates will still get their own PRs.
+    # Define separate groups for version updates and security updates.
     groups:
-      npm-patch-and-minor:
+      # Group patch and minor version updates together to reduce PR noise.
+      npm-version-updates:
+        applies-to: "version-updates"
         patterns:
-          - "*" # Match all dependencies
+          - "*"
         update-types:
           - "minor"
           - "patch"
+      # Group all security updates into a single PR per run.
+      npm-security-updates:
+        applies-to: "security-updates"
+        patterns:
+          - "*"
 
-    # **STABILITY**
+    # **STABILITY (for Version Updates)**
     # Ignore major version updates, as they often contain breaking changes
-    # and should be handled manually with careful testing.
+    # and should be handled manually.
     ignore:
       - dependency-name: "*"
         update-types: ["version-update:semver-major"]
 
-    # Use a clear, conventional commit message prefix.
+    # Use a clear, conventional commit message prefix. This applies to both update types.
     commit-message:
       prefix: "chore(deps)"
       include: "scope"
 
-    # Limit open PRs to a reasonable number to avoid getting overwhelmed.
     open-pull-requests-limit: 10
-
 
   # Harden and maintain GitHub Actions
   - package-ecosystem: "github-actions"
@@ -57,9 +62,17 @@ updates:
     cooldown:
       default-days: 5
 
-    # Group all GitHub Actions updates into a single PR.
+    # **MANAGEABILITY**
+    # Group GitHub Actions updates into separate PRs for version vs. security.
     groups:
-      github-actions:
+      # Group all version updates for actions together.
+      actions-version-updates:
+        applies-to: "version-updates"
+        patterns:
+          - "*"
+      # Group all security updates for actions together.
+      actions-security-updates:
+        applies-to: "security-updates"
         patterns:
           - "*"
 
