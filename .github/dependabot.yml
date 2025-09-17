@@ -1,18 +1,71 @@
-# To get started with Dependabot version updates, you'll need to specify which
-# package ecosystems to update and where the package manifests are located.
-# Please see the documentation for all configuration options:
+# A hardened Dependabot configuration file.
+# For all configuration options, see the official documentation:
 # https://docs.github.com/code-security/dependabot/dependabot-version-updates/configuration-options-for-the-dependabot.yml-file
 
 version: 2
 updates:
-  - package-ecosystem: "npm" # See documentation for possible values
+  # Harden and maintain npm dependencies
+  - package-ecosystem: "npm"
     directory: "/" # Location of package manifests
     schedule:
       interval: "daily"
-  # Enable version updates for GitHub Actions
+      time: "04:00" # Run early in the morning (UTC)
+      timezone: "Etc/UTC"
+
+    # **SECURITY HARDENING**
+    # Wait 5 days before opening a PR for a new version. This gives time
+    # for the community to discover and flag malicious packages.
+    cooldown:
+      default-days: 5
+
+    # **MANAGEABILITY**
+    # Group patch and minor updates together to reduce PR noise.
+    # Major updates will still get their own PRs.
+    groups:
+      npm-patch-and-minor:
+        patterns:
+          - "*" # Match all dependencies
+        update-types:
+          - "minor"
+          - "patch"
+
+    # **STABILITY**
+    # Ignore major version updates, as they often contain breaking changes
+    # and should be handled manually with careful testing.
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+
+    # Use a clear, conventional commit message prefix.
+    commit-message:
+      prefix: "chore(deps)"
+      include: "scope"
+
+    # Limit open PRs to a reasonable number to avoid getting overwhelmed.
+    open-pull-requests-limit: 10
+
+
+  # Harden and maintain GitHub Actions
   - package-ecosystem: "github-actions"
-    # Workflow files stored in the default location of `.github/workflows`
-    # You don't need to specify `/.github/workflows` for `directory`. You can use `directory: "/"`.
     directory: "/"
     schedule:
       interval: "daily"
+      time: "04:00"
+      timezone: "Etc/UTC"
+
+    # Also apply a cooldown to GitHub Actions to avoid newly compromised actions.
+    cooldown:
+      default-days: 5
+
+    # Group all GitHub Actions updates into a single PR.
+    groups:
+      github-actions:
+        patterns:
+          - "*"
+
+    # Use a clear, conventional commit message prefix.
+    commit-message:
+      prefix: "chore(ci)"
+      include: "scope"
+
+    open-pull-requests-limit: 5
