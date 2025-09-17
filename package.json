@@ -114,22 +114,41 @@
     "verify:sanitize": "node scripts/verify-sanitize.cjs",
     "generate:sbom": "npx ts-node --transpile-only scripts/generate-sbom.ts",
     "pack:check": "npm pack --dry-run",
-  "generate:unicode-digests": "npx ts-node --transpile-only scripts/generate-unicode-digests.ts",
-  "scan:unicode-controls": "node scripts/scan-unicode-controls.ts",
-  "bench:confusables-index": "node --loader ts-node/esm scripts/bench-confusables-index.ts",
-  "prepare": "node -r ts-node/register .husky/install.ts && npm run generate:unicode-digests && npm run scan:unicode-controls",
+    "generate:unicode-digests": "npx ts-node --transpile-only scripts/generate-unicode-digests.ts",
+    "scan:unicode-controls": "node scripts/scan-unicode-controls.ts",
+    "bench:confusables-index": "node --loader ts-node/esm scripts/bench-confusables-index.ts",
+    "prepare": "node -r ts-node/register .husky/install.ts && npm run generate:unicode-digests && npm run scan:unicode-controls",
     "prepare:full": "npm run typecheck && npm run lint && npm run test && npm run verify:sanitize && npm run build && npm run generate:sbom",
-  "prepublishOnly": "npm run prepare && npm run typecheck && npm run lint:ci && npm run test:unit",
+    "prepublishOnly": "npm run prepare && npm run typecheck && npm run lint:ci && npm run test:unit",
     "guard:no-blob-fallback": "NODE_NO_WARNINGS=1 npx ts-node-esm ./scripts/ci-guard-no-blob-fallback.ts",
     "ci:check": "npm run guard:no-blob-fallback && npm run typecheck && npm run lint:ci && npm run test && npm run ci:knip",
     "check:secrets": "NODE_OPTIONS=--no-warnings npx ts-node-esm ./tools/check-short-secrets.ts",
     "fuzz:standalone": "npm run build && node -e \"(async function(){const m=await import('./dist/index.mjs');const it=Number(process.env.RUN_FUZZ_ITERATIONS||'100');if(typeof m.runStandaloneFuzzHarness==='function'){const code=await m.runStandaloneFuzzHarness(it);process.exit(code||0);}else{console.error('runStandaloneFuzzHarness not exported');process.exit(1);}})()\"",
     "perf": "NODE_OPTIONS=--expose-gc npx vitest run tests/performance --config vitest.min.config.mjs",
     "bench": "npx tsx benchmarks/secure-lru-cache.bench.ts",
-    "bench:compare": "QUIET_SECURELRU_WARN=1 node benchmarks/compare-lru-harness.mjs",
+    "bench:compare": "npm run bench && deno task bench:deno",
     "bench:compare:verbose": "node benchmarks/compare-lru-harness.mjs",
     "bench:summarize": "node benchmarks/summarize-profiles.mjs benchmarks 10",
-    "bench:sweep-segmented": "node benchmarks/sweep-segmented-tuning.mjs"
+    "bench:sweep-segmented": "node benchmarks/sweep-segmented-tuning.mjs",
+    "security:check": "deno task check && deno task lint && deno task test:security",
+    "security:audit": "deno run --allow-read --allow-net --allow-env scripts/security-audit.ts",
+    "supply-chain:verify": "deno task check && npm audit && snyk test",
+    "test:deno": "deno test --allow-read --allow-env tests/deno/ --reporter=verbose",
+    "test:deno:security": "deno test --allow-read --allow-env tests/security/",
+    "test:hybrid": "npm test && deno task test:deno",
+    "build:deno": "deno check src/index.ts && deno bundle src/index.ts dist/bundle.js",
+    "build:secure": "deno task security:check && npm run build",
+    "publish:jsr": "deno publish",
+    "publish:hybrid": "npm run build:secure && npm publish && deno task publish:jsr",
+    "lint:deno": "deno task lint:eslint",
+    "lint:all": "npm run lint && deno task lint:eslint",
+    "supply-chain:scan": "deno task security:audit && npm audit && deno run --allow-net scripts/check-dependencies.ts",
+    "test:migration": "deno run --allow-read scripts/test-migration-compatibility.ts",
+    "validate:types": "deno check src/index.ts && tsc --noEmit",
+    "validate:security": "deno task security:check && deno run --allow-read scripts/validate-security.ts",
+    "dev:hybrid": "deno task validate:types && npm run test:watch",
+    "ci:hybrid": "deno task security:check && npm run lint && npm test && deno task test:deno",
+    "bench:deno": "deno bench --allow-read benchmarks/deno/"
   },
   "peerDependencies": {
     "dompurify": "^3.2.0"
@@ -194,5 +213,11 @@
     "**/*.{ts,tsx}": [
       "eslint --fix"
     ]
+  },
+  "security": {
+    "advisoryUrl": "https://github.com/david-osipov/Security-Kit/security/advisories",
+    "supplyChainPolicy": "zero-trust-dependencies",
+    "denoMigrationPhase": 1,
+    "owaspapsvLevel": "L3"
   }
 }

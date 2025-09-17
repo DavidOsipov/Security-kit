@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: LGPL-3.0-or-later
 // SPDX-FileCopyrightText: © 2025 David Osipov <personal@david-osipov.vision>
 /// <reference types="./dnt-globals.d.ts" />
+/// <reference path="./deno-dom-types.d.ts" />
 
 /**
  * Provides a hardened wrapper around DOMPurify to create and manage

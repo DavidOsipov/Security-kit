@@ -13,25 +13,18 @@ import {
   InvalidParameterError,
 } from "./errors.ts";
 import { environment, isDevelopment } from "./environment.ts";
-// Use explicit process import to satisfy Deno/Node hybrid linting rules
-// Use namespace import to avoid relying on synthetic default (TS1259 under strict settings)
-import * as process from "node:process";
-import { Buffer } from "node:buffer";
 
-// Safe environment accessor to avoid unsafe member access on process.env
+// Deno-compatible environment access
 function getEnvironmentVariableSafe(key: string): string | undefined {
-  const environment_ = (
-    process as unknown as {
-      readonly env?: Record<string, string | undefined>;
-    }
-  ).env;
-  if (environment_ && typeof environment_ === "object") {
-    // Only allow string|undefined values
-    const v = environment_[key];
-    return typeof v === "string" ? v : undefined;
+  // In Deno, we use globalThis.Deno.env for environment variables
+  try {
+    return Deno?.env?.get(key);
+  } catch {
+    // Fallback for environments without Deno.env permission
+    return undefined;
   }
-  return undefined;
 }
+
 import { reportProdError as reportProductionError } from "./reporting.ts";
 import {
   developmentLog_ as secureDevelopmentLog,
@@ -69,64 +62,83 @@ async function detectNodeCrypto(
   generation: number,
 ): Promise<Crypto | undefined> {
   try {
-    // Dynamic import prevents bundler issues and allows lazy loading
-    const nodeModule = await import("node:crypto");
-
-    // Validate generation hasn't changed during async operation (cache poisoning protection)
-    if (generation !== _cryptoInitGeneration) {
-      return undefined; // Generation changed, abort
+    // In Deno, crypto is available directly via globalThis
+    // First check if we have Web Crypto API directly available
+    if (globalThis.crypto && isCryptoLike(globalThis.crypto)) {
+      return globalThis.crypto;
     }
 
-    // ASVS L3: Strict validation of Node webcrypto interface
-    // Use index access to avoid relying on ambient types claiming presence
-    const maybeWebcrypto = (nodeModule as Record<string, unknown>)["webcrypto"];
-    if (isCryptoLike(maybeWebcrypto)) {
-      const webcrypto = maybeWebcrypto;
-      // Additional validation for SubtleCrypto if present
-      const subtle = (webcrypto as { readonly subtle?: unknown }).subtle;
-      if (subtle && typeof subtle === "object") {
-        // Verify critical SubtleCrypto methods exist
-        const subtleObject = subtle as Record<string, unknown>;
-        if (typeof subtleObject["digest"] === "function") {
-          return webcrypto;
-        }
+    // Fallback: Try to import crypto module using createRequire for Node.js compatibility
+    try {
+      const { createRequire } = await import("node:module");
+      const require = createRequire(import.meta.url);
+      const nodeModule = require("node:crypto");
+
+      // Validate generation hasn't changed during async operation (cache poisoning protection)
+      if (generation !== _cryptoInitGeneration) {
+        return undefined; // Generation changed, abort
       }
-      // Return webcrypto even if subtle is incomplete - some use cases only need getRandomValues
-      return webcrypto;
-    }
 
-    // Fallback: Check if Node crypto.randomBytes can be adapted
-    if (typeof nodeModule.randomBytes === "function") {
-      const randomBytesFunction = nodeModule.randomBytes as (
-        size: number,
-      ) => Buffer;
-
-      // Create a Crypto-compatible interface using Node's randomBytes
-      // Provide a safe randomUUID fallback without optional chaining
-      const adaptedRandomUUID: Crypto["randomUUID"] =
-        typeof nodeModule.randomUUID === "function"
-          ? nodeModule.randomUUID.bind(nodeModule)
-          : () => {
-              throw new Error("randomUUID not available");
-            };
-
-      const adaptedCrypto: Crypto = {
-        getRandomValues: <T extends ArrayBufferView | null>(array: T): T => {
-          if (!array || typeof array !== "object" || !("byteLength" in array)) {
-            throw new TypeError("getRandomValues requires an ArrayBufferView");
+      // ASVS L3: Strict validation of Node webcrypto interface
+      const maybeWebcrypto = nodeModule.webcrypto;
+      if (isCryptoLike(maybeWebcrypto)) {
+        const webcrypto = maybeWebcrypto;
+        // Additional validation for SubtleCrypto if present
+        const subtle = webcrypto.subtle;
+        if (subtle && typeof subtle === "object") {
+          // Verify critical SubtleCrypto methods exist
+          const subtleObject = subtle as unknown as Record<string, unknown>;
+          if (typeof subtleObject["digest"] === "function") {
+            return webcrypto;
           }
-          const buffer = randomBytesFunction(array.byteLength);
-          new Uint8Array(array.buffer, array.byteOffset, array.byteLength).set(
-            buffer,
-          );
-          return array;
-        },
-        // Note: subtle may not be available in this fallback
-        subtle: undefined as unknown as SubtleCrypto,
-        randomUUID: adaptedRandomUUID,
-      };
+        }
+        // Return webcrypto even if subtle is incomplete
+        return webcrypto;
+      }
 
-      return adaptedCrypto;
+      // Fallback: Check if Node crypto.randomBytes can be adapted
+      if (typeof nodeModule.randomBytes === "function") {
+        const randomBytesFunction = nodeModule.randomBytes;
+
+        // Create a Crypto-compatible interface using Node's randomBytes
+        const adaptedRandomUUID: Crypto["randomUUID"] =
+          typeof nodeModule.randomUUID === "function"
+            ? nodeModule.randomUUID.bind(nodeModule)
+            : () => {
+                throw new Error("randomUUID not available");
+              };
+
+        const adaptedCrypto: Crypto = {
+          getRandomValues: <T extends ArrayBufferView | null>(array: T): T => {
+            if (
+              !array ||
+              typeof array !== "object" ||
+              !("byteLength" in array)
+            ) {
+              throw new TypeError(
+                "getRandomValues requires an ArrayBufferView",
+              );
+            }
+            // Convert Node.js Buffer to Uint8Array
+            const buffer = randomBytesFunction(array.byteLength);
+            const uint8Buffer = new Uint8Array(buffer);
+            new Uint8Array(
+              array.buffer,
+              array.byteOffset,
+              array.byteLength,
+            ).set(uint8Buffer);
+            return array;
+          },
+          // Note: subtle may not be available in this fallback
+          subtle: undefined as unknown as SubtleCrypto,
+          randomUUID: adaptedRandomUUID,
+        };
+
+        return adaptedCrypto;
+      }
+    } catch (nodeCompatError) {
+      // Node.js compatibility layer failed, continue with other fallbacks
+      console.warn("Node.js compatibility fallback failed:", nodeCompatError);
     }
 
     return undefined;

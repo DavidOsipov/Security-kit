@@ -23,6 +23,7 @@ import enforceSecurePostmessageListener from "../eslint-rules/enforce-secure-pos
 import enforceSecureSignerIntegrity from "../eslint-rules/enforce-secure-signer-integrity.js";
 import noInsecureNonceStore from "../eslint-rules/no-insecure-nonce-store.js";
 import enforcePostmessageConfigConsistency from "../eslint-rules/enforce-postmessage-config-consistency.js";
+import requireUntrustedInputNormalization from "../eslint-rules/require-untrusted-input-normalization.js";
 
 export default {
   rules: {
@@ -51,5 +52,6 @@ export default {
     "enforce-secure-signer-integrity": enforceSecureSignerIntegrity,
     "no-insecure-nonce-store": noInsecureNonceStore,
     "enforce-postmessage-config-consistency": enforcePostmessageConfigConsistency,
+    "require-untrusted-input-normalization": requireUntrustedInputNormalization,
   },
 };

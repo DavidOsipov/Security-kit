@@ -1,0 +1,39 @@
+{
+  "name": "@david-osipov/security-kit",
+  "version": "0.7.1",
+  "description": "Zero-dependency, OWASP ASVS L3 compliant security toolkit built on Deno and Web Crypto API",
+  "license": "LGPL-3.0-or-later",
+  "author": "David Osipov <personal@david-osipov.vision>",
+  "homepage": "https://github.com/david-osipov/Security-Kit",
+  "repository": {
+    "type": "git", 
+    "url": "git+https://github.com/david-osipov/Security-Kit.git"
+  },
+  "exports": {
+    ".": "./src/index.ts",
+    "./test-internals": "./tests/helpers/test-internals.ts",
+    "./worker": "./src/worker/signing-worker.ts",
+    "./server": "./server/verify-api-request-signature.ts",
+    "./server/nonce-store": "./server/nonce-store.ts"
+  },
+  "publish": {
+    "include": [
+      "src/**/*.ts",
+      "server/**/*.ts", 
+      "tests/helpers/test-internals.ts",
+      "README.md",
+      "LICENSE"
+    ],
+    "exclude": [
+      "docs/**/*",
+      "docs/User docs/**/*",
+      "docs/Contributor docs/**/*",
+      "docs/Additional security guidelines/**/*",
+      "docs/Constitutions/**/*",
+      "docs/Methodology/**/*", 
+      "docs/Plans/**/*",
+      "docs/Prompts/**/*",
+      "docs/Tinybench docs/**/*"
+    ]
+  }
+}

@@ -745,6 +745,8 @@ export default [
       }],
       // Ensure postMessage configuration consistency
       "local/enforce-postmessage-config-consistency": "error",
+  // Require normalization of untrusted UTF-8 inputs before usage in sinks (Unicode hardening boundary)
+  "local/require-untrusted-input-normalization": "error",
       
       // NEW SECURITY HARDENING RULES (OWASP ASVS L3)
       // Prevent Unicode normalization attacks (ASVS V5.1.4)
@@ -985,6 +987,8 @@ export default [
   "sdl/no-insecure-url": "error",
   "sdl/no-document-domain": "error",
   "sdl/no-unsafe-alloc": "error",
+    // Require normalization boundary for untrusted UTF-8 input in server code as well
+    "local/require-untrusted-input-normalization": "error",
   // Deprecated API detection intentionally omitted to avoid adding
   // `eslint-plugin-deprecation`. We prefer not to add that dependency.
     },

@@ -1,0 +1,45 @@
+name: Security-kit Production Pipeline
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  security-validation:
+    name: OWASP ASVS L3 Security
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+      - name: Security Audit
+        run: deno run --allow-read --allow-net scripts/advanced-security-audit.ts
+      - name: Memory Safety Tests
+        run: deno test --allow-read --allow-env tests/deno/security/
+
+  performance-tests:
+    name: Performance Tests
+    runs-on: ubuntu-latest
+    needs: security-validation
+    steps:
+      - uses: actions/checkout@v4
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+      - name: Performance Benchmarks
+        run: deno run --allow-read --allow-env scripts/deno-performance-test.ts
+
+  test-suite:
+    name: Comprehensive Tests
+    runs-on: ubuntu-latest
+    needs: security-validation
+    steps:
+      - uses: actions/checkout@v4
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+      - name: Run Tests
+        run: deno test --allow-read --allow-env tests/deno/

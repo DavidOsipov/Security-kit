@@ -1,0 +1,46 @@
+# Hybrid Node.js + Deno CI workflow
+name: Security-Kit Hybrid CI
+
+on: [push, pull_request]
+
+jobs:
+  nodejs-tests:
+    name: "Node.js Tests & Linting" 
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+      - run: npm ci
+      - run: npm run lint
+      - run: npm test
+      - run: npm run build
+      
+  deno-security:
+    name: "Deno Security Checks"
+    runs-on: ubuntu-latest  
+    steps:
+      - uses: actions/checkout@v4
+      - uses: denoland/setup-deno@v1
+        with:
+          deno-version: v1.x
+      - run: deno task check
+      - run: deno task lint:eslint
+      - run: deno task security:audit
+      - run: deno task test:security
+      
+  supply-chain:
+    name: "Supply Chain Security"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+      - uses: denoland/setup-deno@v1
+        with:
+          deno-version: v1.x
+      - run: npm ci
+      - run: npm audit
+      - run: deno task supply-chain:verify

@@ -41,16 +41,6 @@ import {
   createAdversarialMLEngine
 } from "../adversarial/adversarialPayloadGenerator.mjs";
 
-// Heavy suite execution guard.
-// Enable via: SECURITY_KIT_RUN_HEAVY_FUZZ=1 npm test
-const HEAVY = process?.env?.SECURITY_KIT_RUN_HEAVY_FUZZ === '1';
-if (!HEAVY) {
-  describe.skip('Heavy adversarial Unicode fuzz test suite (SECURITY_KIT_RUN_HEAVY_FUZZ=1 to enable)', () => {
-    it('skipped', () => { /* noop */ });
-  });
-}
-
-if (HEAVY) {
 // 🚀 PERFORMANCE OPTIMIZATION CONFIGURATION
 const PERFORMANCE_CONFIG: ParallelTestConfig = {
   memoryLimitMB: 200, // Very conservative memory limit per worker (reduced from 800)
@@ -907,8 +897,6 @@ describe("💀 ADVANCED ATTACK VECTOR 6: Filesystem & Shell Injection", () => {
     );
   });
 });
-
-} // end HEAVY guard
 
 describe("💀 ADVANCED ATTACK VECTOR 7: Deserialization Poisoning", () => {
   it("🎯 Should prevent YAML object instantiation", () => {

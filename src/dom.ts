@@ -194,8 +194,35 @@ async function sha256Hex(input: string, timeoutMs = 1500): Promise<string> {
       // Security: Restrict dynamic imports to a strict allowlist using a switch
       // to avoid variable import() calls. ASVS V3.7.5.
       switch (s) {
-        case "node:crypto":
-          return import("node:crypto");
+        case "node:crypto": {
+          // In Deno, prefer Web Crypto API, fallback to Node.js compatibility
+          return Promise.resolve({
+            createHash: (algorithm: string) => {
+              if (algorithm !== "sha256") {
+                throw new Error(`Unsupported hash algorithm: ${algorithm}`);
+              }
+              // Use Web Crypto API for hashing in Deno
+              const encoder = new TextEncoder();
+              return {
+                _data: new Uint8Array(0) as Uint8Array,
+                update(data: string | Uint8Array): any {
+                  const bytes =
+                    typeof data === "string" ? encoder.encode(data) : data;
+                  this._data =
+                    bytes instanceof Uint8Array
+                      ? bytes
+                      : new Uint8Array(bytes as ArrayBuffer);
+                  return this;
+                },
+                digest(): Promise<Uint8Array> {
+                  return crypto.subtle
+                    .digest("SHA-256", this._data as BufferSource)
+                    .then((hash) => new Uint8Array(hash));
+                },
+              };
+            },
+          });
+        }
         case "fast-sha256":
           return import("fast-sha256");
         case "hash-wasm":
@@ -227,7 +254,7 @@ async function sha256Hex(input: string, timeoutMs = 1500): Promise<string> {
         data = enc.encode(input);
         const digest = await promiseWithTimeout(
           subtle.digest("SHA-256", data),
-          timeoutMs,
+          timeoutMs ?? 1500,
           "sha256_timeout",
         );
         u8 = new Uint8Array(digest);
@@ -332,7 +359,7 @@ async function sha256Hex(input: string, timeoutMs = 1500): Promise<string> {
       >;
       const nodeCrypto = await promiseWithTimeout(
         nodeCryptoModulePromise,
-        timeoutMs,
+        timeoutMs ?? 1500,
         "sha256_timeout",
       );
       if (typeof nodeCrypto.createHash !== "function") return undefined;
@@ -374,7 +401,7 @@ async function sha256Hex(input: string, timeoutMs = 1500): Promise<string> {
       const fastModulePromise = importer("fast-sha256") as Promise<unknown>;
       const fastModule = await promiseWithTimeout(
         fastModulePromise,
-        timeoutMs,
+        timeoutMs ?? 1500,
         "sha256_timeout",
       );
       if (hasHashHex(fastModule)) {
@@ -409,7 +436,7 @@ async function sha256Hex(input: string, timeoutMs = 1500): Promise<string> {
       const hwPromise = importer("hash-wasm") as Promise<unknown>;
       const hw = await promiseWithTimeout(
         hwPromise,
-        timeoutMs,
+        timeoutMs ?? 1500,
         "sha256_timeout",
       );
       if (hw !== null && typeof hw === "object") {
@@ -421,7 +448,7 @@ async function sha256Hex(input: string, timeoutMs = 1500): Promise<string> {
           if (maybe instanceof Promise) {
             const v = await promiseWithTimeout(
               maybe as Promise<unknown>,
-              timeoutMs,
+              timeoutMs ?? 1500,
               "sha256_timeout",
             );
             return typeof v === "string" ? v : String(v);
@@ -1029,7 +1056,7 @@ export class DOMValidator {
     const max =
       this.#config.maxValidationsPerSecond ??
       DEFAULT_CONFIG.maxValidationsPerSecond;
-    if (this.#validationCounter > max) {
+    if (max && this.#validationCounter > max) {
       if (this.#config.auditHook) {
         const eventBase = {
           kind: "rate_limit_triggered" as const,
@@ -1084,7 +1111,7 @@ export class DOMValidator {
 
     const maxLength =
       this.#config.maxSelectorLength ?? DEFAULT_CONFIG.maxSelectorLength;
-    if (s.length > maxLength) {
+    if (maxLength && s.length > maxLength) {
       this.#emitValidationFailureEvent(s, "selector_too_long");
       throw new InvalidParameterError("Selector is too long.");
     }
@@ -1177,7 +1204,7 @@ export class DOMValidator {
       this.#config.validatedElementTTLms ??
       DEFAULT_CONFIG.validatedElementTTLms;
     const last = this.#validatedElements.get(element) ?? 0;
-    if (last && now - last <= ttl) {
+    if (ttl && last && now - last <= ttl) {
       // considered still validated
       return element;
     }
@@ -1409,7 +1436,7 @@ export class DOMValidator {
           // Ensure any thrown value is propagated to our outer try/catch and sanitized.
           await hook(safeEvent);
         })(),
-        timeoutMs,
+        timeoutMs ?? 1500,
         "audit_hook_timeout",
       );
     } catch (error) {

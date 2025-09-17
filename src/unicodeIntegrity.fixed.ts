@@ -26,26 +26,20 @@ function readUint32LE(bytes: Uint8Array, offset: number): number {
       "unicode-integrity",
     );
   }
-
-  const byte0 = bytes[offset];
-  const byte1 = bytes[offset + 1];
-  const byte2 = bytes[offset + 2];
-  const byte3 = bytes[offset + 3];
-
   return (
-    ((byte0 !== undefined ? byte0 : 0) |
-      ((byte1 !== undefined ? byte1 : 0) << 8) |
-      ((byte2 !== undefined ? byte2 : 0) << 16) |
-      ((byte3 !== undefined ? byte3 : 0) << 24)) >>>
+    ((bytes[offset] || 0) |
+      ((bytes[offset + 1] || 0) << 8) |
+      ((bytes[offset + 2] || 0) << 16) |
+      ((bytes[offset + 3] || 0) << 24)) >>>
     0
   );
 }
 
-export function verifyUnicodeDataIntegrity(
+export async function verifyUnicodeDataIntegrity(
   kind: UnicodeDataKind,
   profile: string,
   bytes: Uint8Array,
-): void {
+): Promise<void> {
   const cfg = getUnicodeSecurityConfig();
   if (!cfg.requireUnicodeDataIntegrity) return; // skip in dev when disabled
 

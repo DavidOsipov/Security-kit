@@ -4,17 +4,16 @@
   "lock": true,
   "exports": {
     ".": "./src/index.ts",
-    "./test-internals": "./tests/helpers/test-internals.ts", 
-    "./worker": "./src/worker/signing-worker.ts",
-    "./server": "./server/verify-api-request-signature.ts",
-    "./server/nonce-store": "./server/nonce-store.ts",
-    "./server/redis-nonce-store": "./server/redis-nonce-store.ts"
+    "./crypto": "./src/crypto.ts",
+    "./utils": "./src/utils.ts",
+    "./sanitizer": "./src/sanitizer.ts",
+    "./secure-cache": "./src/secure-cache.ts"
   },
   "imports": {
     "dompurify": "npm:dompurify@^3.2.0",
     "isomorphic-dompurify": "npm:isomorphic-dompurify@^2.27.0",
     "css-what": "npm:css-what@^7.0.0",
-    "fast-sha256": "npm:fast-sha256@^1.3.0", 
+    "fast-sha256": "npm:fast-sha256@^1.3.0",
     "hash-wasm": "npm:hash-wasm@^4.12.0",
     "@std/assert": "jsr:@std/assert@^1.0.0",
     "@std/fs": "jsr:@std/fs@^1.0.0",
@@ -23,16 +22,18 @@
   },
   "publish": {
     "include": [
-      "LICENSE",
-      "README.md",
       "src/**/*.ts",
-      "server/**/*.ts",
-      "tests/helpers/test-internals.ts",
-      "docs/Security Constitution.md"
+      "README.md",
+      "LICENSE",
+      "docs/Security Constitution.md",
+      "docs/User docs/**/*.md"
     ],
     "exclude": [
-      "src/**/*.test.ts",
-      "src/**/*.spec.ts"
+      "**/*.test.ts",
+      "**/*.spec.ts",
+      "tests/**",
+      "scripts/**",
+      "benchmarks/**"
     ]
   },
   "fmt": {
@@ -44,19 +45,25 @@
     "proseWrap": "preserve"
   },
   "lint": {
-    "rules": { 
-      "tags": ["recommended"]
+    "rules": {
+      "tags": [
+        "recommended"
+      ]
     },
     "exclude": [
       "dist/",
-      "coverage/", 
+      "coverage/",
       "node_modules/",
       "tmp-*/"
     ]
   },
   "nodeModulesDir": "auto",
   "compilerOptions": {
-    "lib": ["deno.window", "dom", "dom.extras"],
+    "lib": [
+      "deno.window",
+      "dom",
+      "dom.extras"
+    ],
     "strict": true,
     "noUncheckedIndexedAccess": true,
     "noImplicitOverride": true,
@@ -70,7 +77,7 @@
   "tasks": {
     "test": "deno test --allow-read --allow-env --allow-net=deno.land,jsr.io tests/",
     "test:unit": "deno test --allow-read --allow-env tests/unit/",
-    "test:integration": "deno test --allow-read --allow-env tests/integration/", 
+    "test:integration": "deno test --allow-read --allow-env tests/integration/",
     "test:security": "deno test --allow-read --allow-env tests/security/",
     "test:performance": "deno test --allow-read --allow-env tests/performance/",
     "test:fuzz": "deno test --allow-read --allow-env tests/fuzz/",
@@ -78,11 +85,26 @@
     "coverage:html": "deno coverage coverage --html",
     "lint": "deno lint src/ server/ tests/",
     "lint:eslint": "deno run --allow-read --allow-env npm:eslint@^9 src/ server/ tests/",
-    "fmt": "deno fmt src/ server/ tests/", 
+    "fmt": "deno fmt src/ server/ tests/",
     "check": "deno check src/index.ts server/verify-api-request-signature.ts",
     "check:all": "deno check src/**/*.ts server/**/*.ts tests/**/*.ts",
     "build:npm": "deno run --allow-read --allow-write --allow-env scripts/build-npm.ts",
     "test:vitest": "deno run --allow-read --allow-env npm:vitest@^3 run",
     "build:legacy": "deno run --allow-read --allow-write --allow-run npm:tsup --config tsup.config.ts"
-  }
+  },
+  "license": "LGPL-3.0-or-later",
+  "repository": "https://github.com/david-osipov/Security-Kit.git",
+  "homepage": "https://github.com/david-osipov/Security-Kit#readme",
+  "keywords": [
+    "security",
+    "crypto",
+    "webcrypto",
+    "zerotrust",
+    "hardening",
+    "owasp",
+    "asvs",
+    "constant-time",
+    "secure",
+    "deno"
+  ]
 }

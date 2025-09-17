@@ -117,20 +117,20 @@ export class CircuitBreakerError extends Error {
 
 // Canonicalization specific error classes (clear taxonomy for callers)
 export class CanonicalizationDepthError extends InvalidParameterError {
-  public override readonly code = 'ERR_INVALID_PARAMETER' as const;
-  public readonly canonicalCode = 'ERR_CANON_DEPTH' as const;
+  public override readonly code = "ERR_INVALID_PARAMETER" as const;
+  public readonly canonicalCode = "ERR_CANON_DEPTH" as const;
   constructor(message: string) {
     super(message);
-    this.name = 'CanonicalizationDepthError';
+    this.name = "CanonicalizationDepthError";
   }
 }
 
 export class CanonicalizationTraversalError extends InvalidParameterError {
-  public override readonly code = 'ERR_INVALID_PARAMETER' as const;
-  public readonly canonicalCode = 'ERR_CANON_TRAVERSAL' as const;
+  public override readonly code = "ERR_INVALID_PARAMETER" as const;
+  public readonly canonicalCode = "ERR_CANON_TRAVERSAL" as const;
   constructor(message: string) {
     super(message);
-    this.name = 'CanonicalizationTraversalError';
+    this.name = "CanonicalizationTraversalError";
   }
 }
 

@@ -167,7 +167,11 @@ export function normalizeUrlSafeStringStrict(
         "error",
         "normalizeUrlSafeStringStrict",
         "Suspicious URL pattern detected",
-        { context, pattern: pattern.source, inputLength: baseNormalized.length },
+        {
+          context,
+          pattern: pattern.source,
+          inputLength: baseNormalized.length,
+        },
       );
       throw new _InvalidParameterError(
         `${context}: Contains potentially dangerous URL patterns.`,

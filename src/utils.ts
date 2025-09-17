@@ -690,7 +690,11 @@ export function isSharedArrayBufferView(view: ArrayBufferView): boolean {
       // Symbol.toStringTag spoofing.
       const hasSpoofTag = (() => {
         try {
-          return Object.hasOwn(bufferValue, Symbol.toStringTag);
+          return (
+            bufferValue &&
+            bufferValue &&
+            Object.hasOwn(bufferValue, Symbol.toStringTag)
+          );
         } catch {
           return true; // be conservative
         }
@@ -826,7 +830,7 @@ function tryBigIntWipe(typedArray: ArrayBufferView): boolean {
     // eslint-disable-next-line functional/no-let -- loop counter required for BigInt wipe
     for (let index = 0; index < ta.length; index++) {
       // eslint-disable-next-line functional/immutable-data,security/detect-object-injection -- intentional in-place BigInt array wipe for security with bounds-checked access
-      (ta as unknown as { readonly [index: number]: bigint })[index] = 0n;
+      (ta as any)[index] = 0n;
     }
     safeEmitMetric("secureWipe.ok", 1, { strategy: "bigint" });
     return true;
@@ -1171,7 +1175,7 @@ async function checkCryptoAvailability(options?: {
   readonly crypto: Crypto;
   readonly subtle: SubtleCrypto;
 }> {
-  const strict = options?.requireCrypto === true || isSecurityStrict();
+  const strict = Boolean(options?.requireCrypto) || isSecurityStrict();
 
   const crypto = await ensureCrypto();
   const subtle = (crypto as { readonly subtle?: SubtleCrypto }).subtle;
@@ -1180,7 +1184,7 @@ async function checkCryptoAvailability(options?: {
       throw new CryptoUnavailableError("SubtleCrypto.digest is unavailable.");
     }
     safeEmitMetric("secureCompare.fallback", 1, {
-      requireCrypto: String(options?.requireCrypto === true),
+      requireCrypto: String(Boolean(options?.requireCrypto)),
       subtlePresent: "0",
       // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- strict is runtime boolean, retain explicit mapping
       strict: strict ? "1" : "0",
@@ -1285,9 +1289,11 @@ export function secureCompareBytesOrThrow(
 export async function secureCompareAsync(
   a: string | undefined,
   b: string | undefined,
-  options?: { readonly requireCrypto?: boolean },
+  options?: { readonly requireCrypto?: boolean; readonly signal?: AbortSignal },
 ): Promise<boolean> {
   const { sa, sb } = validateAndNormalizeInputs(a, b);
+  const signal = options?.signal;
+  if (signal?.aborted) return false; // fast-path: already aborted
   const now = (): number => {
     try {
       // Prefer high-resolution monotonic clock in Node.js to minimize jitter
@@ -1345,17 +1351,41 @@ export async function secureCompareAsync(
   // First determine crypto availability. If unavailable and not strict,
   // fall back to the synchronous constant-time compare. Any other error
   // (including during the crypto path itself) must fail closed.
-  try {
-    const { subtle } = await checkCryptoAvailability(options);
-    const result = await compareWithCrypto(sa, sb, subtle);
-    await equalizeIfNeeded();
-    return result;
-  } catch (error) {
-    // Fallback or error handling path must also equalize timing in dev/test
-    const res = handleCompareAsyncError(error, options, sa, sb);
-    await equalizeIfNeeded();
-    return res;
+  const performCoreCompare = async (): Promise<boolean> => {
+    try {
+      const { subtle } = await checkCryptoAvailability(options);
+      const result = await compareWithCrypto(sa, sb, subtle);
+      await equalizeIfNeeded();
+      return result;
+    } catch (error) {
+      const res = handleCompareAsyncError(error, options, sa, sb);
+      await equalizeIfNeeded();
+      return res;
+    }
+  };
+
+  if (!signal) {
+    return performCoreCompare();
   }
+
+  const abortPromise = new Promise<boolean>((resolve) => {
+    if (signal.aborted) {
+      resolve(false);
+      return;
+    }
+    const onAbort = (): void => {
+      resolve(false);
+    };
+    try {
+      signal.addEventListener("abort", onAbort, { once: true });
+    } catch {
+      /* ignore addEventListener issues */
+    }
+  });
+
+  const corePromise = performCoreCompare();
+  const result = await Promise.race([corePromise, abortPromise]);
+  return result;
 }
 
 function handleCompareAsyncError(
@@ -1364,7 +1394,7 @@ function handleCompareAsyncError(
   sa: string,
   sb: string,
 ): boolean {
-  const strict = options?.requireCrypto === true || isSecurityStrict();
+  const strict = Boolean(options?.requireCrypto) || isSecurityStrict();
   if (error instanceof CryptoUnavailableError) {
     const message = ((error as Error).message || "").toLowerCase();
     const isAvailabilityIssue =
@@ -1373,20 +1403,20 @@ function handleCompareAsyncError(
       message.includes("unavailable");
     if (!strict && isAvailabilityIssue) {
       safeEmitMetric("secureCompare.fallback", 1, {
-        requireCrypto: String(options?.requireCrypto === true),
+        requireCrypto: String(Boolean(options?.requireCrypto)),
         subtlePresent: "0",
         strict: String(Number(strict)),
       });
       return secureCompare(sa, sb);
     }
     safeEmitMetric("secureCompare.error", 1, {
-      requireCrypto: String(options?.requireCrypto === true),
+      requireCrypto: String(Boolean(options?.requireCrypto)),
       strict: String(Number(strict)),
     });
     throw error;
   }
   safeEmitMetric("secureCompare.error", 1, {
-    requireCrypto: String(options?.requireCrypto === true),
+    requireCrypto: String(Boolean(options?.requireCrypto)),
     strict: String(Number(strict)),
   });
   throw new CryptoUnavailableError(

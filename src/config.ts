@@ -1437,7 +1437,7 @@ export type CanonicalConfig = {
   /** Maximum traversal depth budget (optional, reserved for future use). */
   readonly maxDepth?: number | undefined;
   /** Policy for handling circular references encountered during canonicalization. Fail (throw) by default for fail-loud posture. */
-  readonly circularPolicy: 'fail' | 'annotate';
+  readonly circularPolicy: "fail" | "annotate";
   /** Hard wall-clock budget in milliseconds for a single canonicalization traversal (defense-in-depth against pathological proxies). */
   readonly traversalTimeBudgetMs: number;
 };
@@ -1450,7 +1450,7 @@ const DEFAULT_CANONICAL_CONFIG: CanonicalConfig = {
   // 256 is intentionally conservative for typical JSON-like payloads while
   // preventing extremely deep adversarial nesting.
   maxDepth: 256,
-  circularPolicy: 'fail',
+  circularPolicy: "fail",
   traversalTimeBudgetMs: 25, // ~ one event-loop slice; tuned for typical payloads
 };
 
@@ -1601,22 +1601,26 @@ export function setCanonicalConfig(cfg: Partial<CanonicalConfig>): void {
   }
 
   if (cfg.circularPolicy !== undefined) {
-    if (cfg.circularPolicy !== 'fail' && cfg.circularPolicy !== 'annotate') {
-      throw new InvalidParameterError('circularPolicy must be "fail" or "annotate".');
+    if (cfg.circularPolicy !== "fail" && cfg.circularPolicy !== "annotate") {
+      throw new InvalidParameterError(
+        'circularPolicy must be "fail" or "annotate".',
+      );
     }
   }
 
   if (cfg.traversalTimeBudgetMs !== undefined) {
     if (
-      typeof cfg.traversalTimeBudgetMs !== 'number' ||
+      typeof cfg.traversalTimeBudgetMs !== "number" ||
       !Number.isFinite(cfg.traversalTimeBudgetMs) ||
       cfg.traversalTimeBudgetMs <= 0
     ) {
-      throw new InvalidParameterError('traversalTimeBudgetMs must be a positive finite number.');
+      throw new InvalidParameterError(
+        "traversalTimeBudgetMs must be a positive finite number.",
+      );
     }
     const MAX_TRAVERSAL_BUDGET_MS = 5_000; // upper bound clamp (5s)
     if (cfg.traversalTimeBudgetMs > MAX_TRAVERSAL_BUDGET_MS) {
-      cfg.traversalTimeBudgetMs = MAX_TRAVERSAL_BUDGET_MS; // eslint-disable-line no-param-reassign -- intentional clamping for DoS resilience
+      (cfg as any).traversalTimeBudgetMs = MAX_TRAVERSAL_BUDGET_MS;
     }
   }
 
@@ -1758,7 +1762,7 @@ export type UnicodeSecurityConfig = {
    * 64‑bit CPUs for payloads > ~32KB and provides larger security margin). Accepted values:
    * 'SHA-256' | 'SHA-384' | 'SHA-512'.
    */
-  readonly integrityHashAlgorithm: 'SHA-256' | 'SHA-384' | 'SHA-512';
+  readonly integrityHashAlgorithm: "SHA-256" | "SHA-384" | "SHA-512";
   /**
    * Build an in-memory index (Map<char, string[]>) for confusable lookups to achieve
    * amortized O(1) isConfusable/getConfusableTargets operations. Enabled by default
@@ -1771,7 +1775,7 @@ export type UnicodeSecurityConfig = {
   /** Minimum total length before combining ratio check enforced. Default 20. */
   readonly minCombiningRatioScanLength: number;
   /** Idempotency verification mode for NFKC normalization. */
-  readonly normalizationIdempotencyMode: 'off' | 'sample' | 'always';
+  readonly normalizationIdempotencyMode: "off" | "sample" | "always";
   /** Sampling rate (1 in N inputs) when mode === 'sample'. Default 64. */
   readonly normalizationIdempotencySampleRate: number;
 };
@@ -1796,11 +1800,11 @@ let _unicodeSecurityConfig: UnicodeSecurityConfig = {
   rejectDangerousRanges: true,
   requireUnicodeDataIntegrity: environment.isProduction,
   allowBidiInProduction: undefined,
-  integrityHashAlgorithm: 'SHA-384',
+  integrityHashAlgorithm: "SHA-384",
   enableConfusableIndex: true,
   maxCombiningRatio: 0.3,
   minCombiningRatioScanLength: 20,
-  normalizationIdempotencyMode: 'sample',
+  normalizationIdempotencyMode: "sample",
   normalizationIdempotencySampleRate: 64,
 };
 /* eslint-enable functional/no-let */
@@ -1873,9 +1877,7 @@ export function setUnicodeSecurityConfig(
 
   if (cfg.normalizationIdempotencyMode !== undefined) {
     if (
-      !["off", "sample", "always"].includes(
-        cfg.normalizationIdempotencyMode,
-      )
+      !["off", "sample", "always"].includes(cfg.normalizationIdempotencyMode)
     ) {
       throw new InvalidParameterError(
         "normalizationIdempotencyMode must be off | sample | always",
@@ -1911,65 +1913,125 @@ export function setUnicodeSecurityConfig(
     throw new InvalidParameterError("enableValidationCache must be a boolean.");
   }
 
-  if (cfg.enableRiskScoring !== undefined && typeof cfg.enableRiskScoring !== 'boolean') {
-    throw new InvalidParameterError('enableRiskScoring must be a boolean.');
+  if (
+    cfg.enableRiskScoring !== undefined &&
+    typeof cfg.enableRiskScoring !== "boolean"
+  ) {
+    throw new InvalidParameterError("enableRiskScoring must be a boolean.");
   }
   if (cfg.riskWarnThreshold !== undefined) {
-    if (typeof cfg.riskWarnThreshold !== 'number' || cfg.riskWarnThreshold < 0) {
-      throw new InvalidParameterError('riskWarnThreshold must be a non-negative number.');
+    if (
+      typeof cfg.riskWarnThreshold !== "number" ||
+      cfg.riskWarnThreshold < 0
+    ) {
+      throw new InvalidParameterError(
+        "riskWarnThreshold must be a non-negative number.",
+      );
     }
   }
   if (cfg.riskBlockThreshold !== undefined) {
-    if (typeof cfg.riskBlockThreshold !== 'number' || cfg.riskBlockThreshold < 0) {
-      throw new InvalidParameterError('riskBlockThreshold must be a non-negative number.');
+    if (
+      typeof cfg.riskBlockThreshold !== "number" ||
+      cfg.riskBlockThreshold < 0
+    ) {
+      throw new InvalidParameterError(
+        "riskBlockThreshold must be a non-negative number.",
+      );
     }
   }
-  if (cfg.riskBlockThreshold !== undefined && cfg.riskWarnThreshold !== undefined) {
+  if (
+    cfg.riskBlockThreshold !== undefined &&
+    cfg.riskWarnThreshold !== undefined
+  ) {
     if (cfg.riskBlockThreshold < cfg.riskWarnThreshold) {
-      throw new InvalidParameterError('riskBlockThreshold must be >= riskWarnThreshold.');
+      throw new InvalidParameterError(
+        "riskBlockThreshold must be >= riskWarnThreshold.",
+      );
     }
   }
-  if (cfg.blockRawShellChars !== undefined && typeof cfg.blockRawShellChars !== 'boolean') {
-    throw new InvalidParameterError('blockRawShellChars must be a boolean.');
+  if (
+    cfg.blockRawShellChars !== undefined &&
+    typeof cfg.blockRawShellChars !== "boolean"
+  ) {
+    throw new InvalidParameterError("blockRawShellChars must be a boolean.");
   }
-  if (cfg.detailedErrorMessages !== undefined && typeof cfg.detailedErrorMessages !== 'boolean') {
-    throw new InvalidParameterError('detailedErrorMessages must be a boolean.');
+  if (
+    cfg.detailedErrorMessages !== undefined &&
+    typeof cfg.detailedErrorMessages !== "boolean"
+  ) {
+    throw new InvalidParameterError("detailedErrorMessages must be a boolean.");
   }
   if (cfg.riskMetricWeights !== undefined) {
-    if (cfg.riskMetricWeights === null || typeof cfg.riskMetricWeights !== 'object') {
-      throw new InvalidParameterError('riskMetricWeights must be an object map.');
+    if (
+      cfg.riskMetricWeights === null ||
+      typeof cfg.riskMetricWeights !== "object"
+    ) {
+      throw new InvalidParameterError(
+        "riskMetricWeights must be an object map.",
+      );
     }
     for (const [k, v] of Object.entries(cfg.riskMetricWeights)) {
-      if (typeof v !== 'number' || v < 0) {
-        throw new InvalidParameterError(`riskMetricWeights[${k}] must be a non-negative number.`);
+      if (typeof v !== "number" || v < 0) {
+        throw new InvalidParameterError(
+          `riskMetricWeights[${k}] must be a non-negative number.`,
+        );
       }
     }
   }
-  if (cfg.rejectBidiControls !== undefined && typeof cfg.rejectBidiControls !== 'boolean') {
-    throw new InvalidParameterError('rejectBidiControls must be a boolean.');
+  if (
+    cfg.rejectBidiControls !== undefined &&
+    typeof cfg.rejectBidiControls !== "boolean"
+  ) {
+    throw new InvalidParameterError("rejectBidiControls must be a boolean.");
   }
-  if (cfg.rejectInvisibleChars !== undefined && typeof cfg.rejectInvisibleChars !== 'boolean') {
-    throw new InvalidParameterError('rejectInvisibleChars must be a boolean.');
+  if (
+    cfg.rejectInvisibleChars !== undefined &&
+    typeof cfg.rejectInvisibleChars !== "boolean"
+  ) {
+    throw new InvalidParameterError("rejectInvisibleChars must be a boolean.");
   }
-  if (cfg.rejectIntroducedStructuralChars !== undefined && typeof cfg.rejectIntroducedStructuralChars !== 'boolean') {
-    throw new InvalidParameterError('rejectIntroducedStructuralChars must be a boolean.');
+  if (
+    cfg.rejectIntroducedStructuralChars !== undefined &&
+    typeof cfg.rejectIntroducedStructuralChars !== "boolean"
+  ) {
+    throw new InvalidParameterError(
+      "rejectIntroducedStructuralChars must be a boolean.",
+    );
   }
-  if (cfg.rejectDangerousRanges !== undefined && typeof cfg.rejectDangerousRanges !== 'boolean') {
-    throw new InvalidParameterError('rejectDangerousRanges must be a boolean.');
+  if (
+    cfg.rejectDangerousRanges !== undefined &&
+    typeof cfg.rejectDangerousRanges !== "boolean"
+  ) {
+    throw new InvalidParameterError("rejectDangerousRanges must be a boolean.");
   }
-  if (cfg.requireUnicodeDataIntegrity !== undefined && typeof cfg.requireUnicodeDataIntegrity !== 'boolean') {
-    throw new InvalidParameterError('requireUnicodeDataIntegrity must be a boolean.');
+  if (
+    cfg.requireUnicodeDataIntegrity !== undefined &&
+    typeof cfg.requireUnicodeDataIntegrity !== "boolean"
+  ) {
+    throw new InvalidParameterError(
+      "requireUnicodeDataIntegrity must be a boolean.",
+    );
   }
-  if (cfg.allowBidiInProduction !== undefined && typeof cfg.allowBidiInProduction !== 'boolean') {
-    throw new InvalidParameterError('allowBidiInProduction must be a boolean.');
+  if (
+    cfg.allowBidiInProduction !== undefined &&
+    typeof cfg.allowBidiInProduction !== "boolean"
+  ) {
+    throw new InvalidParameterError("allowBidiInProduction must be a boolean.");
   }
   if (cfg.integrityHashAlgorithm !== undefined) {
-    if (!['SHA-256','SHA-384','SHA-512'].includes(cfg.integrityHashAlgorithm)) {
-      throw new InvalidParameterError('integrityHashAlgorithm must be one of SHA-256 | SHA-384 | SHA-512');
+    if (
+      !["SHA-256", "SHA-384", "SHA-512"].includes(cfg.integrityHashAlgorithm)
+    ) {
+      throw new InvalidParameterError(
+        "integrityHashAlgorithm must be one of SHA-256 | SHA-384 | SHA-512",
+      );
     }
   }
-  if (cfg.enableConfusableIndex !== undefined && typeof cfg.enableConfusableIndex !== 'boolean') {
-    throw new InvalidParameterError('enableConfusableIndex must be a boolean.');
+  if (
+    cfg.enableConfusableIndex !== undefined &&
+    typeof cfg.enableConfusableIndex !== "boolean"
+  ) {
+    throw new InvalidParameterError("enableConfusableIndex must be a boolean.");
   }
 
   _unicodeSecurityConfig = { ..._unicodeSecurityConfig, ...cfg };
@@ -2024,7 +2086,12 @@ export function setUnicodeSecurityConfig(
       );
     }
     for (const [k, v] of Object.entries(cfg.riskMetricWeights)) {
-      if (typeof v !== "number" || !Number.isInteger(v) || v < 0 || v > 10_000) {
+      if (
+        typeof v !== "number" ||
+        !Number.isInteger(v) ||
+        v < 0 ||
+        v > 10_000
+      ) {
         throw new InvalidParameterError(
           `riskMetricWeights.${k} must be an integer 0..10000.`,
         );
@@ -2033,7 +2100,7 @@ export function setUnicodeSecurityConfig(
   }
 
   // Validation for new rejection / integrity flags
-  const boolKeys: (keyof Partial<UnicodeSecurityConfig>)[] = [
+  const boolKeys: readonly (keyof Partial<UnicodeSecurityConfig>)[] = [
     "rejectBidiControls",
     "rejectInvisibleChars",
     "rejectIntroducedStructuralChars",
@@ -2042,7 +2109,10 @@ export function setUnicodeSecurityConfig(
     "allowBidiInProduction",
   ];
   for (const k of boolKeys) {
-    if (Object.hasOwn(cfg, k) && (cfg as Record<string, unknown>)[k] !== undefined) {
+    if (
+      Object.hasOwn(cfg, k) &&
+      (cfg as Record<string, unknown>)[k] !== undefined
+    ) {
       const v = (cfg as Record<string, unknown>)[k];
       if (typeof v !== "boolean") {
         throw new InvalidParameterError(`${String(k)} must be a boolean.`);
@@ -2050,13 +2120,18 @@ export function setUnicodeSecurityConfig(
     }
   }
   if (cfg.integrityHashAlgorithm !== undefined) {
-    const allowed = new Set(['SHA-256','SHA-384','SHA-512']);
+    const allowed = new Set(["SHA-256", "SHA-384", "SHA-512"]);
     if (!allowed.has(cfg.integrityHashAlgorithm)) {
-      throw new InvalidParameterError('integrityHashAlgorithm must be one of SHA-256|SHA-384|SHA-512.');
+      throw new InvalidParameterError(
+        "integrityHashAlgorithm must be one of SHA-256|SHA-384|SHA-512.",
+      );
     }
   }
-  if (cfg.enableConfusableIndex !== undefined && typeof cfg.enableConfusableIndex !== 'boolean') {
-    throw new InvalidParameterError('enableConfusableIndex must be a boolean.');
+  if (
+    cfg.enableConfusableIndex !== undefined &&
+    typeof cfg.enableConfusableIndex !== "boolean"
+  ) {
+    throw new InvalidParameterError("enableConfusableIndex must be a boolean.");
   }
 
   // Production hardening: prevent disabling critical rejections unless explicit override for bidi only.
@@ -2064,7 +2139,10 @@ export function setUnicodeSecurityConfig(
     // If attempting to disable bidi controls in production without override, reject.
     if (
       cfg.rejectBidiControls === false &&
-      !(_unicodeSecurityConfig.allowBidiInProduction || cfg.allowBidiInProduction === true)
+      !(
+        _unicodeSecurityConfig.allowBidiInProduction ||
+        cfg.allowBidiInProduction === true
+      )
     ) {
       throw new InvalidParameterError(
         "rejectBidiControls cannot be disabled in production without allowBidiInProduction override.",
@@ -2107,9 +2185,3 @@ export function sealUnicodeSecurityConfig(): void {
  * This supports staged initialization patterns where Unicode policy is locked
  * earlier (e.g. before loading untrusted modules) per OWASP ASVS V14.2.
  */
-export function sealUnicodeSecurityConfig(): void {
-  _unicodeSecurityConfigSealed = true;
-  // Freeze the current object to provide a shallow immutability barrier in case
-  // references were retained (defense‑in‑depth; callers should treat config as immutable).
-  Object.freeze(_unicodeSecurityConfig);
-}

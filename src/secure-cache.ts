@@ -1051,7 +1051,7 @@ export class SecureLRUCache<K extends string, V extends Uint8Array> {
   #isStale(index: number): boolean {
     const ttl = this.#ttls[index];
     // Explicit numeric comparison (avoid relying on truthiness of 0) for clarity & lint compliance
-    if (ttl <= 0) return false;
+    if (ttl === undefined || ttl <= 0) return false;
     const start = this.#starts[index] ?? 0;
     return this.#tickNow() - start > ttl;
   }
