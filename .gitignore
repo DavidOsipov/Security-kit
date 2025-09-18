@@ -25,3 +25,4 @@ benchmarks/summary-*.*
 benchmarks/sweep-*.*
 # stryker temp files
 .stryker-tmp
+logs_llm

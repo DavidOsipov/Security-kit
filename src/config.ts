@@ -80,7 +80,14 @@ export const SUSPICIOUS_REPETITIVE_PATTERNS = /(.{1,3}[ \t]+){4,}/u;
 // injection). We fail CLOSED if NFKC introduces any that were absent originally.
 // ASVS L3: canonicalization must not create new unsafe separators.
 // Enhanced for OWASP ASVS L3: Added shell injection metacharacters
-export const STRUCTURAL_RISK_CHARS = /[/\\:@#?&=%<>"'`$|;(){}[\]~*!]/u;
+// Added U+2044 (fraction slash), U+2215 (division slash) and fullwidth solidus U+FF0F
+// to pre-normalization structural risk detection to catch homoglyph introduction earlier.
+export const STRUCTURAL_RISK_CHARS =
+  /[/\\:@#?&=%<>"'`$|;(){}[\]~*!\u2044\u2215\uFF0F]/u;
+// Maximum number of structural character sample positions recorded for diagnostics
+// in development logs when normalization introduces new structural delimiters.
+// Keeping this low (5) bounds log volume while providing actionable context.
+export const STRUCTURAL_SAMPLE_LIMIT = 5 as const;
 
 // Shell injection metacharacters specifically - subset of STRUCTURAL_RISK_CHARS
 // OWASP ASVS L3 V5.3.4: Command injection prevention
@@ -1778,6 +1785,16 @@ export type UnicodeSecurityConfig = {
   readonly normalizationIdempotencyMode: "off" | "sample" | "always";
   /** Sampling rate (1 in N inputs) when mode === 'sample'. Default 64. */
   readonly normalizationIdempotencySampleRate: number;
+  /** Reject tag characters U+E0000–U+E007F (invisible tagging). Default true. */
+  readonly rejectTagCharacters?: boolean;
+  /** Reject variation selectors (FE00–FE0F, E0100–E01EF). Default true. */
+  readonly rejectVariationSelectors?: boolean;
+  /** Reject Private Use Area characters (BMP + supplementary). Default false (soft risk). */
+  readonly rejectPrivateUseArea?: boolean;
+  /** Soft-flag (risk score / log) mathematical styled alphanumerics instead of hard block. Default true. */
+  readonly softFlagMathStyles?: boolean;
+  /** Soft-flag enclosed alphanumerics instead of hard block. Default true. */
+  readonly softFlagEnclosedAlphanumerics?: boolean;
 };
 
 /* eslint-disable functional/no-let -- controlled mutable configuration */
@@ -1806,6 +1823,11 @@ let _unicodeSecurityConfig: UnicodeSecurityConfig = {
   minCombiningRatioScanLength: 20,
   normalizationIdempotencyMode: "sample",
   normalizationIdempotencySampleRate: 64,
+  rejectTagCharacters: true,
+  rejectVariationSelectors: true,
+  rejectPrivateUseArea: false,
+  softFlagMathStyles: true,
+  softFlagEnclosedAlphanumerics: true,
 };
 /* eslint-enable functional/no-let */
 
@@ -2107,6 +2129,11 @@ export function setUnicodeSecurityConfig(
     "rejectDangerousRanges",
     "requireUnicodeDataIntegrity",
     "allowBidiInProduction",
+    "rejectTagCharacters",
+    "rejectVariationSelectors",
+    "rejectPrivateUseArea",
+    "softFlagMathStyles",
+    "softFlagEnclosedAlphanumerics",
   ];
   for (const k of boolKeys) {
     if (

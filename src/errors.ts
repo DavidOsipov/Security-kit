@@ -5,6 +5,7 @@ import {
   MAX_TOTAL_STACK_LENGTH,
   MAX_STACK_LINE_LENGTH,
   MAX_PARENS_PER_LINE,
+  getUnicodeSecurityConfig,
 } from "./config.ts";
 
 /**
@@ -30,6 +31,48 @@ export class InvalidParameterError extends RangeError {
     super(`[security-kit] ${message}`);
     this.name = "InvalidParameterError";
   }
+}
+
+/**
+ * Enumerated Unicode normalization / validation error codes used by canonical.ts.
+ * Centralizing here ensures all thrown errors originate in errors.ts as required.
+ */
+export enum UnicodeErrorCode {
+  Bidi = "ERR_UNICODE_BIDI",
+  Invisible = "ERR_UNICODE_INVISIBLE",
+  Tag = "ERR_UNICODE_TAG",
+  Variation = "ERR_UNICODE_VARIATION",
+  PrivateUse = "ERR_UNICODE_PUA",
+  Dangerous = "ERR_UNICODE_DANGEROUS",
+  Combining = "ERR_UNICODE_COMBINING",
+  Expansion = "ERR_UNICODE_EXPANSION",
+  Structural = "ERR_UNICODE_STRUCTURAL",
+  Idempotency = "ERR_UNICODE_IDEMPOTENCY",
+  Shell = "ERR_UNICODE_SHELL",
+  Surrogate = "ERR_UNICODE_SURROGATE",
+}
+
+/**
+ * Create a formatted InvalidParameterError for Unicode security violations.
+ * All Unicode validation failures funnel through this helper for consistency.
+ * When detailed=false, caller should already have redacted sensitive specifics.
+ */
+export function makeUnicodeError(
+  context: string,
+  code: UnicodeErrorCode,
+  detail: string,
+): InvalidParameterError {
+  try {
+    const cfg = getUnicodeSecurityConfig();
+    if (!cfg.detailedErrorMessages) {
+      return new InvalidParameterError(
+        `${context}: Rejected for security policy. [code=${code}]`,
+      );
+    }
+  } catch {
+    // Fall through to detailed message if config is unavailable.
+  }
+  return new InvalidParameterError(`${context}: ${detail} [code=${code}]`);
 }
 
 export class EncodingError extends Error {

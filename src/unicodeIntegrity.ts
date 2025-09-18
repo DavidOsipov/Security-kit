@@ -5,7 +5,7 @@
 // require refactoring loader to async path). For now we validate header + minimal
 // structural sanity when requireUnicodeDataIntegrity is enabled.
 
-import { SecurityValidationError } from "./errors.ts";
+import { SecurityValidationError, SecurityKitError } from "./errors.ts";
 import { getUnicodeSecurityConfig } from "./config.ts";
 import { normalizeInputString } from "./canonical.ts";
 
@@ -41,13 +41,29 @@ function readUint32LE(bytes: Uint8Array, offset: number): number {
   );
 }
 
+async function computeDigest(
+  algo: "SHA-256" | "SHA-384" | "SHA-512",
+  data: Uint8Array,
+): Promise<string> {
+  if (typeof crypto === "undefined" || !crypto.subtle) {
+    // Fallback (very rare – Node w/out WebCrypto) -> throw to force explicit environment support
+    throw new SecurityKitError(
+      "WebCrypto not available for Unicode data integrity verification",
+    );
+  }
+  const digest = await crypto.subtle.digest(algo, data);
+  return Array.from(new Uint8Array(digest))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+}
+
 export function verifyUnicodeDataIntegrity(
   kind: UnicodeDataKind,
   profile: string,
   bytes: Uint8Array,
 ): void {
   const cfg = getUnicodeSecurityConfig();
-  if (!cfg.requireUnicodeDataIntegrity) return; // skip in dev when disabled
+  if (!cfg.requireUnicodeDataIntegrity) return; // allowed disabled only in non‑prod
 
   if (bytes.length === 0) {
     throw new SecurityValidationError(
@@ -71,8 +87,8 @@ export function verifyUnicodeDataIntegrity(
     validateConfusablesHeader(bytes, normalizedProfile);
   }
 
-  // For now, we only do basic structural validation
-  // Future enhancement: implement full cryptographic digest verification
+  // Structural sanity already validated above; a future enhancement will
+  // compare against signed digests (current build emits hashes for reference).
 }
 
 function validateIdentifierHeader(bytes: Uint8Array, profile: string): void {

@@ -32,6 +32,17 @@ The `SecureLRUCache` component in this security-kit is a modified and security-h
 > ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF OR
 > IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 
+
+### Inboxfuscation
+
+-   **Project:** https://github.com/Permiso-io-tools/Inboxfuscation
+-   **Copyright:** Copyright (c) 2025 Permiso Security
+-   **License:** Apache License, Version 2.0
+
+This project's library `canonical.ts` adapts Unicode security concepts and detection patterns demonstrated in the Inboxfuscation framework. Specifically, the logic for identifying and categorizing potentially malicious Unicode characters (such as zero-width characters, RTL control characters, and homoglyphs) was influenced by their comprehensive detection engine.
+
+The full text of the Apache License 2.0, under which this code is licensed, is available in this repository.
+
 ---
 
 ## Academic and Security Research Influences
@@ -54,7 +65,7 @@ This section acknowledges the key academic papers and technical reports whose fi
 -   **Link:** https://apps.dtic.mil/sti/pdfs/AD1122149.pdf
 -   **Influence on this Library:** This work informs the library's core "Zero Trust" philosophy regarding input. It highlights the long-standing practice of writing malicious code that appears benign to human reviewers. This justifies our strict, multi-layered validation approach and the principle of "failing loudly" when encountering suspicious constructs like homoglyphs or invisible characters.
 
-### Host/Split: Exploitable Antipatterns in Unicode Normalization
+#### Host/Split: Exploitable Antipatterns in Unicode Normalization
 
 -   **Author:** Jonathan Birch
 -   **Publication:** Microsoft Technical Whitepaper
@@ -73,3 +84,14 @@ This section acknowledges the key academic papers and technical reports whose fi
 -   **Publication:** Proceedings of the ACM Internet Measurement Conference (IMC '19)
 -   **DOI:** https://doi.org/10.1145/3355369.3355587
 -   **Influence on this Library:** This paper provides a deep analysis of automated homoglyph detection. It justifies the inclusion of a proactive homoglyph check (`HOMOGLYPH_SUSPECTS`) in `validateUnicodeSecurity` as a necessary defense against phishing and spoofing attacks that rely on visually confusable characters.
+-   
+
+#### The Unicode Standard and Technical Reports
+
+-   **Organization:** The Unicode Consortium
+-   **Link:** https://www.unicode.org/reports/
+-   **Influence on this Library:** The architectural approach to Unicode security in `canonical.ts` library is directly based on the formal specifications and best practices published by the Unicode Consortium. The following documents were essential references:
+    -   **UAX #15: Unicode Normalization Forms:** Provided the foundational concepts for the "validate, normalize, re-validate" security pattern. It details how normalization can change string content, which is a critical consideration for preventing security bypasses.
+    -   **UAX #31: Unicode Identifier and Syntax:** Informed the logic for distinguishing between valid identifier characters and syntactic characters, which is crucial for robust parsing and preventing syntax injection attacks.
+    -   **UTS #39: Unicode Security Mechanisms:** This was a primary source for the library's threat model. It provided the data and algorithms for detecting confusable characters (homoglyphs), mixed-script spoofing, and identifying characters that are restricted for security reasons.
+    -   **UTS #55: Unicode Source Code Handling:** Provided high-level guidance and motivation for building security tools that are aware of the unique challenges posed by Unicode in programming and scripting environments.

@@ -104,6 +104,9 @@ export {
   type UnicodeSecurityConfig,
 } from "./canonical.ts";
 
+// Fingerprint helper for deterministic non-cryptographic tagging
+export { canonicalFingerprint } from "./canonical.ts";
+
 // Secure LRU Cache - Standalone security-hardened cache utility
 export {
   SecureLRUCache,

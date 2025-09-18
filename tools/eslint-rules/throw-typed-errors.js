@@ -178,7 +178,12 @@ export default {
       const errorFactories = [
         "makeInvalidParameterError",
         "makeDepthBudgetExceededError", 
-        "makePayloadTooLargeError"
+        "makePayloadTooLargeError",
+        // Added Unicode normalization security helper factory. This is a
+        // centralized wrapper that returns InvalidParameterError instances
+        // with standardized code tokens (e.g., [code=ERR_UNICODE_*]). Allowing
+        // it here prevents false positives after Phase 1 Unicode hardening.
+        "makeUnicodeError"
       ];
       
       if (callee?.type === "Identifier") {

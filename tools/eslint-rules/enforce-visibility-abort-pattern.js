@@ -68,9 +68,22 @@ export default {
       return {};
     }
 
-    const abortControllers = new Set();
-    const visibilityListeners = new Set();
+    // Map of containing function node (or null for program-level) -> Set of abort controller identifiers
+    const abortControllers = new Map();
+    // Map of containing function node (or null for program-level) -> boolean (has visibility listener or helper)
+    const visibilityListeners = new Map();
     const sensitiveOperationCalls = new Map();
+    // Configurable helper names that implement the visibility-abort pattern (to avoid false positives)
+    const helperVisibilityFunctions = new Set(options.visibilityHelpers || [
+      'setupVisibilityAbort',
+      'withVisibilityAbort',
+      'ensureVisibilityAbort',
+    ]);
+    // Configurable helper names that perform an abort-check (return boolean) inside loops
+    const abortCheckFunctions = new Set(options.abortCheckFunctions || [
+      'shouldAbortForVisibility',
+      'isHidden',
+    ]);
 
     /**
      * Check if node is a sensitive operation call
@@ -141,41 +154,59 @@ export default {
      */
     function hasVisibilityCheck(node) {
       const containingFunc = findContainingFunction(node);
+      // Helper: check a block statement body for a direct visibilityState === 'hidden' check
+      function bodyHasVisibilityCheck(body) {
+        if (!body || body.type !== 'BlockStatement') return false;
+        return body.body.some(stmt =>
+          stmt.type === 'IfStatement' &&
+          stmt.test?.type === 'BinaryExpression' &&
+          stmt.test.operator === '===' &&
+          stmt.test.left?.type === 'MemberExpression' &&
+          // match document.visibilityState === 'hidden'
+          stmt.test.left.object?.type === 'Identifier' &&
+          stmt.test.left.object?.name === 'document' &&
+          stmt.test.left.property?.name === 'visibilityState' &&
+          stmt.test.right?.type === 'Literal' &&
+          stmt.test.right.value === 'hidden'
+        );
+      }
+
       if (!containingFunc) {
-        // Check if visibility check exists in current scope
+        // Walk up parents to try to find a direct visibility check in the scope
         let parent = node.parent;
         while (parent) {
-          if (parent.type === "IfStatement" &&
-              parent.test?.type === "BinaryExpression" &&
-              parent.test.operator === "===" &&
-              parent.test.left?.type === "MemberExpression" &&
-              parent.test.left.object?.type === "MemberExpression" &&
-              parent.test.left.object.object?.name === "document" &&
-              parent.test.left.object.property?.name === "visibilityState" &&
-              parent.test.right?.type === "Literal" &&
-              parent.test.right.value === "hidden") {
-            return true;
+          if (parent.type === 'IfStatement') {
+            if (bodyHasVisibilityCheck({ body: [parent] })) return true;
           }
           parent = parent.parent;
         }
         return false;
       }
-      
-      // For functions, check the body for visibility checks
-      const body = containingFunc.body;
-      if (body?.type === "BlockStatement") {
-        return body.body.some(stmt => 
-          stmt.type === "IfStatement" &&
-          stmt.test?.type === "BinaryExpression" &&
-          stmt.test.operator === "===" &&
-          stmt.test.left?.type === "MemberExpression" &&
-          stmt.test.left.object?.type === "MemberExpression" &&
-          stmt.test.left.object.object?.name === "document" &&
-          stmt.test.left.object.property?.name === "visibilityState" &&
-          stmt.test.right?.type === "Literal" &&
-          stmt.test.right.value === "hidden"
-        );
+
+      // For functions, check for explicit checks, direct abort helper calls, or for a registered visibility listener/helper
+      if (bodyHasVisibilityCheck(containingFunc.body)) return true;
+
+      // Walk the function body to find calls to known abort-check helper functions
+      let foundAbortCheck = false;
+      function scanForAbortCheck(n) {
+        if (!n || foundAbortCheck) return;
+        if (n.type === 'CallExpression' && n.callee?.type === 'Identifier' && abortCheckFunctions.has(n.callee.name)) {
+          foundAbortCheck = true;
+          return;
+        }
+        for (const key in n) {
+          if (key === 'parent') continue;
+          const child = n[key];
+          if (Array.isArray(child)) child.forEach(scanForAbortCheck);
+          else if (child && typeof child === 'object' && child.type) scanForAbortCheck(child);
+        }
       }
+      scanForAbortCheck(containingFunc.body);
+      if (foundAbortCheck) return true;
+
+      // Also accept registered listeners/helpers tracked earlier
+      if (visibilityListeners.has(containingFunc)) return true;
+      if (visibilityListeners.has(null)) return true; // program-level listener/helper
       return false;
     }
 
@@ -342,22 +373,35 @@ export default {
     return {
       // Track AbortController declarations
       VariableDeclarator(node) {
-        if (node.init?.type === "NewExpression" && 
-            node.init.callee?.name === "AbortController" &&
-            node.id?.type === "Identifier") {
-          abortControllers.add(node.id.name);
+        if (node.init?.type === 'NewExpression' &&
+            node.init.callee?.name === 'AbortController' &&
+            node.id?.type === 'Identifier') {
+          const func = findContainingFunction(node) || null;
+          let set = abortControllers.get(func);
+          if (!set) {
+            set = new Set();
+            abortControllers.set(func, set);
+          }
+          set.add(node.id.name);
         }
       },
 
       // Track visibility change listeners  
       CallExpression(node) {
         // Track addEventListener('visibilitychange', ...)
-        if (node.callee?.type === "MemberExpression" &&
-            node.callee?.object?.name === "document" &&
-            node.callee?.property?.name === "addEventListener" &&
-            node.arguments[0]?.type === "Literal" &&
-            node.arguments[0]?.value === "visibilitychange") {
-          visibilityListeners.add(node);
+        if (node.callee?.type === 'MemberExpression' &&
+            node.callee?.object?.name === 'document' &&
+            node.callee?.property?.name === 'addEventListener' &&
+            node.arguments[0]?.type === 'Literal' &&
+            node.arguments[0]?.value === 'visibilitychange') {
+          const func = findContainingFunction(node) || null;
+          visibilityListeners.set(func, true);
+        }
+
+        // Recognize calls to helper functions that implement the visibility-abort pattern
+        if (node.callee?.type === 'Identifier' && helperVisibilityFunctions.has(node.callee.name)) {
+          const func = findContainingFunction(node) || null;
+          visibilityListeners.set(func, true);
         }
 
         // Check for setInterval/setTimeout - but exclude immediate scheduling (delay 0 or very short)
@@ -375,16 +419,15 @@ export default {
         const operationName = isSensitiveOperation(node);
         if (operationName) {
           const containingFunc = findContainingFunction(node);
-          if (containingFunc) {
-            if (!sensitiveOperationCalls.has(containingFunc)) {
-              sensitiveOperationCalls.set(containingFunc, []);
-            }
-            sensitiveOperationCalls.get(containingFunc).push({
-              node,
-              operationName,
-              hasAbortSignal: hasAbortSignal(node)
-            });
+          const key = containingFunc || null;
+          if (!sensitiveOperationCalls.has(key)) {
+            sensitiveOperationCalls.set(key, []);
           }
+          sensitiveOperationCalls.get(key).push({
+            node,
+            operationName,
+            hasAbortSignal: hasAbortSignal(node)
+          });
         }
       },
 
@@ -400,19 +443,19 @@ export default {
       },
 
       "Program:exit"() {
-        // Check each function with sensitive operations
+        // Check each function (or program-level key) with sensitive operations
         sensitiveOperationCalls.forEach((operations, _functionNode) => {
-          const functionHasAbortController = operations.some(op => 
-            abortControllers.size > 0 || op.hasAbortSignal
-          );
+          const funcKey = _functionNode || null;
+          const controllersForFunction = abortControllers.get(funcKey);
+          const functionHasAbortController = (controllersForFunction && controllersForFunction.size > 0) || false;
 
-          const functionHasVisibilityListener = visibilityListeners.size > 0;
+          const functionHasVisibilityListener = Boolean(visibilityListeners.get(funcKey) || visibilityListeners.get(null));
 
           operations.forEach(({ node, operationName, hasAbortSignal }) => {
             if (!functionHasVisibilityListener) {
               context.report({
                 node,
-                messageId: "missingVisibilityAbort",
+                messageId: 'missingVisibilityAbort',
                 data: { operation: operationName }
               });
             }
@@ -420,7 +463,7 @@ export default {
             if (!hasAbortSignal && !functionHasAbortController) {
               context.report({
                 node,
-                messageId: "missingAbortController", 
+                messageId: 'missingAbortController', 
                 data: { operation: operationName }
               });
             }
@@ -428,7 +471,7 @@ export default {
             if (functionHasAbortController && !hasAbortSignal) {
               context.report({
                 node,
-                messageId: "abortSignalNotPassed",
+                messageId: 'abortSignalNotPassed',
                 data: { operation: operationName }
               });
             }

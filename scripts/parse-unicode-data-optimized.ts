@@ -13,17 +13,49 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
+// Explicit process import for hybrid Node/Deno tooling (avoids lint complaints)
+// eslint-disable-next-line import/no-extraneous-dependencies
+import process from 'node:process';
 
 /**
  * Calculate BLAKE3 hash (fallback to SHA-256 if BLAKE3 unavailable)
  * SECURITY: Provides compile-time integrity verification for OWASP ASVS L3 compliance
  */
 function calculateSecureHash(data: Uint8Array): string {
-  // Use SHA-256 as it's universally available in Node.js and browsers
-  // TODO: Add optional BLAKE3 when available as dependency
-  const hash = createHash('sha256');
+  // MIGRATED: Use SHA-384 for stronger collision resistance & consistency with supply-chain pre-parse digests.
+  // (SHA-384 widely supported via Web Crypto and Node's crypto). BLAKE3 optional future enhancement.
+  const hash = createHash('sha384');
   hash.update(data);
   return hash.digest('hex');
+}
+
+// --- SUPPLY CHAIN HARDENING (OWASP ASVS L3) ---------------------------------
+// Hardcoded SHA-384 digests for authoritative Unicode source specification files.
+// These MUST match the official Unicode 16.0.0 release contents bundled in
+// docs/Additional security guidelines/Specifications and RFC/Unicode 16.0.0/
+// If they do not match we FAIL CLOSED to prevent downstream generation using
+// tampered data (e.g., build server compromise, local developer MITM, etc.).
+// NOTE: Do NOT update these digests casually. Any change requires a full
+// provenance review of upstream Unicode data and a signed commit trail.
+const EXPECTED_IDENTIFIER_STATUS_SHA384 = '5b23e5998a5a08261923fc364c6ae43c0f729116362b43740ed1eb3473a5c224cec5a27035e6660c5b2c652ccb35e297';
+const EXPECTED_CONFUSABLES_SUMMARY_SHA384 = '50f6a163e9741c0ce50a965a448191a463eb79df96494ad795c367df471ca3de73643216374774ed85f71fdd29cc1abc';
+
+function computeSha384Hex(data: Uint8Array): string {
+  const h = createHash('sha384');
+  h.update(data);
+  return h.digest('hex');
+}
+
+function verifySourceFileIntegrityOrThrow(label: string, filePath: string, expectedSha384: string): void {
+  const raw = readFileSync(filePath);
+  const actual = computeSha384Hex(raw);
+  if (actual.toLowerCase() !== expectedSha384.toLowerCase()) {
+    // Fail CLOSED – we DO NOT continue with potentially tainted Unicode data.
+    throw new Error(
+      `Unicode source integrity FAILED for ${label}. Expected SHA-384 ${expectedSha384} but found ${actual}. ` +
+      'Aborting generation to prevent supply-chain risk. If this change is legitimate, update the hardcoded digest after security review.'
+    );
+  }
 }
 
 // Helper to summarize top-N index usage for decision guidance (placed early to avoid hoist issues)
@@ -127,17 +159,7 @@ function compressRanges(entries: IdentifierEntry[]): RangeEntry[] {
 }
 
 // Optimized encoding for Allowed-only ranges (no status byte needed)
-function encodeRangesLegacy(ranges: RangeEntry[]): Uint8Array {
-  const buffer = new ArrayBuffer(ranges.length * 8);
-  const view = new DataView(buffer);
-  let offset = 0;
-  for (const range of ranges) {
-    view.setUint32(offset, range.start, true);
-    view.setUint32(offset + 4, range.end, true);
-    offset += 8;
-  }
-  return new Uint8Array(buffer);
-}
+// (Removed legacy flat format; delta v2 is the single source of truth.)
 
 // Advanced confusables compression with frequency analysis
 function compressConfusables(entries: ConfusableEntry[], profile: 'minimal' | 'standard' | 'complete'): Uint8Array {
@@ -419,16 +441,16 @@ export function parseConfusables(filePath: string): ConfusableEntry[] {
  * Generate embedded TypeScript data with BLAKE3/SHA-256 integrity verification
  * SECURITY: Implements OWASP ASVS L3 integrity requirements for embedded data
  */
-async function generateEmbeddedDataWithIntegrity(
+function generateEmbeddedDataWithIntegrity(
   outputDir: string, 
   rangesDataV2: Uint8Array, 
   confusableEntries: ConfusableEntry[]
-): Promise<void> {
+): void {
   
   // Generate minimal confusables (empty for frontend performance)
   const minimalConfusables = generateMinimalConfusablesV2();
   
-  // Calculate secure hashes
+  // Calculate secure hashes (SHA-384)
   const rangesHash = calculateSecureHash(rangesDataV2);
   const minimalConfusablesHash = calculateSecureHash(minimalConfusables);
   
@@ -455,12 +477,12 @@ async function generateEmbeddedDataWithIntegrity(
     externalHashes['unicode-confusables-complete.bin'] = calculateSecureHash(completeConfusables);
   } catch { /* File may not exist yet */ }
   
-  // Generate TypeScript embedded data
+  // Generate TypeScript embedded data (now SHA-384)
   const embeddedDataTs = `/**
  * SPDX-License-Identifier: LGPL-3.0-or-later
  * 
  * SECURITY NOTICE: This file contains embedded Unicode binary data.
- * Data integrity is verified via compile-time BLAKE3/SHA-256 checksums.
+ * Data integrity is verified via compile-time SHA-384 checksums.
  * DO NOT MODIFY - Generated by scripts/parse-unicode-data-optimized.ts
  * 
  * HYBRID SECURITY ARCHITECTURE:
@@ -473,12 +495,12 @@ async function generateEmbeddedDataWithIntegrity(
 
 import { SecurityKitError } from '../errors.ts';
 
-// Compile-time integrity verification hashes (SHA-256)
-const EMBEDDED_RANGES_HASH = "${rangesHash}";
-const EMBEDDED_MINIMAL_CONFUSABLES_HASH = "${minimalConfusablesHash}"; 
+// Compile-time integrity verification hashes (SHA-384)
+export const EMBEDDED_RANGES_HASH_SHA384 = "${rangesHash}";
+export const EMBEDDED_MINIMAL_CONFUSABLES_HASH_SHA384 = "${minimalConfusablesHash}"; 
 
 // External file integrity hashes (for standard/complete profiles)
-export const EXTERNAL_FILE_HASHES = {
+export const EXTERNAL_FILE_HASHES_SHA384 = {
   'unicode-identifier-ranges-standard.bin': "${externalHashes['unicode-identifier-ranges-standard.bin'] || 'PLACEHOLDER_STANDARD_RANGES_HASH'}",
   'unicode-identifier-ranges-complete.bin': "${externalHashes['unicode-identifier-ranges-complete.bin'] || 'PLACEHOLDER_COMPLETE_RANGES_HASH'}", 
   'unicode-confusables-standard.bin': "${externalHashes['unicode-confusables-standard.bin'] || 'PLACEHOLDER_STANDARD_CONFUSABLES_HASH'}",
@@ -512,20 +534,20 @@ async function verifyEmbeddedIntegrity(): Promise<void> {
 
   try {
     // Verify identifier ranges
-    const rangesHash = await crypto.subtle.digest('SHA-256', EMBEDDED_IDENTIFIER_RANGES_MINIMAL);
+  const rangesHash = await crypto.subtle.digest('SHA-384', EMBEDDED_IDENTIFIER_RANGES_MINIMAL);
     const rangesHex = Array.from(new Uint8Array(rangesHash))
       .map(b => b.toString(16).padStart(2, '0')).join('');
     
-    if (rangesHex !== EMBEDDED_RANGES_HASH.toLowerCase()) {
+  if (rangesHex !== EMBEDDED_RANGES_HASH_SHA384.toLowerCase()) {
       throw new SecurityKitError('Embedded identifier ranges integrity check failed - potential tampering detected');
     }
 
     // Verify minimal confusables  
-    const confusablesHash = await crypto.subtle.digest('SHA-256', EMBEDDED_CONFUSABLES_MINIMAL);
+  const confusablesHash = await crypto.subtle.digest('SHA-384', EMBEDDED_CONFUSABLES_MINIMAL);
     const confusablesHex = Array.from(new Uint8Array(confusablesHash))
       .map(b => b.toString(16).padStart(2, '0')).join('');
     
-    if (confusablesHex !== EMBEDDED_MINIMAL_CONFUSABLES_HASH.toLowerCase()) {
+  if (confusablesHex !== EMBEDDED_MINIMAL_CONFUSABLES_HASH_SHA384.toLowerCase()) {
       throw new SecurityKitError('Embedded minimal confusables integrity check failed - potential tampering detected');
     }
 
@@ -544,21 +566,21 @@ async function verifyEmbeddedIntegrity(): Promise<void> {
  */
 export async function verifyExternalFileIntegrity(
   data: Uint8Array, 
-  filename: keyof typeof EXTERNAL_FILE_HASHES
+  filename: keyof typeof EXTERNAL_FILE_HASHES_SHA384
 ): Promise<void> {
   if (typeof crypto === 'undefined' || !crypto.subtle) {
     console.warn('Web Crypto API unavailable - skipping external file integrity verification');
     return;
   }
 
-  const expectedHash = EXTERNAL_FILE_HASHES[filename];
+  const expectedHash = EXTERNAL_FILE_HASHES_SHA384[filename];
   if (!expectedHash || expectedHash.startsWith('PLACEHOLDER')) {
     console.warn(\`No integrity hash available for \${filename} - verification skipped\`);
     return;
   }
 
   try {
-    const actualHash = await crypto.subtle.digest('SHA-256', data);
+  const actualHash = await crypto.subtle.digest('SHA-384', data);
     const actualHex = Array.from(new Uint8Array(actualHash))
       .map(b => b.toString(16).padStart(2, '0')).join('');
     
@@ -601,7 +623,7 @@ export async function getEmbeddedData(): Promise<{
 
   writeFileSync(join(outputDir, 'unicode-embedded-data.ts'), embeddedDataTs);
   
-  console.log('🔒 Generated embedded data with SHA-256 integrity verification');
+  console.log('🔒 Generated embedded data with SHA-384 integrity verification');
   console.log(`   📱 Embedded minimal ranges: ${rangesDataV2.length} bytes (${rangesHash.slice(0, 16)}...)`);
   console.log(`   📱 Embedded minimal confusables: ${minimalConfusables.length} bytes (${minimalConfusablesHash.slice(0, 16)}...)`);
 }
@@ -636,18 +658,49 @@ async function generateOptimizedUnicodeData() {
   const outputDir = join(projectRoot, 'src/generated');
   
   console.log('🔍 Parsing Unicode 16.0.0 data...');
+  // Pre-parse SUPPLY CHAIN INTEGRITY VERIFICATION (fail-closed)
+  const identifierPath = join(unicodeDir, 'IdentifierStatus.txt');
+  const confusablesPath = join(unicodeDir, 'confusablesSummary.txt');
+  verifySourceFileIntegrityOrThrow('IdentifierStatus.txt', identifierPath, EXPECTED_IDENTIFIER_STATUS_SHA384);
+  verifySourceFileIntegrityOrThrow('confusablesSummary.txt', confusablesPath, EXPECTED_CONFUSABLES_SUMMARY_SHA384);
+  console.log('🛡️  Source file integrity verified (SHA-384)');
   
-  const identifierEntries = parseIdentifierStatus(join(unicodeDir, 'IdentifierStatus.txt'));
-  const confusableEntries = parseConfusables(join(unicodeDir, 'confusablesSummary.txt'));
+  const identifierEntries = parseIdentifierStatus(identifierPath);
+  const confusableEntries = parseConfusables(confusablesPath);
   
   console.log(`📊 Parsed ${identifierEntries.length} identifier entries, ${confusableEntries.length} confusable mappings`);
   
   // Compress ranges for all profiles
   const ranges = compressRanges(identifierEntries);
-  const rangesDataLegacy = encodeRangesLegacy(ranges);
   const rangesDataV2 = encodeRangesV2(ranges);
-  
-  console.log(`🗜️ Compressed identifier ranges: ${identifierEntries.length} entries → ${ranges.length} ranges (v2 ${rangesDataV2.length} bytes, legacy ${rangesDataLegacy.length} bytes)`);
+
+  console.log(`🗜️ Compressed identifier ranges: ${identifierEntries.length} entries → ${ranges.length} ranges (v2 ${rangesDataV2.length} bytes)`);
+
+  // In-memory decode of v2 to assert round trip correctness & ordering (security: prevents silent encoder drift)
+  (function selfValidateV2() {
+    if (rangesDataV2.length < 12) throw new Error('v2 ranges too small for header');
+    if (!(rangesDataV2[0] === 0x55 && rangesDataV2[1] === 0x31 && rangesDataV2[2] === 0x36 && rangesDataV2[3] === 0x52)) throw new Error('v2 magic mismatch');
+    const version = rangesDataV2[4]; if (version !== 2) throw new Error(`Unexpected v2 version ${version}`);
+    const dv = new DataView(rangesDataV2.buffer, rangesDataV2.byteOffset, rangesDataV2.byteLength);
+    const count = dv.getUint32(8, true);
+    let offset = 12; let decoded: RangeEntry[] = [];
+    const readVar = () => { let shift = 0; let res = 0; for (let i=0;i<5;i++){ if (offset >= rangesDataV2.length) throw new Error('truncated varint'); const b = rangesDataV2[offset++]; res |= (b & 0x7F) << shift; if((b & 0x80)===0) return res; shift+=7;} throw new Error('varint too long'); };
+    if (count > 0) {
+      let start = readVar(); let len = readVar(); let end = start + len; decoded.push({ start, end, status: 'Allowed' });
+      for (let i=1;i<count;i++){ const delta = readVar(); start = start + delta; len = readVar(); end = start + len; decoded.push({ start, end, status:'Allowed' }); }
+    }
+    // Structural validation: strictly increasing, non-overlapping
+    let prevEnd = -1; let totalCovered = 0;
+    for (const r of decoded) {
+      if (r.start <= prevEnd) throw new Error('Decoded ranges not strictly increasing');
+      if (r.end < r.start) throw new Error('Decoded range end < start');
+      totalCovered += (r.end - r.start + 1);
+      prevEnd = r.end;
+    }
+    // Compare against source ranges
+    if (decoded.length !== ranges.length) throw new Error('v2 decode range count mismatch');
+    for (let i=0;i<decoded.length;i++){ const a = decoded[i]!, b = ranges[i]!; if (a.start!==b.start || a.end!==b.end) throw new Error('v2 decode mismatch at index '+i); }
+  })();
   
   // Generate different profiles
   const profiles = ['minimal', 'standard', 'complete'] as const;
@@ -680,16 +733,10 @@ async function generateOptimizedUnicodeData() {
     const stats = (confusablesData as any).__stats;
   if (stats) logStats(profile, stats);
     
-    // Write profile-specific files
-    // Write v2 primary file
+    // Write profile-specific v2 file
     writeFileSync(
       join(outputDir, `unicode-identifier-ranges-${profile}.bin`),
       rangesDataV2
-    );
-    // Also keep legacy for fallback debugging (optional)
-    writeFileSync(
-      join(outputDir, `unicode-identifier-ranges-legacy-${profile}.bin`),
-      rangesDataLegacy
     );
     
     if (confusablesData.length > 0) {
@@ -925,7 +972,7 @@ export function getDataStats(): UnicodeDataStats {
   writeFileSync(join(outputDir, 'unicode-optimized-loader.ts'), loaderCode);
   
   // SECURITY ENHANCEMENT: Generate embedded data with BLAKE3/SHA-256 integrity verification
-  await generateEmbeddedDataWithIntegrity(outputDir, rangesDataV2, confusableEntries);
+  generateEmbeddedDataWithIntegrity(outputDir, rangesDataV2, confusableEntries);
   
   console.log('✅ Generated optimized Unicode data loader');
   console.log('\nProfile sizes:');
