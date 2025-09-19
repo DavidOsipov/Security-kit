@@ -24,7 +24,13 @@ export {
   getSecureLRUProfiles,
   setSecureLRUProfiles,
   resolveSecureLRUOptions,
+  // DoS Protection Configuration
+  getDosProtectionConfig,
+  setDosProtectionConfig,
+  DEFAULT_MAX_ARRAY_LENGTH,
+  HARD_CAP_MAX_ARRAY_LENGTH,
 } from "./config.ts";
+export type { DosProtectionConfig } from "./config.ts";
 
 // State (Test-only)
 export {

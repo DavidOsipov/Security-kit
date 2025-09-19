@@ -45,6 +45,118 @@ export const MAX_CANONICAL_INPUT_LENGTH_BYTES = 2_048 as const; // 2KB - reasona
 export const MAX_NORMALIZED_LENGTH_RATIO = 2 as const; // Prevent normalization bombs - conservative 2x threshold
 export const MAX_COMBINING_CHARS_PER_BASE = 5 as const; // Prevent combining character DoS attacks (OWASP ASVS L3)
 
+/**
+ * DoS Protection Configuration (OWASP ASVS L3 Compliance)
+ * ========================================================
+ * These constants define the security boundaries for canonicalization operations
+ * to prevent denial-of-service attacks through resource exhaustion.
+ *
+ * Security Philosophy:
+ * - Defaults are conservative (security-first)
+ * - Hard caps prevent misconfiguration
+ * - Legitimate large data should be processed in chunks
+ */
+
+// Default array processing limits (security-first)
+export const DEFAULT_MAX_ARRAY_LENGTH = 1000 as const; // Conservative default for most use cases
+export const HARD_CAP_MAX_ARRAY_LENGTH = 10000 as const; // Absolute maximum to prevent misconfiguration
+
+// Default string processing limits
+export const DEFAULT_MAX_STRING_BYTES = (10 * 1024 * 1024) as const; // 10MB default
+export const HARD_CAP_MAX_STRING_BYTES = (64 * 1024 * 1024) as const; // 64MB absolute maximum
+
+// Default traversal depth limits
+export const DEFAULT_MAX_TRAVERSAL_DEPTH = 256 as const; // Conservative for typical JSON
+export const HARD_CAP_MAX_TRAVERSAL_DEPTH = 1024 as const; // Absolute maximum depth
+
+/**
+ * DoS Protection Configuration Interface
+ * Allows runtime configuration of security limits while maintaining hard caps
+ */
+export interface DosProtectionConfig {
+  /** Maximum array length for canonicalization (default: 1000, max: 10000) */
+  readonly maxArrayLength: number;
+  /** Maximum string length in bytes (default: 10MB, max: 64MB) */
+  readonly maxStringBytes: number;
+  /** Maximum traversal depth (default: 256, max: 1024) */
+  readonly maxDepth: number;
+}
+
+// Secure default configuration
+const DEFAULT_DOS_PROTECTION_CONFIG: Readonly<DosProtectionConfig> =
+  Object.freeze({
+    maxArrayLength: DEFAULT_MAX_ARRAY_LENGTH,
+    maxStringBytes: DEFAULT_MAX_STRING_BYTES,
+    maxDepth: DEFAULT_MAX_TRAVERSAL_DEPTH,
+  });
+
+// Mutable configuration that can be updated before sealing
+let dosProtectionConfig: DosProtectionConfig = {
+  ...DEFAULT_DOS_PROTECTION_CONFIG,
+};
+
+/**
+ * Get current DoS protection configuration
+ * @returns Current DoS protection settings
+ */
+export function getDosProtectionConfig(): Readonly<DosProtectionConfig> {
+  return Object.freeze({ ...dosProtectionConfig });
+}
+
+/**
+ * Configure DoS protection limits
+ * @param config - Partial configuration to merge with current settings
+ * @throws InvalidConfigurationError if crypto state is sealed
+ * @throws InvalidParameterError if limits exceed hard caps
+ */
+export function setDosProtectionConfig(
+  config: Partial<DosProtectionConfig>,
+): void {
+  const state = getCryptoState();
+  if (state === CryptoState.Sealed) {
+    throw new InvalidConfigurationError(
+      "Cannot modify DoS protection configuration after crypto state is sealed. Call this before sealSecurityKit().",
+    );
+  }
+
+  // Validate limits don't exceed hard caps
+  if (config.maxArrayLength !== undefined) {
+    if (
+      config.maxArrayLength > HARD_CAP_MAX_ARRAY_LENGTH ||
+      config.maxArrayLength < 1
+    ) {
+      throw new InvalidParameterError(
+        `maxArrayLength must be between 1 and ${HARD_CAP_MAX_ARRAY_LENGTH} (got ${config.maxArrayLength})`,
+      );
+    }
+  }
+
+  if (config.maxStringBytes !== undefined) {
+    if (
+      config.maxStringBytes > HARD_CAP_MAX_STRING_BYTES ||
+      config.maxStringBytes < 1024
+    ) {
+      throw new InvalidParameterError(
+        `maxStringBytes must be between 1024 and ${HARD_CAP_MAX_STRING_BYTES} (got ${config.maxStringBytes})`,
+      );
+    }
+  }
+
+  if (config.maxDepth !== undefined) {
+    if (config.maxDepth > HARD_CAP_MAX_TRAVERSAL_DEPTH || config.maxDepth < 1) {
+      throw new InvalidParameterError(
+        `maxDepth must be between 1 and ${HARD_CAP_MAX_TRAVERSAL_DEPTH} (got ${config.maxDepth})`,
+      );
+    }
+  }
+
+  // Merge configuration
+  dosProtectionConfig = {
+    ...dosProtectionConfig,
+    ...config,
+  };
+}
+
 // Comprehensive bidirectional control characters (Trojan Source attack vectors)
 // Based on "Trojan Source: Invisible Vulnerabilities" research (Boucher & Anderson, 2021)
 export const BIDI_CONTROL_CHARS =
@@ -1451,12 +1563,12 @@ export type CanonicalConfig = {
 
 /* eslint-disable functional/no-let -- runtime configuration */
 const DEFAULT_CANONICAL_CONFIG: CanonicalConfig = {
-  maxStringLengthBytes: 10 * 1024 * 1024, // 10 MiB
-  maxTopLevelArrayLength: 1_000_000,
+  maxStringLengthBytes: DEFAULT_MAX_STRING_BYTES,
+  maxTopLevelArrayLength: DEFAULT_MAX_ARRAY_LENGTH,
   // Secure default: cap traversal depth to prevent call-stack exhaustion.
   // 256 is intentionally conservative for typical JSON-like payloads while
   // preventing extremely deep adversarial nesting.
-  maxDepth: 256,
+  maxDepth: DEFAULT_MAX_TRAVERSAL_DEPTH,
   circularPolicy: "fail",
   traversalTimeBudgetMs: 25, // ~ one event-loop slice; tuned for typical payloads
 };
@@ -1528,9 +1640,9 @@ try {
 
   if (Object.keys(parsed).length > 0) {
     // Upper bounds to prevent misconfiguration weakening DoS hardening
-    const MAX_STRING_BYTES_CAP = 64 * 1024 * 1024; // 64 MiB
-    const MAX_ARRAY_LENGTH_CAP = 1_000_000; // keep as cap
-    const MAX_DEPTH_CAP = 1024;
+    const MAX_STRING_BYTES_CAP = HARD_CAP_MAX_STRING_BYTES;
+    const MAX_ARRAY_LENGTH_CAP = HARD_CAP_MAX_ARRAY_LENGTH;
+    const MAX_DEPTH_CAP = HARD_CAP_MAX_TRAVERSAL_DEPTH;
     const adjusted: Partial<CanonicalConfig> = {
       ...parsed,
       ...(parsed.maxStringLengthBytes !== undefined

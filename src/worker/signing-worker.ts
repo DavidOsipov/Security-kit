@@ -13,7 +13,7 @@ import {
 import { getHandshakeConfig, setHandshakeConfig } from "../config.ts";
 import { secureDevLog as secureDevelopmentLog } from "../utils.ts";
 import { sanitizeErrorForLogs } from "../errors.ts";
-import { assertTestApiAllowed } from "../development-guards";
+import { assertTestApiAllowed } from "../development-guards.ts";
 import {
   createSecurePostMessageListener,
   isEventAllowedWithLock,

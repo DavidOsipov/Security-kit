@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: LGPL-3.0-or-later
 import { describe, it, expect } from 'vitest';
-import { safeStableStringify } from '../src/canonical';
-import { setCanonicalConfig, _resetCanonicalConfigForTests } from '../src/config';
-import { InvalidParameterError } from '../src/errors';
+import { safeStableStringify } from '../src/canonical.ts';
+import { setCanonicalConfig, _resetCanonicalConfigForTests } from '../src/config.ts';
+import { InvalidParameterError } from '../src/errors.ts';
 
 // Helper to build a deeply nested object to exhaust depth
 function buildDeep(depth: number): unknown {

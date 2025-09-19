@@ -917,7 +917,7 @@ import {
   generateSecureUUID,
   getSecureRandomInt,
   shouldExecuteThrottled,
-} from '../src/secure-random-updated.ts';
+} from "../src/secure-random-updated.ts";
 
 describe('Secure random smoke tests', () => {
   it('generates hex ids async & sync', async () => {

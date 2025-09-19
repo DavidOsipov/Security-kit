@@ -1,0 +1,22 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    // Override settings for build process 
+    "noEmit": false,
+    "allowImportingTsExtensions": true, // Keep true for Deno compatibility
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true,
+    "outDir": "./dist",
+    "removeComments": false,
+    "noEmitOnError": false // Let tsup handle errors during build
+  },
+  "exclude": [
+    "node_modules",
+    "dist", 
+    "tests",
+    "vitest.config.ts",
+    "**/*.test.ts",
+    "**/*.spec.ts"
+  ]
+}

@@ -9,6 +9,7 @@ export default defineConfig([
     sourcemap: true,
     clean: true,
     outDir: "dist",
+    tsconfig: "tsconfig.build.json", // Use build-specific tsconfig
     // Do not bundle optional dependencies (they are optional fallbacks).
     // This keeps the runtime small and allows consumers to opt-in by
     // installing the optional packages when needed.

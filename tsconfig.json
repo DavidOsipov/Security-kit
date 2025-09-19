@@ -10,11 +10,11 @@
     "outDir": "./dist",
     "removeComments": false,
 
-    // === PROJECT STRUCTURE & MODULES ===
+    // === PROJECT STRUCTURE & MODULES (HYBRID DENO/NODE SETUP) ===
     "target": "ES2023",
-    "module": "ESNext",
+    "module": "ESNext", 
     "moduleResolution": "bundler",
-    "lib": ["ES2023", "DOM"],
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
     "esModuleInterop": true,
     "forceConsistentCasingInFileNames": true,
     "isolatedModules": true,
@@ -74,10 +74,13 @@
     // STRICTER: By setting `noEmitOnError` to true, the build will fail completely if there are any
     // TypeScript errors. This prevents you from accidentally publishing a broken or partially-compiled
     // version of your library. It's a critical safety net.
-    "noEmitOnError": true
-    ,
-    // Allow explicit .ts extension imports (needed for current source style, resolves TS5097)
-    "allowImportingTsExtensions": true
+    "noEmitOnError": false, // Allow tsup to handle build process for hybrid Deno/Node setup
+    
+    // === DENO HYBRID COMPATIBILITY ===
+    // Allow explicit .ts extension imports (needed for Deno compatibility)
+    "allowImportingTsExtensions": true,
+    // Must disable emit when using allowImportingTsExtensions (tsup handles the build)
+    "noEmit": true
   },
   "include": [
     "src/**/*",

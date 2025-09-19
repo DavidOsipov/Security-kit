@@ -43,7 +43,7 @@ import {
 // Re-export a small accessor so consumers/tests that import postMessage
 // can read runtime postMessage configuration without importing config.ts
 // directly. This preserves backward-compatible test usage like
-// `const pm = await import('../../src/postMessage'); pm.getPostMessageConfig()`.
+// `const pm = await import("../../src/postMessage.ts"); pm.getPostMessageConfig()`.
 export function getPostMessageConfig() {
   return _getPostMessageConfig();
 }
