@@ -12,7 +12,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
       - name: Setup Node
-        uses: actions/setup-node@v5
+        uses: actions/setup-node@v6
         with:
           node-version: '23'
       - name: Install deps
@@ -24,7 +24,7 @@ jobs:
         run: |
           node benchmarks/summarize-profiles.mjs benchmarks 10
       - name: Upload summary artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: bench-summaries
           path: benchmarks/summary-*.json
