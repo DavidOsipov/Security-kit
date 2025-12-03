@@ -54,7 +54,7 @@ jobs:
           npm run generate:sbom -- --provenance-commit "$GITHUB_SHA" --provenance-run-url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" --provenance-run-id "$GITHUB_RUN_ID" --provenance-builder "$GITHUB_ACTOR" --tool-version "1.0.0"
 
       - name: Upload SBOM artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: sbom-json
           path: sbom.json
