@@ -18,13 +18,13 @@ jobs:
       packages: write
       id-token: write
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
       - name: Setup Deno
         uses: denoland/setup-deno@v2
         with:
           deno-version: v2.x
       - name: Use Node.js (for build/tests/publish)
-        uses: actions/setup-node@v5
+        uses: actions/setup-node@v6
         with:
           node-version: 23
           registry-url: https://registry.npmjs.org/
