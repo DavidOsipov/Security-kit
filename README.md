@@ -1,5 +1,7 @@
 # Security-Kit
 
+**Research incubator; individual modules may be extracted**
+
 ![NPM Version](https://img.shields.io/npm/v/@david-osipov/security-kit?style=for-the-badge)
 ![License](https://img.shields.io/npm/l/@david-osipov/security-kit?style=for-the-badge)
 ![Build Status](https://img.shields.io/github/actions/workflow/status/david-osipov/Security-Kit/ci.yml?branch=main&style=for-the-badge)
